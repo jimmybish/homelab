@@ -1,0 +1,128 @@
+# The Scrypted docker-compose.yml file typically resides at:
+# ~/.scrypted/docker-compose.yml
+
+
+# Scrypted NVR Storage (Optional Network Volume: Part 1 of 3)
+# Example volumes SMB (CIFS) and NFS.
+# Uncomment only one.
+# volumes:
+#     nvr:
+#         driver_opts:
+#             type: cifs
+#             o: username=[username],password=[password],vers=3.0,file_mode=0777,dir_mode=0777
+#             device: //[ip-address]/[path-to-directory]
+#     nvr:
+#         driver_opts:
+#             type: "nfs"
+#             o: "addr=[ip-address],nolock,soft,rw"
+#             device: ":[path-to-directory]"
+
+services:
+    scrypted:
+        environment:
+            # Scrypted NVR Storage (Part 2 of 3)
+
+            # Uncomment the next line to configure the NVR plugin to store recordings
+            # use the /nvr directory within the container. This can also be configured
+            # within the plugin manually.
+            # The drive or network share will ALSO need to be configured in the volumes
+            # section below.
+            - SCRYPTED_NVR_VOLUME=/nvr
+
+            - SCRYPTED_WEBHOOK_UPDATE_AUTHORIZATION={{ scrypted_webhook_auth }}
+            - SCRYPTED_WEBHOOK_UPDATE=http://localhost:10444/v1/update
+
+            # Avahi can be used for network discovery by passing in the host daemon
+            # or running the daemon inside the container. Choose one or the other.
+            # Uncomment next line to run avahi-daemon inside the container.
+            # See volumes section below to use the host daemon.
+            # - SCRYPTED_DOCKER_AVAHI=true
+
+            # Uncomment next 3 lines for Nvidia GPU support.
+            # - NVIDIA_VISIBLE_DEVICES=all
+            # - NVIDIA_DRIVER_CAPABILITIES=all
+        # runtime: nvidia
+        # Necessary to communicate with host dbus for avahi-daemon.
+        security_opt:
+            - apparmor:unconfined
+        volumes:
+            # Scrypted NVR Storage (Part 3 of 3)
+
+            # Modify to add the additional volume for Scrypted NVR.
+            # The following example would mount the /mnt/sda/video path on the host
+            # to the /nvr path inside the docker container.
+            - {{ scrypted_folder }}/nvr:/nvr
+
+            # Or use a network mount from one of the CIFS/NFS examples at the top of this file.
+            # - type: volume
+            #   source: nvr
+            #   target: /nvr
+            #   volume:
+            #     nocopy: true
+
+            # Uncomment the following lines to use Avahi daemon from the host.
+            # Ensure Avahi is running on the host machine:
+            # It can be installed with: sudo apt-get install avahi-daemon
+            # This is not compatible with running avahi inside the container (see above).
+            - /var/run/dbus:/var/run/dbus
+            - /var/run/avahi-daemon/socket:/var/run/avahi-daemon/socket
+
+            # Default volume for the Scrypted database. Typically should not be changed.
+            - {{ scrypted_folder }}/volume:/server/volume
+        devices: [
+            # uncomment the common systems devices to pass
+            # them through to docker.
+
+            # all usb devices, such as coral tpu
+            # "/dev/bus/usb:/dev/bus/usb",
+
+            # hardware accelerated video decoding, opencl, etc.
+            "/dev/dri:/dev/dri",
+
+            # uncomment below as necessary.
+            # zwave usb serial device
+
+            # "/dev/ttyACM0:/dev/ttyACM0",
+
+            # coral PCI devices
+            "/dev/apex_0:/dev/apex_0",
+            # "/dev/apex_1:/dev/apex_1",
+        ]
+
+        container_name: scrypted
+        restart: unless-stopped
+        network_mode: host
+        image: ghcr.io/koush/scrypted
+
+        # logging is noisy and will unnecessarily wear on flash storage.
+        # scrypted has per device in memory logging that is preferred.
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "10"
+        labels:
+            - "com.centurylinklabs.watchtower.scope=scrypted"
+
+    # watchtower manages updates for Scrypted.
+    watchtower:
+        environment:
+            - WATCHTOWER_HTTP_API_TOKEN=SET_THIS_TO_SOME_RANDOM_TEXT
+            - WATCHTOWER_HTTP_API_UPDATE=true
+            - WATCHTOWER_SCOPE=scrypted
+            # remove the following line to never allow docker to auto update.
+            # this is not recommended.
+            - WATCHTOWER_HTTP_API_PERIODIC_POLLS=true
+        image: containrrr/watchtower
+        container_name: scrypted-watchtower
+        restart: unless-stopped
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+        labels:
+            - "com.centurylinklabs.watchtower.scope=scrypted"
+        ports:
+            # The auto update port 10444 can be configured
+            # Must match the port in the auto update url above.
+            - 10444:8080
+        # check for updates once an hour (interval is in seconds)
+        command: --interval 3600 --cleanup --scope scrypted

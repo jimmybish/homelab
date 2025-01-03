@@ -1,0 +1,25 @@
+---
+# Example:
+# ansible-playbook shutdown_hosts.yaml -i inventory.yaml --extra-vars "target=[hostname]"
+
+- name: Initialise
+  hosts: localhost
+  become: true
+  gather_facts: false
+  vars_prompt:
+    - name: target_hosts
+      prompt: Please enter a comma-separated list of hosts
+      private: true
+
+  tasks:
+    - name: Get hosts
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        groups: hosts_list
+      with_items: "{{ target_hosts.split(',') }}"
+
+- name: Stop containers
+  hosts: hosts_list
+  tasks:
+    - name: Shutdown host
+      community.general.shutdown:

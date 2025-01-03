@@ -1,0 +1,13 @@
+services:
+  grafana:
+    image: grafana/grafana-oss:{{ grafana_version }}
+    container_name: grafana
+    restart: unless-stopped
+    user: "{{ docker_user_puid }}"
+    environment:
+     - GF_SERVER_ROOT_URL={{ internal_grafana_url }}
+     - GF_INSTALL_PLUGINS={{ grafana_plugins }}
+    ports:
+     - '3000:3000'
+    volumes:
+     - {{ grafana_parent_folder }}:/var/lib/grafana

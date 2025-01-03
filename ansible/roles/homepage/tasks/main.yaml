@@ -1,0 +1,98 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup Homepage directory
+  ansible.builtin.file:
+    path: "{{ homepage_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup Homepage config directory
+  ansible.builtin.file:
+    path: "{{ homepage_folder }}/config"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Deploy Bookmarks config
+  ansible.builtin.template:
+    src: "templates/bookmarks.yaml.j2"
+    dest: "{{ homepage_folder }}/config/bookmarks.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+
+- name: Deploy Docker config
+  ansible.builtin.template:
+    src: "templates/docker.yaml.j2"
+    dest: "{{ homepage_folder }}/config/docker.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+
+- name: Deploy Kubernetes config
+  ansible.builtin.template:
+    src: "templates/kubernetes.yaml.j2"
+    dest: "{{ homepage_folder }}/config/kubernetes.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+
+- name: Deploy Services config
+  ansible.builtin.template:
+    src: "templates/services.yaml.j2"
+    dest: "{{ homepage_folder }}/config/services.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+
+- name: Deploy Settings config
+  ansible.builtin.template:
+    src: "templates/settings.yaml.j2"
+    dest: "{{ homepage_folder }}/config/settings.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+
+- name: Deploy Widgets config
+  ansible.builtin.template:
+    src: "templates/widgets.yaml.j2"
+    dest: "{{ homepage_folder }}/config/widgets.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+
+
+- name: Deploy Homepage using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ homepage_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Homepage
+
+- name: Run Homepage docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ homepage_folder }}"
+    state: present
+    remove_orphans: false

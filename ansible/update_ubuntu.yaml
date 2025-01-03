@@ -1,0 +1,27 @@
+---
+- name: Update, upgrade, and reboot all Ubuntu hosts
+  hosts: "ubuntu:!192.168.0.4"
+  become: true
+  serial: 1
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Upgrade all packages
+      ansible.builtin.apt:
+        upgrade: dist
+      register: upgrade_result
+      notify: Reboot the host
+
+  handlers:
+    - name: Reboot the host
+      ansible.builtin.reboot:
+      when: upgrade_result.changed
+      notify: Wait for the host to come back online
+
+    - name: Wait for the host to come back online
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+      when: upgrade_result.changed

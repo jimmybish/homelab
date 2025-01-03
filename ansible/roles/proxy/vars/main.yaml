@@ -1,0 +1,4 @@
+---
+# Docker Compose vars
+proxy_swag_version: "latest"
+proxy_folder: "/etc/docker-storage/swag"

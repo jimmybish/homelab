@@ -1,0 +1,51 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup Scrypted directory
+  ansible.builtin.file:
+    path: "{{ scrypted_folder }}"
+    state: directory
+    mode: '0755'
+    owner: qnapadmin
+    group: qnapadmin
+
+- name: Setup Scrypted config directory
+  ansible.builtin.file:
+    path: "{{ scrypted_folder }}/volume"
+    state: directory
+    mode: '0755'
+    owner: qnapadmin
+    group: qnapadmin
+
+- name: Setup the NVR storage directory
+  ansible.builtin.file:
+    path: "{{ scrypted_folder }}/nvr"
+    state: directory
+    mode: '0755'
+    owner: qnapadmin
+    group: qnapadmin
+
+- name: Deploy Scrypted using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ scrypted_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: qnapadmin
+    group: qnapadmin
+  notify:
+    - Start Scrypted
+
+- name: Run Scrypted docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ scrypted_folder }}"
+    state: present
+    remove_orphans: false

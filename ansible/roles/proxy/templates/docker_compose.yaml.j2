@@ -1,0 +1,41 @@
+services:
+  swag_external:
+    container_name: swag_external
+    image: linuxserver/swag
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+      - TZ={{ timezone }}
+      - URL={{ external_domain }}
+      - SUBDOMAINS=wildcard
+      - VALIDATION=dns
+      - DNSPLUGIN=cloudflare
+      - ONLY_SUBDOMAINS=true
+    ports:
+      - 7443:443
+      - 780:80
+    volumes:
+      - {{ proxy_folder }}/external:/config
+    restart: unless-stopped
+
+  swag_internal:
+    container_name: swag_internal
+    image: linuxserver/swag
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+      - TZ={{ timezone }}
+      - URL={{ internal_domain }}
+      - SUBDOMAINS=wildcard
+      - VALIDATION=dns
+      - DNSPLUGIN=cloudflare
+    ports:
+      - 443:443
+      - 80:80
+    volumes:
+      - {{ proxy_folder }}/internal:/config
+    restart: unless-stopped

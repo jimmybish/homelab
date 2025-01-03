@@ -1,0 +1,5 @@
+---
+grafana_version: "latest"
+grafana_downloads_folder: "/downloads"
+grafana_parent_folder: "/etc/docker-storage/grafana"
+grafana_plugins: "grafana-clock-panel"
