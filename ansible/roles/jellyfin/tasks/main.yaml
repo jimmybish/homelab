@@ -1,0 +1,48 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup Jellyfin directory
+  ansible.builtin.file:
+    path: "{{ jellyfin_folder }}/config"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup Jellyseerr directory
+  ansible.builtin.file:
+    path: "{{ jellyfin_jellyseerr_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Get fileserver hostname
+  ansible.builtin.set_fact:
+    jellyfin_fileserver_ip: "{{ (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0] }}"
+
+- name: Deploy Jellyfin using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ jellyfin_folder }}/docker-compose.yaml"
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Jellyfin
+
+- name: Run Jellyfin docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ jellyfin_folder }}"
+    state: present
+    remove_orphans: true

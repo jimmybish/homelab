@@ -1,0 +1,61 @@
+services:
+  plex:
+    image: lscr.io/linuxserver/plex:{{ plex_version }}
+    container_name: plex
+    network_mode: host
+    environment:
+      - TZ={{ timezone }}
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+      - VERSION=docker
+    volumes:
+      - {{ plex_folder }}:/config
+      - mytv:/tv
+      - mymovies:/movies
+    devices:
+      - /dev/dri:/dev/dri
+    restart: unless-stopped
+  overseerr:
+    image: lscr.io/linuxserver/overseerr:{{ plex_overseerr_version }}
+    container_name: overseerr
+    environment:
+      - TZ={{ timezone }}
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+    ports:
+      - 5055:5055
+    volumes:
+      - {{ plex_overseerr_folder }}:/config
+    restart: unless-stopped
+  tautulli:
+    image: ghcr.io/tautulli/tautulli
+    container_name: tautulli
+    restart: unless-stopped
+    volumes:
+      - {{ plex_tautulli_folder }}:/config
+    environment:
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+      - TZ={{ timezone }}
+    ports:
+      - 8181:8181
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: plex overseerr tautulli
+
+volumes:
+  mytv:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr={{ plex_fileserver_ip}},nolock,soft,rw"
+      device: ":{{ fs_media_tv }}"
+  mymovies:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr={{ plex_fileserver_ip}},nolock,soft,rw"
+      device: ":{{ fs_media_movies }}"

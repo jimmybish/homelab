@@ -1,0 +1,54 @@
+services:
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:{{ jellyfin_version }}
+    container_name: jellyfin
+    environment:
+      - TZ={{ timezone }}
+      - JELLYFIN_PublishedServerUrl={{ internal_jellyfin_url }} #optional
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+    volumes:
+      - {{ jellyfin_folder }}/config:/config
+      - mytv:/data/tvshows
+      - mymovies:/data/movies
+    ports:
+      - 8096:8096
+      - 8920:8920 #optional
+      - 7359:7359/udp #optional
+      - 1900:1900/udp #optional
+    devices:
+      - /dev/dri:/dev/dri
+    restart: unless-stopped
+  jellyseerr:
+    image: fallenbagel/jellyseerr:{{ jellyfin_jellyseerr_version }}
+    container_name: jellyseerr
+    environment:
+      - LOG_LEVEL=info
+      - TZ={{ timezone }}
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+    ports:
+      - 5055:5055
+    volumes:
+      - {{ jellyfin_jellyseerr_folder }}:/app/config
+    restart: unless-stopped
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: jellyfin jellyseerr
+
+volumes:
+  mytv:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr={{ jellyfin_fileserver_ip}},nolock,soft,rw"
+      device: ":{{ fs_media_tv }}"
+  mymovies:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr={{ jellyfin_fileserver_ip}},nolock,soft,rw"
+      device: ":{{ fs_media_movies }}"

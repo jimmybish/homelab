@@ -1,0 +1,7 @@
+---
+plex_version: "latest"
+plex_overseerr_version: "latest"
+plex_parent_folder: "/etc/docker-storage"
+plex_folder: "/etc/docker-storage/plex"
+plex_overseerr_folder: "/etc/docker-storage/overseerr"
+plex_tautulli_folder: "/etc/docker-storage/tautulli"

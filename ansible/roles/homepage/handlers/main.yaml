@@ -1,0 +1,6 @@
+---
+- name: Start Homepage
+  community.docker.docker_compose_v2:
+    project_src: /etc/docker-storage/homepage
+    state: restarted
+    remove_orphans: false

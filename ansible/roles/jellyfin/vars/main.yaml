@@ -1,0 +1,5 @@
+---
+jellyfin_version: "latest"
+jellyfin_jellyseerr_version: "latest"
+jellyfin_folder: "/etc/docker-storage/jellyfin"
+jellyfin_jellyseerr_folder: "/etc/docker-storage/jellyseerr"

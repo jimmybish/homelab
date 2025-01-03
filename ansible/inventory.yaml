@@ -1,0 +1,103 @@
+# QNAP NAS
+qnap:
+  vars:
+    ansible_user: "{{ qnap_ansible_user }}"
+    ansible_ssh_private_key_file: ~/.ssh/ansible
+    ansible_python_interpreter: /opt/python3/bin/python3 # Python3 installed via the App Center
+  hosts:
+    fileserver:
+
+# Router
+pfsense:
+  hosts:
+    router:
+
+# TP-Link Omada Controller
+omada_controller:
+  hosts:
+    tp-oc200:
+
+# All Ububtu hosts
+ubuntu:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3.10
+  hosts:
+    mgmt:
+    docker-1:
+    docker-2:
+    plex-lxc:
+    jellyfin-lxc:
+    proxy:
+
+# All Debian hosts
+debian:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3.11
+  hosts:
+    debian-downloader:
+
+# Plex Media Server
+plex_host:
+  hosts:
+    plex-lxc:
+
+# Jellyfin Media Server
+jellyfin_host:
+  hosts:
+    jellyfin-lxc:
+
+# NGINX Reverse Proxy
+proxy_host:
+  hosts:
+    proxy:
+
+# Homepage
+homepage_host:
+  hosts:
+    docker-2:
+
+homeassistant_host:
+  hosts:
+    homeassistant-new:
+
+# GitHub Enterprise Server
+ghes_hosts:
+  hosts:
+    ghes: # Primary
+    ghes-ha: # HA
+
+proxmox_hosts:
+  hosts:
+    proxmox-1:
+    proxmox-2:
+
+
+sonarr_host:
+  hosts:
+    debian-downloader:
+
+radarr_host:
+  hosts:
+    debian-downloader:
+
+prowlarr_host:
+  hosts:
+    debian-downloader:
+
+sabnzbd_host:
+  hosts:
+    debian-downloader:
+
+qbittorrent_host:
+  hosts:
+    debian-downloader:
+
+# Grafana
+grafana_host:
+  hosts:
+    mgmt:
+
+# Klipper 3d printer
+sovol_sv08:
+  hosts:
+    192.168.200.32:

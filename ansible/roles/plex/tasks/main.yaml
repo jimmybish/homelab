@@ -1,0 +1,56 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup Plex directory
+  ansible.builtin.file:
+    path: "{{ plex_folder }}/config"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup Overseerr directory
+  ansible.builtin.file:
+    path: "{{ plex_overseerr_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup Tautulli directory
+  ansible.builtin.file:
+    path: "{{ plex_tautulli_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Get fileserver IP
+  ansible.builtin.set_fact:
+    plex_fileserver_ip: "{{ (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0] }}"
+
+- name: Deploy Plex using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ plex_parent_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Plex
+
+- name: Run Plex docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ plex_parent_folder }}"
+    state: present
+    remove_orphans: true

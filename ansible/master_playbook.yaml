@@ -1,0 +1,42 @@
+---
+- name: Install Docker
+  hosts: ubuntu
+  become: true
+  roles:
+    - docker
+
+- name: Install Homepage
+  hosts: homepage_host
+  become: true
+  roles:
+    - homepage
+
+# - name: Install the *arr suite
+#   hosts: arr_hosts
+#   become: true
+#   roles:
+#     - arr_suite
+
+- name: Install Plex, Overseerr, and Tautulli
+  hosts: plex_host
+  become: true
+  roles:
+    - plex
+
+- name: Install Jellyfin and Jellyseerr
+  hosts: jellyfin_host
+  become: true
+  roles:
+    - jellyfin
+
+- name: Install Grafana
+  hosts: grafana_host
+  become: true
+  roles:
+    - grafana
+
+- name: Install NGINX
+  hosts: proxy_host
+  become: true
+  roles:
+    - proxy

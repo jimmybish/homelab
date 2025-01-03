@@ -1,0 +1,43 @@
+---
+- name: Initialise
+  hosts: localhost
+  become: true
+  gather_facts: false
+  vars_prompt:
+    - name: target_hosts
+      prompt: Please enter a comma-separated list of hosts
+      private: true
+
+  tasks:
+    - name: Get hosts
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        groups: hosts_list
+      with_items: "{{ target_hosts.split(',') }}"
+
+- name: Stop containers
+  hosts: hosts_list
+  tasks:
+    - name: Get containers
+      community.docker.docker_host_info:
+        containers: true
+      register: docker_info
+
+    - name: Show running containers
+      ansible.builtin.debug:
+        var: docker_info.containers
+
+    - name: Stop running containers
+      community.docker.docker_container:
+        name: "{{ item }}"
+        state: stopped
+      loop: "{{ docker_info.containers | map(attribute='Id') | list }}"
+
+    - name: Verify containers
+      community.docker.docker_host_info:
+        containers: true
+      register: docker_info
+
+    - name: Show running containers again
+      ansible.builtin.debug:
+        var: docker_info.containers

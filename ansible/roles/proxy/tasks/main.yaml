@@ -1,0 +1,117 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup Swag directory
+  ansible.builtin.file:
+    path: "{{ proxy_folder }}"
+    state: directory
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+# OMG, this one took me a long time to get right.
+# Lots of documentation reading and a few cans of lager later (ok, the cans may have slowed me down), and we have IPs for the first host in each group!
+# BUT!! We also need to make it bombproof, so if the first host returned by dig is the loopback, we'll just use DNS with the hostname
+# and append the internal domain.
+- name: Get IP Addresses
+  ansible.builtin.set_fact:
+    proxy_homepage_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'homepage_host').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'homepage_host').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'homepage_host').split(','))[0])) }}
+    proxy_plex_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'plex_host').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'plex_host').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'plex_host').split(','))[0])) }}
+    proxy_jellyfin_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'jellyfin_host').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'jellyfin_host').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'jellyfin_host').split(','))[0])) }}
+    proxy_fileserver_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0])) }}
+    proxy_ghes_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'ghes_hosts').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'ghes_hosts').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'ghes_hosts').split(','))[0])) }}
+    proxy_homeassistant_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'homeassistant_host').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'homeassistant_host').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'homeassistant_host').split(','))[0])) }}
+    proxy_prowlarr_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'prowlarr_host').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'prowlarr_host').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'prowlarr_host').split(','))[0])) }}
+    proxy_sonarr_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'sonarr_host').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'sonarr_host').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'sonarr_host').split(','))[0])) }}
+    proxy_radarr_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'radarr_host').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'radarr_host').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'radarr_host').split(','))[0])) }}
+    proxy_proxmox_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'proxmox_hosts').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'proxmox_hosts').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'proxmox_hosts').split(','))[0])) }}
+    proxy_pfsense_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'pfsense').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'pfsense').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'pfsense').split(','))[0])) }}
+    proxy_omada_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'omada_controller').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'omada_controller').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'omada_controller').split(','))[0])) }}
+    proxy_grafana_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'grafana_host').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'grafana_host').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'grafana_host').split(','))[0])) }}
+
+- name: Debug IP Addresses
+  ansible.builtin.debug:
+    msg:
+      - "IPs:"
+      - "- proxy_homepage_ip = {{ proxy_homepage_ip }}"
+      - "- proxy_plex_ip = {{ proxy_plex_ip }}"
+      - "- proxy_jellyfin_ip = {{ proxy_jellyfin_ip }}"
+      - "- proxy_fileserver_ip = {{ proxy_fileserver_ip }}"
+      - "- proxy_ghes_ip = {{ proxy_ghes_ip }}"
+      - "- proxy_homeassistant_ip = {{ proxy_homeassistant_ip }}"
+      - "- proxy_prowlarr_ip = {{ proxy_prowlarr_ip }}"
+      - "- proxy_sonarr_ip = {{ proxy_sonarr_ip }}"
+      - "- proxy_radarr_ip = {{ proxy_radarr_ip }}"
+      - "- proxy_proxmox_ip = {{ proxy_proxmox_ip }}"
+      - "- proxy_pfsense_ip = {{ proxy_pfsense_ip }}"
+      - "- proxy_omada_ip = {{ proxy_omada_ip }}"
+      - "- proxy_grafana_ip = {{ proxy_grafana_ip }}"
+
+- name: Load Internal Proxy Config
+  ansible.builtin.include_tasks: internal_config.yaml
+- name: Load External Proxy Config
+  ansible.builtin.include_tasks: external_config.yaml
+
+- name: Deploy Swag using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ proxy_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Run Swag docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ proxy_folder }}"
+    state: present
+    remove_orphans: true

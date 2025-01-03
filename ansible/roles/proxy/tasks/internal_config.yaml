@@ -1,0 +1,161 @@
+---
+- name: Copy Cloudflare token config to SWAG Internal
+  ansible.builtin.template:
+    src: "templates/cloudflare.ini.j2"
+    dest: "{{ proxy_folder }}/internal/dns-conf/cloudflare.ini"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Proxy config
+  ansible.builtin.template:
+    src: "templates/internal/proxy-internal.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Swag
+
+- name: Deploy Frigate config
+  ansible.builtin.template:
+    src: "templates/internal/frigate.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/frigate.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy GHES config
+  ansible.builtin.template:
+    src: "templates/internal/ghes.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/ghes.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Home Assistant config
+  ansible.builtin.template:
+    src: "templates/internal/homeassistant.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/homeassistant.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Homepage config
+  ansible.builtin.template:
+    src: "templates/internal/homepage.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/homepage.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Jellyfin config
+  ansible.builtin.template:
+    src: "templates/internal/jellyfin.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/jellyfin.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Jellyseerr config
+  ansible.builtin.template:
+    src: "templates/internal/jellyseerr.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/jellyseerr.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Overseerr config
+  ansible.builtin.template:
+    src: "templates/internal/overseerr.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/overseerr.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy pfSense config
+  ansible.builtin.template:
+    src: "templates/internal/pfsense.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/pfsense.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Proxmox config
+  ansible.builtin.template:
+    src: "templates/internal/proxmox.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/proxmox.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Tautulli config
+  ansible.builtin.template:
+    src: "templates/internal/tautulli.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/tautulli.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Sonarr config
+  ansible.builtin.template:
+    src: "templates/internal/sonarr.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/sonarr.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Radarr config
+  ansible.builtin.template:
+    src: "templates/internal/radarr.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/radarr.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Prowlarr config
+  ansible.builtin.template:
+    src: "templates/internal/prowlarr.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/prowlarr.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Grafana config
+  ansible.builtin.template:
+    src: "templates/internal/grafana.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/grafana.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag

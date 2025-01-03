@@ -1,0 +1,84 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/latest/configs/services
+
+- Media:
+    - Plex:
+        href: {{ internal_plex_url }}
+        description: Plex Media Server
+        icon: plex.png
+        widget:
+          type: tautulli
+          url: {{ internal_tautulli_url }}
+          key: {{ homepage_tautulli_key }}
+          enableUser: true # optional, defaults to false
+          showEpisodeNumber: true # optional, defaults to false
+          expandOneStreamToTwoRows: false # optional, defaults to true
+    - Jellyfin:
+        href: {{ internal_jellyfin_url }}
+        description: homepage_Jellyfin
+        icon: jellyfin.png
+        widget:
+          type: jellyfin
+          url: {{ internal_jellyfin_url }}
+          key: {{ homepage_jellyfin_key }}
+          enableBlocks: true # optional, defaults to false
+          enableNowPlaying: true # optional, defaults to true
+          enableUser: true # optional, defaults to false
+          showEpisodeNumber: true # optional, defaults to false
+          expandOneStreamToTwoRows: false # optional, defaults to true
+    - Overseerr:
+        href: {{ internal_overseerr_url }}
+        description: Overseerr (Plex requests)
+        icon: overseerr.png
+        widget:
+          type: overseerr
+          url: {{ internal_overseerr_url }}
+          key: {{ homepage_overseerr_key }}
+    - Jellyseerr:
+        href: {{ internal_jellyseerr_url }}
+        description: Jellyseerr (Jellyfin requests)
+        icon: jellyseerr.png
+        widget:
+          type: jellyseerr
+          url: {{ internal_jellyseerr_url }}
+          key: {{ homepage_jellyseerr_key }}
+
+
+- Smart Home:
+    - Home Assistant:
+        href: {{ internal_homeassistant_url }}
+        icon: home-assistant.png
+        widget:
+          type: homeassistant
+          url: {{ internal_homeassistant_url }}
+          key: {{ homepage_homeassistant_key }}
+          custom:
+            - state: sensor.total_pv_power
+              label: Solar generation
+            - state: sensor.lounge_temperature
+              label: Lounge temperature
+    - EssVeeOhAte:
+        href: {{ internal_sovol_url }}
+        icon: mdi:printer-3d-nozzle
+        widget:
+          type: moonraker
+          url: {{ internal_sovol_url }}
+
+- Others:
+    - pfSense:
+        href: {{ internal_pfsense_url }}
+        description: The router
+        icon: pfsense.png
+    - Omada Controller:
+        href: {{ internal_omada_url }}
+        description: TP-Link Omada
+        icon: omada.png
+    - Sonarr:
+        href: {{ internal_sonarr_url }}
+        description: Sonarr (TV Shows)
+        icon: sonarr.png
+    - Radarr:
+        href: {{ internal_radarr_url }}
+        description: Radarr (Movies)
+        icon: radarr.png

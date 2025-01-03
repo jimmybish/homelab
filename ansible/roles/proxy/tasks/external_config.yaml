@@ -1,0 +1,50 @@
+---
+- name: Copy Cloudflare token config to SWAG External
+  ansible.builtin.template:
+    src: "templates/cloudflare.ini.j2"
+    dest: "{{ proxy_folder }}/external/dns-conf/cloudflare.ini"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy GHES config
+  ansible.builtin.template:
+    src: "templates/external/ghes.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/external/nginx/proxy-confs/ghes.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Jellyfin config
+  ansible.builtin.template:
+    src: "templates/external/jellyfin.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/external/nginx/proxy-confs/jellyfin.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Jellyseerr config
+  ansible.builtin.template:
+    src: "templates/external/jellyseerr.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/external/nginx/proxy-confs/jellyseerr.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
+- name: Deploy Overseerr config
+  ansible.builtin.template:
+    src: "templates/external/overseerr.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/external/nginx/proxy-confs/overseerr.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag

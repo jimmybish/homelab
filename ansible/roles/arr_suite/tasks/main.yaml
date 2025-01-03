@@ -1,0 +1,80 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup Parent directory
+  ansible.builtin.file:
+    path: "{{ arr_suite_parent_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup Sonarr directory
+  ansible.builtin.file:
+    path: "{{ arr_suite_sonarr_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup Radarr directory
+  ansible.builtin.file:
+    path: "{{ arr_suite_radarr_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup Prowlarr directory
+  ansible.builtin.file:
+    path: "{{ arr_suite_prowlarr_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup SABnzbd directory
+  ansible.builtin.file:
+    path: "{{ arr_suite_sabnzbd_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup qBittorrent directory
+  ansible.builtin.file:
+    path: "{{ arr_suite_qbittorrent_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Get fileserver IP
+  ansible.builtin.set_fact:
+    plex_fileserver_ip: "{{ lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0]) }}"
+
+- name: Deploy *Arr using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ arr_suite_parent_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Containers
+
+- name: Run *Arr docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ arr_suite_parent_folder }}"
+    state: present
+    remove_orphans: true
