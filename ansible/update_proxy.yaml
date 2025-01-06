@@ -1,0 +1,6 @@
+---
+- name: Update NGINX
+  hosts: proxy_host
+  become: true
+  roles:
+    - proxy
