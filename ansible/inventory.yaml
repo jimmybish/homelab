@@ -101,6 +101,11 @@ grafana_host:
   hosts:
     mgmt:
 
+# Paperless
+paperless_host:
+  hosts:
+    docker-1:
+
 # Klipper 3d printer
 sovol_sv08:
   hosts:

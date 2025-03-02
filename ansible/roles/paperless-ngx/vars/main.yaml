@@ -1,0 +1,7 @@
+---
+paperless_version: "latest"
+redis_version: "7"
+postgres_version: "16"
+gotenberg_version: "8.7"
+tika_version: "latest"
+paperless_folder: "/etc/docker-storage/paperless"
