@@ -5,18 +5,31 @@
   gather_facts: false
   vars_prompt:
     - name: target_hosts
-      prompt: Please enter a comma-separated list of hosts
-      private: true
+      prompt: Please enter a comma-separated list of hosts or a host group
+      private: false
 
   tasks:
-    - name: Get hosts
+    - name: Check if target_hosts is a host group
+      ansible.builtin.set_fact:
+        is_host_group: "{{ target_hosts in groups }}"
+
+    - name: Add hosts from group
       ansible.builtin.add_host:
         name: "{{ item }}"
         groups: hosts_list
+      when: is_host_group
+      with_items: "{{ groups[target_hosts] }}"
+
+    - name: Add individual hosts
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        groups: hosts_list
+      when: not is_host_group
       with_items: "{{ target_hosts.split(',') }}"
 
 - name: Stop containers
   hosts: hosts_list
+  become: true
   tasks:
     - name: Get containers
       community.docker.docker_host_info:

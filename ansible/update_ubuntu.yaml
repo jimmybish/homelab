@@ -1,6 +1,6 @@
 ---
 - name: Update, upgrade, and reboot all Ubuntu hosts
-  hosts: "ubuntu:!192.168.0.4"
+  hosts: "ubuntu"
   become: true
   serial: 1
 

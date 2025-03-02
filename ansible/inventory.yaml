@@ -1,3 +1,8 @@
+# Keeping the Ansible host in its own group.
+mgmt:
+  hosts:
+    mgmt:
+
 # QNAP NAS
 qnap:
   vars:
@@ -22,7 +27,6 @@ ubuntu:
   vars:
     ansible_python_interpreter: /usr/bin/python3.10
   hosts:
-    mgmt:
     docker-1:
     docker-2:
     plex-lxc:
