@@ -1,0 +1,12 @@
+---
+- name: Install Paperless
+  hosts: paperless_host
+  become: true
+  roles:
+    - paperless-ngx
+
+# - name: Install NGINX
+#   hosts: proxy_host
+#   become: true
+#   roles:
+#     - proxy
