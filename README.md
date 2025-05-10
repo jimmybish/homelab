@@ -34,6 +34,8 @@ This will deploy:
     - Sonarr
     - Tautulli
 - [Watchtower](https://github.com/containrrr/watchtower) (on each Docker host)
+- [Node Exporter](https://github.com/prometheus/node_exporter) (on each Ubuntu host, monitored by Prometheus)
+- [Prometheus](https://prometheus.io/) (runs in Docker, scrapes Node Exporter metrics from all hosts)
 
 ### Hardware
 - pfSense router from AliExpress (Intel Celeron J4125 Mini PC with 4x 2.5gbe eth ports)
@@ -78,6 +80,12 @@ Currently, there is only the one NGINX proxy host for all services. I may split 
 ```
 ansible-playbook master_playbook.yaml -i inventory.yaml --vault-password-file ~/ansible_key
 ```
+
+### Monitoring & Metrics
+- Node Exporter is deployed on all Ubuntu hosts (VMs and LXCs) for system metrics.
+- Prometheus runs in Docker and scrapes metrics from all Node Exporter endpoints using FQDNs.
+- Prometheus configuration and DNS are set up to ensure all hosts are reachable and monitored.
+- If new hosts are added, ensure Node Exporter is running and the FQDN is resolvable from the Prometheus container.
 
 ### To Do
 - Change the structure of the playbooks. If I deploy an app, it should make changes on any hosts required for that app to work (proxy, DNS, collectd, etc). This probably means limiting role templates to the initial config for deployment and having playbooks drop in chunks of config to those existing files, instead.
