@@ -18,6 +18,31 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
+- name: Ensure Loki data directory exists
+  ansible.builtin.file:
+    path: "{{ loki_data_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Ensure Prometheus data directory exists
+  ansible.builtin.file:
+    path: "{{ prometheus_data_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Deploy Prometheus config
+  ansible.builtin.template:
+    src: "templates/prometheus.yml.j2"
+    dest: "{{ grafana_parent_folder }}/prometheus.yml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+
 - name: Deploy Grafana using Docker Compose
   ansible.builtin.template:
     src: "templates/docker_compose.yaml.j2"
@@ -34,3 +59,20 @@
     project_src: "{{ grafana_parent_folder }}"
     state: present
     remove_orphans: true
+
+- name: Ensure Grafana provisioning directory exists
+  ansible.builtin.file:
+    path: "{{ grafana_parent_folder }}/provisioning/datasources"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Deploy Grafana datasources provisioning config
+  ansible.builtin.template:
+    src: "templates/provisioning_datasources.yaml.j2"
+    dest: "{{ grafana_parent_folder }}/provisioning/datasources/datasources.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true

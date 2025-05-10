@@ -5,6 +5,7 @@ services:
       environment:
         - PUID={{ docker_user_puid }}
         - PGID={{ docker_user_pgid }}
+        - HOMEPAGE_ALLOWED_HOSTS=homepage.{{ internal_domain }}
       ports:
         - 3000:3000
       volumes:

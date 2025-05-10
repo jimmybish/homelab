@@ -1,9 +1,2 @@
 ---
 arr_suite_version: "latest"
-arr_suite_downloads_folder: "/downloads"
-arr_suite_parent_folder: "/etc/docker-storage"
-arr_suite_sonarr_folder: "{{ arr_suite_parent_folder }}/sonarr"
-arr_suite_radarr_folder: "{{ arr_suite_parent_folder }}/overseerr"
-arr_suite_prowlarr_folder: "{{ arr_suite_parent_folder }}/tautulli"
-arr_suite_sabnzbd_folder: "{{ arr_suite_parent_folder }}/sabnzbd"
-arr_suite_qbittorrent_folder: "{{ arr_suite_parent_folder }}/qbittorrent"

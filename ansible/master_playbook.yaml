@@ -40,3 +40,9 @@
   become: true
   roles:
     - proxy
+
+- name: Install Prometheus Node Exporter
+  hosts: ubuntu
+  become: true
+  roles:
+    - role: prometheus.prometheus.node_exporter
