@@ -11,3 +11,29 @@ services:
      - '3000:3000'
     volumes:
      - {{ grafana_parent_folder }}:/var/lib/grafana
+     - {{ grafana_parent_folder }}/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - loki
+      - prometheus
+
+  loki:
+    image: grafana/loki:{{ loki_version }}
+    container_name: loki
+    restart: unless-stopped
+    user: "{{ docker_user_puid }}:{{ docker_user_pgid }}"
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - '3100:3100'
+    volumes:
+      - {{ loki_data_folder }}:/loki
+
+  prometheus:
+    image: prom/prometheus:{{ prometheus_version }}
+    container_name: prometheus
+    restart: unless-stopped
+    user: "{{ docker_user_puid }}:{{ docker_user_pgid }}"
+    ports:
+      - '9090:9090'
+    volumes:
+      - {{ prometheus_data_folder }}:/prometheus
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
