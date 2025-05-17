@@ -34,7 +34,6 @@ This will deploy:
     - Sonarr
     - Tautulli
     - Lidarr
-- [Watchtower](https://github.com/containrrr/watchtower) (on each Docker host)
 - [Node Exporter](https://github.com/prometheus/node_exporter) (on each Ubuntu host, monitored by Prometheus)
 - [Prometheus](https://prometheus.io/) (runs in Docker, scrapes Node Exporter metrics from all hosts)
 
@@ -92,3 +91,6 @@ ansible-playbook master_playbook.yaml -i inventory.yaml --vault-password-file ~/
 - Change the structure of the playbooks. If I deploy an app, it should make changes on any hosts required for that app to work (proxy, DNS, collectd, etc). This probably means limiting role templates to the initial config for deployment and having playbooks drop in chunks of config to those existing files, instead.
 - Split out the internal proxy to each host and have the container tags add the service automatically.
 - Have the playbook reserve DHCP leases and add aliases to DNS when a new host is created. Currently, these are in pfSense, but I may switch to OPNsense before adding this functionality.
+
+### Removed
+- [Watchtower](https://github.com/containrrr/watchtower) (on each Docker host) -- removed
