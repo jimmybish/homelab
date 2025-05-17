@@ -17,7 +17,7 @@ services:
       - prometheus
 
   loki:
-    image: grafana/loki:{{ loki_version }}
+    image: grafana/loki:{{ grafana_loki_version }}
     container_name: loki
     restart: unless-stopped
     user: "{{ docker_user_puid }}:{{ docker_user_pgid }}"
@@ -28,7 +28,7 @@ services:
       - {{ loki_data_folder }}:/loki
 
   prometheus:
-    image: prom/prometheus:{{ prometheus_version }}
+    image: prom/prometheus:{{ grafana_prometheus_version }}
     container_name: prometheus
     restart: unless-stopped
     user: "{{ docker_user_puid }}:{{ docker_user_pgid }}"
