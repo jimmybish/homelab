@@ -1,8 +1,8 @@
 ---
 grafana_version: "latest"
 grafana_plugins: "grafana-clock-panel"
-loki_version: "2.9.7"
-prometheus_version: "v2.51.2"
+grafana_loki_version: "2.9.7"
+grafana_prometheus_version: "v2.51.2"
 # Data folders now set globally in group_vars/all/vars.yaml
 # loki_data_folder: "/opt/loki/data"
 # prometheus_data_folder: "/opt/prometheus/data"
