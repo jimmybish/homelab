@@ -39,12 +39,6 @@ services:
       - TZ={{ timezone }}
     ports:
       - 8181:8181
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: plex overseerr tautulli
 
 volumes:
   mytv:

@@ -32,12 +32,6 @@ services:
     volumes:
       - {{ jellyfin_jellyseerr_folder }}:/app/config
     restart: unless-stopped
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: jellyfin jellyseerr
 
 volumes:
   mytv:
