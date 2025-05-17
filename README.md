@@ -33,6 +33,7 @@ This will deploy:
     - Radarr
     - Sonarr
     - Tautulli
+    - Lidarr
 - [Watchtower](https://github.com/containrrr/watchtower) (on each Docker host)
 - [Node Exporter](https://github.com/prometheus/node_exporter) (on each Ubuntu host, monitored by Prometheus)
 - [Prometheus](https://prometheus.io/) (runs in Docker, scrapes Node Exporter metrics from all hosts)
