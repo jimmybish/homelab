@@ -68,17 +68,37 @@ services:
       - 6881:6881
       - 6881:6881/udp
     restart: unless-stopped
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:{{ arr_suite_version }}
+    container_name: lidarr
+    environment:
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+      - TZ={{ timezone }}
+    volumes:
+      - {{ arr_suite_lidarr_folder }}:/config
+      - mymusic:/music
+      - {{ arr_suite_downloads_folder }}:/downloads
+    ports:
+      - 8686:8686
+    restart: unless-stopped
 
 volumes:
   mytv:
     driver: local
     driver_opts:
       type: nfs
-      o: "addr={{ plex_fileserver_ip}},nolock,soft,rw"
+      o: "addr={{ arr_fileserver_ip}},nolock,soft,rw"
       device: ":{{ fs_media_tv }}"
   mymovies:
     driver: local
     driver_opts:
       type: nfs
-      o: "addr={{ plex_fileserver_ip}},nolock,soft,rw"
+      o: "addr={{ arr_fileserver_ip}},nolock,soft,rw"
       device: ":{{ fs_media_movies }}"
+  mymusic:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr={{ arr_fileserver_ip}},nolock,soft,rw"
+      device: ":{{ fs_media_music }}"
