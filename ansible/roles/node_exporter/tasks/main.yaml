@@ -9,7 +9,7 @@
   ansible.builtin.unarchive:
     src: /tmp/node_exporter.tar.gz
     dest: /usr/local/bin/
-    remote_src: yes
+    remote_src: true
     extra_opts: [--strip-components=1]
     creates: /usr/local/bin/node_exporter
 
@@ -17,8 +17,8 @@
   ansible.builtin.user:
     name: node_exporter
     shell: /usr/sbin/nologin
-    system: yes
-    create_home: no
+    system: true
+    create_home: false
 
 - name: Create systemd service for node_exporter
   ansible.builtin.copy:
@@ -40,10 +40,10 @@
 
 - name: Reload systemd
   ansible.builtin.systemd:
-    daemon_reload: yes
+    daemon_reload: true
 
 - name: Enable and start node_exporter
   ansible.builtin.service:
     name: node_exporter
     state: started
-    enabled: yes
+    enabled: true
