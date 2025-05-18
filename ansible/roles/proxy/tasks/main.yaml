@@ -76,6 +76,10 @@
       {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'grafana_host').split(','))[0]) == '127.0.1.1') |
       ternary((lookup('ansible.builtin.inventory_hostnames', 'grafana_host').split(','))[0] ~ '.' ~ internal_domain,
       lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'grafana_host').split(','))[0])) }}
+    proxy_lidarr_ip: >-
+      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'lidarr_host').split(','))[0]) == '127.0.1.1') |
+      ternary((lookup('ansible.builtin.inventory_hostnames', 'lidarr_host').split(','))[0] ~ '.' ~ internal_domain,
+      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'lidarr_host').split(','))[0])) }}
 
 - name: Debug IP Addresses
   ansible.builtin.debug:
@@ -94,6 +98,7 @@
       - "- proxy_pfsense_ip = {{ proxy_pfsense_ip }}"
       - "- proxy_omada_ip = {{ proxy_omada_ip }}"
       - "- proxy_grafana_ip = {{ proxy_grafana_ip }}"
+      - "- proxy_lidarr_ip = {{ proxy_lidarr_ip }}"
 
 - name: Load Internal Proxy Config
   ansible.builtin.include_tasks: internal_config.yaml

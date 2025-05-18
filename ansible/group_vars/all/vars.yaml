@@ -1,3 +1,4 @@
+---
 # ansible-vault encrypt_string --vault-password-file ~/ansible_key 'value' --name 'key_name'
 
 timezone: "Australia/Hobart"
@@ -172,6 +173,7 @@ fs_scans: "/Scans"
 fs_photos: "/Photos"
 fs_media_tv: "/MyMedia/TV"
 fs_media_movies: "/MyMedia/Movies"
+fs_media_music: "/MyMedia/Music"
 
 # Docker Compose project folders
 jellyfin_folder: "/etc/docker-storage/jellyfin"
@@ -185,10 +187,11 @@ scrypted_folder: "/share/nvr/scrypted"
 arr_suite_downloads_folder: "/downloads"
 arr_suite_parent_folder: "/etc/docker-storage"
 arr_suite_sonarr_folder: "{{ arr_suite_parent_folder }}/sonarr"
-arr_suite_radarr_folder: "{{ arr_suite_parent_folder }}/overseerr"
-arr_suite_prowlarr_folder: "{{ arr_suite_parent_folder }}/tautulli"
+arr_suite_radarr_folder: "{{ arr_suite_parent_folder }}/radarr"
+arr_suite_prowlarr_folder: "{{ arr_suite_parent_folder }}/prowlarr"
 arr_suite_sabnzbd_folder: "{{ arr_suite_parent_folder }}/sabnzbd"
 arr_suite_qbittorrent_folder: "{{ arr_suite_parent_folder }}/qbittorrent"
+arr_suite_lidarr_folder: "{{ arr_suite_parent_folder }}/lidarr"
 proxy_folder: "/etc/docker-storage/swag"
 paperless_folder: "/etc/docker-storage/paperless"
 grafana_downloads_folder: "/downloads"

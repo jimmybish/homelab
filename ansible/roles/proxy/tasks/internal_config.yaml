@@ -140,6 +140,16 @@
   notify:
     - Start Swag
 
+- name: Deploy Lidarr config
+  ansible.builtin.template:
+    src: "templates/internal/lidarr.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/lidarr.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Swag
+
 - name: Deploy Prowlarr config
   ansible.builtin.template:
     src: "templates/internal/prowlarr.subdomain.conf.j2"

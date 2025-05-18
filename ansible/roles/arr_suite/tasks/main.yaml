@@ -60,7 +60,7 @@
 
 - name: Get fileserver IP
   ansible.builtin.set_fact:
-    plex_fileserver_ip: "{{ lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0]) }}"
+    arr_fileserver_ip: "{{ lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0]) }}"
 
 - name: Deploy *Arr using Docker Compose
   ansible.builtin.template:
