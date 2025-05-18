@@ -75,6 +75,9 @@ proxmox_hosts:
     proxmox-1:
     proxmox-2:
 
+lidarr_host:
+  hosts:
+    debian-downloader:
 
 sonarr_host:
   hosts:
@@ -83,6 +86,7 @@ sonarr_host:
 radarr_host:
   hosts:
     debian-downloader:
+
 
 prowlarr_host:
   hosts:
