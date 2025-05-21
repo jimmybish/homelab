@@ -12,10 +12,10 @@ services:
       - mytv:/data/tvshows
       - mymovies:/data/movies
     ports:
-      - 8096:8096
-      - 8920:8920 #optional
-      - 7359:7359/udp #optional
-      - 1900:1900/udp #optional
+      - {{ jellyfin_port }}:8096
+      - {{ jellyfin_https_port }}:8920 #optional
+      - {{ jellyfin_udp_port1 }}:7359/udp #optional
+      - {{ jellyfin_udp_port2 }}:1900/udp #optional
     devices:
       - /dev/dri:/dev/dri
     restart: unless-stopped
@@ -28,7 +28,7 @@ services:
       - PUID={{ docker_user_puid }}
       - PGID={{ docker_user_pgid }}
     ports:
-      - 5055:5055
+      - {{ jellyfin_jellyseerr_port }}:5055
     volumes:
       - {{ jellyfin_jellyseerr_folder }}:/app/config
     restart: unless-stopped

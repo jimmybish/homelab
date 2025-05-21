@@ -48,4 +48,25 @@
   community.docker.docker_compose_v2:
     project_src: "{{ scrypted_folder }}"
     state: present
-    remove_orphans: false
+    remote_orphans: false
+
+# Scrypted web UI (host networking, optional)
+- name: Allow Scrypted web UI port through UFW (if set)
+  ufw:
+    rule: allow
+    port: "{{ scrypted_port | default(omit) }}"
+    proto: tcp
+  when:
+    - ansible_os_family == "Debian"
+    - scrypted_port is defined
+
+# Check if Scrypted port is open and listening (if defined)
+- name: Check if Scrypted port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Scrypted port is listening (if defined)
+  ansible.builtin.assert:
+    that:
+      - scrypted_port is not defined or scrypted_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Scrypted port {{ scrypted_port }} is not open and listening!"
+    success_msg: "Scrypted port {{ scrypted_port }} is open and listening."

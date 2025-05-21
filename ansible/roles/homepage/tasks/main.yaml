@@ -26,6 +26,13 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
+- name: Allow Homepage port through UFW
+  ufw:
+    rule: allow
+    port: "{{ homepage_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
 - name: Deploy Bookmarks config
   ansible.builtin.template:
     src: "templates/bookmarks.yaml.j2"
@@ -96,3 +103,13 @@
     project_src: "{{ homepage_folder }}"
     state: present
     remove_orphans: false
+
+- name: Check if Homepage port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Homepage port is listening
+  ansible.builtin.assert:
+    that:
+      - homepage_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Homepage port {{ homepage_port }} is not open and listening!"
+    success_msg: "Homepage port {{ homepage_port }} is open and listening."

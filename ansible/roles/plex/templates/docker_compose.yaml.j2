@@ -23,7 +23,7 @@ services:
       - PUID={{ docker_user_puid }}
       - PGID={{ docker_user_pgid }}
     ports:
-      - 5055:5055
+      - {{ plex_overseerr_port }}:5055
     volumes:
       - {{ plex_overseerr_folder }}:/config
     restart: unless-stopped
@@ -38,7 +38,7 @@ services:
       - PGID={{ docker_user_pgid }}
       - TZ={{ timezone }}
     ports:
-      - 8181:8181
+      - {{ plex_tautulli_port }}:8181
 
 volumes:
   mytv:

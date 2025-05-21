@@ -1,9 +1,15 @@
 ---
+- name: Initial OS Configuration
+  hosts: ubuntu:debian
+  become: true
+  roles:
+    - os_configure
+    - docker
+
 - name: Install Docker
   hosts: ubuntu
   become: true
   roles:
-    - docker
 
 - name: Install Homepage
   hosts: homepage_host
@@ -11,11 +17,11 @@
   roles:
     - homepage
 
-# - name: Install the *arr suite
-#   hosts: arr_hosts
-#   become: true
-#   roles:
-#     - arr_suite
+- name: Install the *arr suite
+  hosts: sonarr_host
+  become: true
+  roles:
+    - arr_suite
 
 - name: Install Plex, Overseerr, and Tautulli
   hosts: plex_host

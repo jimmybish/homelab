@@ -34,6 +34,27 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
+- name: Allow Grafana port through UFW
+  ufw:
+    rule: allow
+    port: "{{ grafana_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Loki port through UFW
+  ufw:
+    rule: allow
+    port: "{{ grafana_loki_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Prometheus port through UFW
+  ufw:
+    rule: allow
+    port: "{{ grafana_prometheus_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
 - name: Deploy Prometheus config
   ansible.builtin.template:
     src: "templates/prometheus.yml.j2"
@@ -76,3 +97,16 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+
+# Check if Grafana stack ports are open and listening
+- name: Check if Grafana stack ports are open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Grafana stack ports are listening
+  ansible.builtin.assert:
+    that:
+      - grafana_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - grafana_loki_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - grafana_prometheus_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "One or more Grafana stack ports are not open and listening!"
+    success_msg: "All Grafana stack ports are open and listening."

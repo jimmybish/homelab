@@ -26,6 +26,13 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
+- name: Allow Paperless port through UFW
+  ufw:
+    rule: allow
+    port: "{{ paperless_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
 - name: Deploy Paperless using Docker Compose
   ansible.builtin.template:
     src: "templates/docker_compose.yaml.j2"
@@ -42,4 +49,15 @@
     project_src: "{{ paperless_folder }}"
     state: present
     remove_orphans: true
+
+# Check if Paperless port is open and listening
+- name: Check if Paperless port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Paperless port is listening
+  ansible.builtin.assert:
+    that:
+      - paperless_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Paperless port {{ paperless_port }} is not open and listening!"
+    success_msg: "Paperless port {{ paperless_port }} is open and listening."
 

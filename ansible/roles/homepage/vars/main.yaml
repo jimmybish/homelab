@@ -1,2 +1,5 @@
 ---
 homepage_version: "latest"
+
+# External port
+homepage_port: 3000

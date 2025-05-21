@@ -34,6 +34,84 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
+- name: Allow Overseerr port through UFW
+  ufw:
+    rule: allow
+    port: "{{ plex_overseerr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Tautulli port through UFW
+  ufw:
+    rule: allow
+    port: "{{ plex_tautulli_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+# Plex host networking required ports
+- name: Allow Plex main TCP port through UFW
+  ufw:
+    rule: allow
+    port: 32400
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Plex DLNA UDP port through UFW
+  ufw:
+    rule: allow
+    port: 1900
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Plex Bonjour/Avahi UDP port through UFW
+  ufw:
+    rule: allow
+    port: 5353
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Plex discovery UDP port 32410 through UFW
+  ufw:
+    rule: allow
+    port: 32410
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Plex discovery UDP port 32412 through UFW
+  ufw:
+    rule: allow
+    port: 32412
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Plex discovery UDP port 32413 through UFW
+  ufw:
+    rule: allow
+    port: 32413
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Plex discovery UDP port 32414 through UFW
+  ufw:
+    rule: allow
+    port: 32414
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Plex remote control TCP port through UFW
+  ufw:
+    rule: allow
+    port: 8324
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Plex DLNA TCP port through UFW
+  ufw:
+    rule: allow
+    port: 32469
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
 - name: Get fileserver IP
   ansible.builtin.set_fact:
     plex_fileserver_ip: "{{ (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0] }}"
@@ -54,3 +132,41 @@
     project_src: "{{ plex_parent_folder }}"
     state: present
     remove_orphans: true
+
+# Check if required Plex ports are open and listening
+- name: Check if Plex ports are open and listening
+  community.general.listen_ports_facts:
+
+- name: Warn if Plex remote control port 8324 is not listening
+  ansible.builtin.debug:
+    msg: "Warning: Plex remote control port 8324 is not open/listening. This is normal unless a client is connected."
+  when: 8324 not in (ansible_facts.tcp_listen | map(attribute='port') | list)
+
+- name: Warn if Plex DLNA port 32469 is not listening
+  ansible.builtin.debug:
+    msg: "Warning: Plex DLNA port 32469 is not open/listening. This is normal unless DLNA is enabled in Plex settings."
+  when: 32469 not in (ansible_facts.tcp_listen | map(attribute='port') | list)
+
+- name: Warn if Plex DLNA/SSDP port 1900 is not listening
+  ansible.builtin.debug:
+    msg: "Warning: Plex DLNA/SSDP port 1900 is not open/listening. This is normal unless DLNA is enabled in Plex settings."
+  when: 1900 not in (ansible_facts.udp_listen | map(attribute='port') | list)
+
+- name: Warn if Plex mDNS/Bonjour port 5353 is not listening
+  ansible.builtin.debug:
+    msg: "Warning: Plex mDNS/Bonjour port 5353 is not open/listening. This is normal unless mDNS/Bonjour is enabled in Plex or on the host."
+  when: 5353 not in (ansible_facts.udp_listen | map(attribute='port') | list)
+
+- name: Assert Plex ports are listening
+  ansible.builtin.assert:
+    that:
+      - 32400 in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - 32410 in (ansible_facts.udp_listen | map(attribute='port') | list)
+      - 32412 in (ansible_facts.udp_listen | map(attribute='port') | list)
+      - 32413 in (ansible_facts.udp_listen | map(attribute='port') | list)
+      - 32414 in (ansible_facts.udp_listen | map(attribute='port') | list)
+      - plex_overseerr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - plex_tautulli_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "One or more Plex ports are not open and listening!"
+    success_msg: "All Plex ports are open and listening."
+
