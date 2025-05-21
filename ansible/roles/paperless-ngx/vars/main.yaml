@@ -4,3 +4,6 @@ redis_version: "7"
 postgres_version: "16"
 gotenberg_version: "8.7"
 tika_version: "latest"
+
+# External port
+paperless_port: 8000

@@ -1,3 +1,7 @@
 ---
 plex_version: "latest"
 plex_overseerr_version: "latest"
+
+# External ports for each service
+plex_overseerr_port: 5055
+plex_tautulli_port: 8181

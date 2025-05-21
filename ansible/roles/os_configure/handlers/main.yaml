@@ -1,0 +1,10 @@
+# Handler to restart SSH after config changes
+- name: Restart SSH
+  ansible.builtin.service:
+    name: ssh
+    state: restarted
+
+- name: Restart chrony
+  ansible.builtin.service:
+    name: chrony
+    state: restarted

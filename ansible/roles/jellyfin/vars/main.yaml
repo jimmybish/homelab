@@ -1,3 +1,10 @@
 ---
 jellyfin_version: "latest"
 jellyfin_jellyseerr_version: "latest"
+
+# External ports for each service
+jellyfin_port: 8096
+jellyfin_https_port: 8920
+jellyfin_udp_port1: 7359
+jellyfin_udp_port2: 1900
+jellyfin_jellyseerr_port: 5055

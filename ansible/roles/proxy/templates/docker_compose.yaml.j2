@@ -14,8 +14,8 @@ services:
       - DNSPLUGIN=cloudflare
       - ONLY_SUBDOMAINS=true
     ports:
-      - 7443:443
-      - 780:80
+      - {{ proxy_swag_external_https_port }}:443
+      - {{ proxy_swag_external_http_port }}:80
     volumes:
       - {{ proxy_folder }}/external:/config
     restart: unless-stopped
@@ -34,8 +34,8 @@ services:
       - VALIDATION=dns
       - DNSPLUGIN=cloudflare
     ports:
-      - 443:443
-      - 80:80
+      - {{ proxy_swag_internal_https_port }}:443
+      - {{ proxy_swag_internal_http_port }}:80
     volumes:
       - {{ proxy_folder }}/internal:/config
     restart: unless-stopped

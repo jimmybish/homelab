@@ -11,7 +11,7 @@ services:
       - mytv:/tv 
       - {{ arr_suite_downloads_folder }}:/downloads 
     ports:
-      - 8989:8989
+      - {{ arr_suite_sonarr_port }}:8989
     restart: unless-stopped
   radarr:
     image: lscr.io/linuxserver/radarr:{{ arr_suite_version }}
@@ -25,7 +25,7 @@ services:
       - mymovies:/movies 
       - {{ arr_suite_downloads_folder }}:/downloads 
     ports:
-      - 7878:7878
+      - {{ arr_suite_radarr_port }}:7878
     restart: unless-stopped
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:{{ arr_suite_version }}
@@ -37,7 +37,7 @@ services:
     volumes:
       - {{ arr_suite_prowlarr_folder }}:/config
     ports:
-      - 9696:9696
+      - {{ arr_suite_prowlarr_port }}:9696
     restart: unless-stopped
   sabnzbd:
     image: lscr.io/linuxserver/sabnzbd:{{ arr_suite_version }}
@@ -50,7 +50,7 @@ services:
       - {{ arr_suite_sabnzbd_folder }}:/config
       - {{ arr_suite_downloads_folder }}:/downloads 
     ports:
-      - 8080:8080
+      - {{ arr_suite_sabnzbd_port }}:8080
     restart: unless-stopped
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:{{ arr_suite_version }}
@@ -64,9 +64,9 @@ services:
       - {{ arr_suite_qbittorrent_folder }}:/config
       - {{ arr_suite_downloads_folder }}:/downloads
     ports:
-      - 8081:8081
-      - 6881:6881
-      - 6881:6881/udp
+      - {{ arr_suite_qbittorrent_webui_port }}:8081
+      - {{ arr_suite_qbittorrent_peer_port }}:6881
+      - {{ arr_suite_qbittorrent_peer_port }}:6881/udp
     restart: unless-stopped
   lidarr:
     image: lscr.io/linuxserver/lidarr:{{ arr_suite_version }}
@@ -80,7 +80,7 @@ services:
       - mymusic:/music
       - {{ arr_suite_downloads_folder }}:/downloads
     ports:
-      - 8686:8686
+      - {{ arr_suite_lidarr_port }}:8686
     restart: unless-stopped
 
 volumes:

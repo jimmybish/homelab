@@ -1,2 +1,5 @@
 ---
 scrypted_version: "latest"
+
+# Scrypted uses host networking, but if you expose a web UI, set here
+# scrypted_port: 10444

@@ -1,0 +1,134 @@
+---
+# Tasks for initial OS configuration
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+- name: Ensure UFW is installed
+  apt:
+    name: ufw
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Set UFW default incoming policy to deny
+  ufw:
+    direction: incoming
+    policy: deny
+  when: ansible_os_family == "Debian"
+
+- name: Set UFW default outgoing policy to allow
+  ufw:
+    direction: outgoing
+    policy: allow
+  when: ansible_os_family == "Debian"
+
+- name: Allow SSH through UFW
+  ufw:
+    rule: allow
+    name: OpenSSH
+  when: ansible_os_family == "Debian"
+
+- name: Allow Node Exporter port through UFW
+  ufw:
+    rule: allow
+    port: 9100
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+  when: ansible_os_family == "Debian"
+
+- name: Ensure fail2ban is installed
+  apt:
+    name: fail2ban
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Ensure fail2ban is started and enabled
+  service:
+    name: fail2ban
+    state: started
+    enabled: yes
+  when: ansible_os_family == "Debian"
+
+- name: Harden SSH - Disable root login
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^PermitRootLogin'
+    line: 'PermitRootLogin no'
+    state: present
+    create: yes
+  notify: Restart SSH
+  when: ansible_os_family == "Debian"
+
+- name: Harden SSH - Disable password authentication
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^PasswordAuthentication'
+    line: 'PasswordAuthentication no'
+    state: present
+    create: yes
+  notify: Restart SSH
+  when: ansible_os_family == "Debian"
+
+- name: Harden SSH - Allow only key-based authentication
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^ChallengeResponseAuthentication'
+    line: 'ChallengeResponseAuthentication no'
+    state: present
+    create: yes
+  notify: Restart SSH
+  when: ansible_os_family == "Debian"
+
+- name: Set timezone
+  ansible.builtin.timezone:
+    name: "{{ timezone }}"
+  when: ansible_os_family == "Debian"
+
+- name: Configure locale
+  ansible.builtin.locale_gen:
+    name: "{{ locale_lang }}"
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Set system locale
+  lineinfile:
+    path: /etc/default/locale
+    regexp: '^LANG='
+    line: "LANG={{ locale_lang }}"
+    create: yes
+  when: ansible_os_family == "Debian"
+
+- name: Remove ntp if present
+  apt:
+    name: ntp
+    state: absent
+    purge: yes
+  when: ansible_os_family == "Debian"
+
+- name: Ensure chrony is installed
+  apt:
+    name: chrony
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Deploy chrony configuration
+  template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart chrony
+  when: ansible_os_family == "Debian"
+
+- name: Ensure chrony is started and enabled
+  service:
+    name: chrony
+    state: started
+    enabled: yes

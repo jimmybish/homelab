@@ -7,7 +7,7 @@ services:
         - PGID={{ docker_user_pgid }}
         - HOMEPAGE_ALLOWED_HOSTS=homepage.{{ internal_domain }}
       ports:
-        - 3000:3000
+        - {{ homepage_port }}:3000
       volumes:
         - {{ homepage_folder }}/config:/app/config
         - /var/run/docker.sock:/var/run/docker.sock:ro

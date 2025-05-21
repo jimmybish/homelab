@@ -1,3 +1,9 @@
 ---
 # Docker Compose vars
 proxy_swag_version: "latest"
+
+# External ports
+proxy_swag_external_https_port: 7443
+proxy_swag_external_http_port: 780
+proxy_swag_internal_https_port: 443
+proxy_swag_internal_http_port: 80

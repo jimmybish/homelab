@@ -26,6 +26,41 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
+- name: Allow Jellyfin HTTP port through UFW
+  ufw:
+    rule: allow
+    port: "{{ jellyfin_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Jellyfin HTTPS port through UFW
+  ufw:
+    rule: allow
+    port: "{{ jellyfin_https_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Jellyfin UDP port 1 through UFW
+  ufw:
+    rule: allow
+    port: "{{ jellyfin_udp_port1 }}"
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Jellyfin UDP port 2 through UFW
+  ufw:
+    rule: allow
+    port: "{{ jellyfin_udp_port2 }}"
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Jellyseerr port through UFW
+  ufw:
+    rule: allow
+    port: "{{ jellyfin_jellyseerr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
 - name: Get fileserver hostname
   ansible.builtin.set_fact:
     jellyfin_fileserver_ip: "{{ (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0] }}"
@@ -46,3 +81,18 @@
     project_src: "{{ jellyfin_folder }}"
     state: present
     remove_orphans: true
+
+# Check if Jellyfin ports are open and listening
+- name: Check if Jellyfin ports are open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Jellyfin ports are listening
+  ansible.builtin.assert:
+    that:
+      - jellyfin_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - jellyfin_https_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - jellyfin_udp_port1 | int in (ansible_facts.udp_listen | map(attribute='port') | list)
+      - jellyfin_udp_port2 | int in (ansible_facts.udp_listen | map(attribute='port') | list)
+      - jellyfin_jellyseerr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "One or more Jellyfin ports are not open and listening!"
+    success_msg: "All Jellyfin ports are open and listening."

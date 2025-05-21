@@ -18,6 +18,34 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
+- name: Allow Swag external HTTPS port through UFW
+  ufw:
+    rule: allow
+    port: "{{ proxy_swag_external_https_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Swag external HTTP port through UFW
+  ufw:
+    rule: allow
+    port: "{{ proxy_swag_external_http_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Swag internal HTTPS port through UFW
+  ufw:
+    rule: allow
+    port: "{{ proxy_swag_internal_https_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Swag internal HTTP port through UFW
+  ufw:
+    rule: allow
+    port: "{{ proxy_swag_internal_http_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
 # OMG, this one took me a long time to get right.
 # Lots of documentation reading and a few cans of lager later (ok, the cans may have slowed me down), and we have IPs for the first host in each group!
 # BUT!! We also need to make it bombproof, so if the first host returned by dig is the loopback, we'll just use DNS with the hostname
@@ -120,3 +148,17 @@
     project_src: "{{ proxy_folder }}"
     state: present
     remove_orphans: true
+
+# Check if Proxy ports are open and listening
+- name: Check if Proxy ports are open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Proxy ports are listening
+  ansible.builtin.assert:
+    that:
+      - proxy_swag_external_https_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - proxy_swag_external_http_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - proxy_swag_internal_https_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - proxy_swag_internal_http_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "One or more Proxy ports are not open and listening!"
+    success_msg: "All Proxy ports are open and listening."

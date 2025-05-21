@@ -50,6 +50,62 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
+- name: Allow Sonarr port through UFW
+  ufw:
+    rule: allow
+    port: "{{ arr_suite_sonarr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Radarr port through UFW
+  ufw:
+    rule: allow
+    port: "{{ arr_suite_radarr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Prowlarr port through UFW
+  ufw:
+    rule: allow
+    port: "{{ arr_suite_prowlarr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow SABnzbd port through UFW
+  ufw:
+    rule: allow
+    port: "{{ arr_suite_sabnzbd_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow qBittorrent WebUI port through UFW
+  ufw:
+    rule: allow
+    port: "{{ arr_suite_qbittorrent_webui_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow qBittorrent peer port through UFW (TCP)
+  ufw:
+    rule: allow
+    port: "{{ arr_suite_qbittorrent_peer_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow qBittorrent peer port through UFW (UDP)
+  ufw:
+    rule: allow
+    port: "{{ arr_suite_qbittorrent_peer_port }}"
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Lidarr port through UFW
+  ufw:
+    rule: allow
+    port: "{{ arr_suite_lidarr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
 - name: Setup qBittorrent directory
   ansible.builtin.file:
     path: "{{ arr_suite_qbittorrent_folder }}"
@@ -78,3 +134,21 @@
     project_src: "{{ arr_suite_parent_folder }}"
     state: present
     remove_orphans: true
+
+# Check if *Arr suite ports are open and listening
+- name: Check if *Arr suite ports are open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert *Arr suite ports are listening
+  ansible.builtin.assert:
+    that:
+      - arr_suite_sonarr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - arr_suite_radarr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - arr_suite_prowlarr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - arr_suite_sabnzbd_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - arr_suite_qbittorrent_webui_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - arr_suite_qbittorrent_peer_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - arr_suite_qbittorrent_peer_port | int in (ansible_facts.udp_listen | map(attribute='port') | list)
+      - arr_suite_lidarr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "One or more *Arr suite ports are not open and listening!"
+    success_msg: "All *Arr suite ports are open and listening."
