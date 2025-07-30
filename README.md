@@ -45,6 +45,67 @@ This will deploy:
 
 ![image](images/Network-rack.jpg)
 
+### Architecture Overview
+
+```mermaid
+graph TD
+    Internet((Internet))
+    
+    Internet --> Router[pfSense Router<br/>Intel Celeron J4125]
+    Router --> Switch[TP-Link Omada Switch<br/>24 Port PoE]
+    
+    Switch --> Controller[TP-Link Controller]
+    Switch --> APs[WiFi APs]
+    
+    Switch --> ProxmoxCluster
+    Switch --> NAS
+    Switch --> Printer[Sovol SV08<br/>3D Printer]
+    
+    subgraph ProxmoxCluster["Proxmox HA Cluster (2x Intel NUC 12 Pro)"]
+        direction TB
+        
+        subgraph VMs["Virtual Machines & LXC Containers"]
+            direction TB
+            
+            subgraph Row1["Infrastructure Services"]
+                Proxy[proxy<br/>SWAG Proxies]
+                Mgmt[mgmt<br/>Monitoring]
+            end
+            
+            subgraph Row2["Docker Hosts"]
+                Docker1[docker-1<br/>Paperless]
+                Docker2[docker-2<br/>Homepage]
+            end
+            
+            subgraph Row3["Media Services"]
+                PlexLXC[plex-lxc<br/>Plex + Overseerr + Tautulli]
+                JellyfinLXC[jellyfin-lxc<br/>Jellyfin + Jellyseerr]
+            end
+            
+            subgraph Row4["Enterprise & HA"]
+                GHES[GitHub Enterprise]
+                GHES_HA[GitHub Enterprise HA]
+                HomeAssistant[Home Assistant OS]
+            end
+        end
+    end
+    
+    subgraph NAS["QNAP TS-664 NAS (6x8TB + 4x4TB RAID5)"]
+        direction TB
+        Storage[Storage Arrays]
+        DebianDownloader[debian-downloader<br/>*Only VM not on NUCs<br/><br/>• Sonarr/Radarr/Lidarr<br/>• Prowlarr<br/>• SABnzbd/qBittorrent]
+        
+        Storage --- DebianDownloader
+    end
+    
+    style Internet fill:#e1f5fe
+    style Router fill:#fff3e0
+    style ProxmoxCluster fill:#f3e5f5
+    style NAS fill:#e8f5e8
+    style DebianDownloader fill:#fff8e1
+    style Proxy fill:#ffebee
+    style Mgmt fill:#f1f8e9
+```
 
 ### Software
 Services are Docker Compose files, wherever possible. These are hosted on a combination of VMs and LXC containers on the Proxmox host, with a couple of containers that are heavier on storage I/O, or use the Coral TPU, running on the QNAP NAS.
