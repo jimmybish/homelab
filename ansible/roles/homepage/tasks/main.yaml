@@ -27,7 +27,7 @@
     group: "{{ docker_user }}"
 
 - name: Allow Homepage port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ homepage_port }}"
     proto: tcp
