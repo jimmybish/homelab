@@ -1,0 +1,6 @@
+---
+- name: Install NGINX Proxy
+  hosts: proxy_host
+  become: true
+  roles:
+    - proxy

@@ -1,0 +1,6 @@
+---
+- name: Install Scrypted
+  hosts: scrypted_host
+  become: true
+  roles:
+    - scrypted
