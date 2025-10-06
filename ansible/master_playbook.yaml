@@ -11,38 +11,32 @@
   become: true
   roles:
 
+- name: Deploy Proxy
+  ansible.builtin.import_playbook: deploy_proxy.yaml
+
 - name: Deploy Homepage
   ansible.builtin.import_playbook: deploy_homepage.yaml
 
-- name: Install the *arr suite
-  hosts: sonarr_host
-  become: true
-  roles:
-    - arr_suite
+- name: Deploy Arr Suite
+  ansible.builtin.import_playbook: deploy_arr.yaml
 
-- name: Install Plex, Overseerr, and Tautulli
-  hosts: plex_host
-  become: true
-  roles:
-    - plex
+- name: Deploy Plex
+  ansible.builtin.import_playbook: deploy_plex.yaml
 
-- name: Install Jellyfin and Jellyseerr
-  hosts: jellyfin_host
-  become: true
-  roles:
-    - jellyfin
+- name: Deploy Jellyfin
+  ansible.builtin.import_playbook: deploy_jellyfin.yaml
 
-- name: Install Grafana
-  hosts: grafana_host
-  become: true
-  roles:
-    - grafana
+- name: Deploy Grafana
+  ansible.builtin.import_playbook: deploy_grafana.yaml
 
-- name: Install NGINX
-  hosts: proxy_host
-  become: true
-  roles:
-    - proxy
+- name: Deploy n8n
+  ansible.builtin.import_playbook: deploy_n8n.yaml
+
+- name: Deploy Paperless
+  ansible.builtin.import_playbook: deploy_paperless.yaml
+
+- name: Deploy Scrypted
+  ansible.builtin.import_playbook: deploy_scrypted.yaml
 
 - name: Install Prometheus Node Exporter
   hosts: ubuntu
