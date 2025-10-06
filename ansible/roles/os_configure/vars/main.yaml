@@ -1,4 +1,3 @@
 ---
 # Variables for OS configuration role
-ntp_server: "192.168.0.1"
-locale_lang: "en_US.UTF-8"
+# Note: ntp_server and locale_lang are now defined in group_vars/all/vars.yaml

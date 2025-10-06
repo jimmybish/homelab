@@ -35,14 +35,14 @@
     group: "{{ docker_user }}"
 
 - name: Allow Overseerr port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ plex_overseerr_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow Tautulli port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ plex_tautulli_port }}"
     proto: tcp
@@ -50,63 +50,63 @@
 
 # Plex host networking required ports
 - name: Allow Plex main TCP port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: 32400
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow Plex DLNA UDP port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: 1900
     proto: udp
   when: ansible_os_family == "Debian"
 
 - name: Allow Plex Bonjour/Avahi UDP port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: 5353
     proto: udp
   when: ansible_os_family == "Debian"
 
 - name: Allow Plex discovery UDP port 32410 through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: 32410
     proto: udp
   when: ansible_os_family == "Debian"
 
 - name: Allow Plex discovery UDP port 32412 through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: 32412
     proto: udp
   when: ansible_os_family == "Debian"
 
 - name: Allow Plex discovery UDP port 32413 through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: 32413
     proto: udp
   when: ansible_os_family == "Debian"
 
 - name: Allow Plex discovery UDP port 32414 through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: 32414
     proto: udp
   when: ansible_os_family == "Debian"
 
 - name: Allow Plex remote control TCP port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: 8324
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow Plex DLNA TCP port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: 32469
     proto: tcp
@@ -161,12 +161,11 @@
   ansible.builtin.assert:
     that:
       - 32400 in (ansible_facts.tcp_listen | map(attribute='port') | list)
-        #- 32410 in (ansible_facts.udp_listen | map(attribute='port') | list)
-        #- 32412 in (ansible_facts.udp_listen | map(attribute='port') | list)
-        #- 32413 in (ansible_facts.udp_listen | map(attribute='port') | list)
-        #- 32414 in (ansible_facts.udp_listen | map(attribute='port') | list)
+        # - 32410 in (ansible_facts.udp_listen | map(attribute='port') | list)
+        # - 32412 in (ansible_facts.udp_listen | map(attribute='port') | list)
+        # - 32413 in (ansible_facts.udp_listen | map(attribute='port') | list)
+        # - 32414 in (ansible_facts.udp_listen | map(attribute='port') | list)
       - plex_overseerr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
       - plex_tautulli_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "One or more Plex ports are not open and listening!"
     success_msg: "All Plex ports are open and listening."
-

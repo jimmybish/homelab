@@ -52,7 +52,7 @@
 
 # Scrypted web UI (host networking, optional)
 - name: Allow Scrypted web UI port through UFW (if set)
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ scrypted_port | default(omit) }}"
     proto: tcp

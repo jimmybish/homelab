@@ -27,7 +27,7 @@
     group: "{{ docker_user }}"
 
 - name: Allow Paperless port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ paperless_port }}"
     proto: tcp
@@ -60,4 +60,3 @@
       - paperless_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "Paperless port {{ paperless_port }} is not open and listening!"
     success_msg: "Paperless port {{ paperless_port }} is open and listening."
-
