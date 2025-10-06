@@ -84,46 +84,28 @@
         msg: "n8n proxy config deployed to {{ groups['proxy_host'][0] }} routing {{ n8n_proxy_ip }}:{{ n8n_port }} -> https://n8n.{{ internal_domain }}"
 
 # Homepage Configuration (Optional)
-- name: Configure homepage bookmark for n8n
+- name: Configure homepage service for n8n
   when: n8n_configure_homepage | default(true)
   block:
-    - name: Check if homepage bookmarks file exists
-      ansible.builtin.stat:
-        path: "{{ homepage_folder }}/config/bookmarks.yaml"
-      delegate_to: "{{ groups['homepage_host'][0] }}"
-      register: homepage_bookmarks_stat
-
-    - name: Read existing homepage bookmarks
+    - name: Check if n8n service already exists in services.yaml
       ansible.builtin.slurp:
-        src: "{{ homepage_folder }}/config/bookmarks.yaml"
+        src: "{{ homepage_folder }}/config/services.yaml"
       delegate_to: "{{ groups['homepage_host'][0] }}"
-      register: homepage_bookmarks_content
-      when: homepage_bookmarks_stat.stat.exists
+      register: homepage_services_content
 
-    - name: Check if n8n bookmark already exists
-      ansible.builtin.set_fact:
-        n8n_bookmark_exists: "{{ (homepage_bookmarks_content.content | b64decode | regex_search('n8n:')) is not none }}"
-      when: homepage_bookmarks_stat.stat.exists
-
-    - name: Append n8n bookmark to homepage
+    - name: Add n8n service to Homepage Smart Home section
       ansible.builtin.blockinfile:
-        path: "{{ homepage_folder }}/config/bookmarks.yaml"
-        marker: "# {mark} n8n ANSIBLE MANAGED BLOCK"
-        block: |2
-          - Automation:
-              - n8n:
-                  - abbr: N8N
-                    href: {{ internal_n8n_url }}
+        path: "{{ homepage_folder }}/config/services.yaml"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - n8n service"
+        block: "{{ lookup('template', 'homepage_service.yaml.j2') }}"
+        insertafter: "^- Smart Home:"
         owner: "{{ docker_user }}"
         group: "{{ docker_user }}"
         mode: '0644'
       delegate_to: "{{ groups['homepage_host'][0] }}"
-      when:
-        - homepage_bookmarks_stat.stat.exists
-        - not (n8n_bookmark_exists | default(false))
+      when: "'ANSIBLE MANAGED BLOCK - n8n service' not in (homepage_services_content['content'] | b64decode)"
       notify: Restart Homepage
 
     - name: Debug homepage configuration
       ansible.builtin.debug:
-        msg: "n8n bookmark configured on {{ groups['homepage_host'][0] }} at {{ homepage_folder }}/config/bookmarks.yaml"
-      when: homepage_bookmarks_stat.stat.exists
+        msg: "n8n service configured on {{ groups['homepage_host'][0] }} in Smart Home section"

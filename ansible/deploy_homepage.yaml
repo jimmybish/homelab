@@ -1,0 +1,6 @@
+---
+- name: Install Homepage
+  hosts: homepage_host
+  become: true
+  roles:
+    - homepage

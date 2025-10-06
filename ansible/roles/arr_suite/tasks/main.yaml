@@ -51,56 +51,56 @@
     group: "{{ docker_user }}"
 
 - name: Allow Sonarr port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ arr_suite_sonarr_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow Radarr port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ arr_suite_radarr_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow Prowlarr port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ arr_suite_prowlarr_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow SABnzbd port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ arr_suite_sabnzbd_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow qBittorrent WebUI port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ arr_suite_qbittorrent_webui_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow qBittorrent peer port through UFW (TCP)
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ arr_suite_qbittorrent_peer_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow qBittorrent peer port through UFW (UDP)
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ arr_suite_qbittorrent_peer_port }}"
     proto: udp
   when: ansible_os_family == "Debian"
 
 - name: Allow Lidarr port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ arr_suite_lidarr_port }}"
     proto: tcp
@@ -152,3 +152,70 @@
       - arr_suite_lidarr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "One or more *Arr suite ports are not open and listening!"
     success_msg: "All *Arr suite ports are open and listening."
+
+# Configure SWAG Internal Proxy
+- name: Resolve arr_suite host IP for proxy configuration
+  ansible.builtin.set_fact:
+    arr_suite_proxy_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+  when: arr_suite_configure_proxy | default(true)
+
+- name: Deploy Sonarr nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: sonarr.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/sonarr.subdomain.conf"
+    mode: '0644'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag
+  when: arr_suite_configure_proxy | default(true)
+
+- name: Deploy Radarr nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: radarr.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/radarr.subdomain.conf"
+    mode: '0644'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag
+  when: arr_suite_configure_proxy | default(true)
+
+- name: Deploy Prowlarr nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: prowlarr.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/prowlarr.subdomain.conf"
+    mode: '0644'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag
+  when: arr_suite_configure_proxy | default(true)
+
+- name: Deploy Lidarr nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: lidarr.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/lidarr.subdomain.conf"
+    mode: '0644'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag
+  when: arr_suite_configure_proxy | default(true)
+
+# Configure Homepage Services
+- name: Check if arr_suite services already exist in services.yaml
+  ansible.builtin.slurp:
+    src: "{{ homepage_folder }}/config/services.yaml"
+  register: homepage_services_content
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+  when: arr_suite_configure_homepage | default(true)
+
+- name: Add arr_suite services to Homepage
+  ansible.builtin.blockinfile:
+    path: "{{ homepage_folder }}/config/services.yaml"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - arr_suite services"
+    block: "{{ lookup('template', 'homepage_services.yaml.j2') }}"
+    insertafter: EOF
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+  notify:
+    - Restart Homepage
+  when:
+    - arr_suite_configure_homepage | default(true)
+    - "'ANSIBLE MANAGED BLOCK - arr_suite services' not in (homepage_services_content['content'] | b64decode)"

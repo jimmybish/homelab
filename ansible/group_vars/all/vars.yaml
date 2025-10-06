@@ -80,6 +80,8 @@ internal_plex_url: "http://plex-lxc.{{ internal_domain }}:32400"
 internal_portainer_url: "https://portainer.{{ internal_domain }}"
 internal_radarr_url: "https://radarr.{{ internal_domain }}"
 internal_sonarr_url: "https://sonarr.{{ internal_domain }}"
+internal_prowlarr_url: "https://prowlarr.{{ internal_domain }}"
+internal_lidarr_url: "https://lidarr.{{ internal_domain }}"
 internal_sovol_url: "http://{{ (lookup('ansible.builtin.inventory_hostnames', 'sovol_sv08').split(','))[0] }}/"
 internal_tautulli_url: "https://tautulli.{{ internal_domain }}"
 

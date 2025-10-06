@@ -1,22 +1,22 @@
 ## Version 2024/07/16
-# make sure that your sonarr container is named sonarr
-# make sure that your dns has a cname set for sonarr
+# make sure that your radarr container is named radarr
+# make sure that your dns has a cname set for radarr
 
 # redirect to FQDN
 server {
     listen 443;
-    server_name sonarr;
+    server_name radarr;
 
     include /config/nginx/ssl.conf;
 
-    return 301 https://sonarr.{{ internal_domain }}$request_uri;
+    return 301 https://radarr.{{ internal_domain }}$request_uri;
 }
 
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
 
-    server_name sonarr.{{ internal_domain }};
+    server_name radarr.{{ internal_domain }};
 
     include /config/nginx/ssl.conf;
 
@@ -47,18 +47,18 @@ server {
 
         include /config/nginx/proxy.conf;
         include /config/nginx/resolver.conf;
-        set $upstream_app {{ proxy_sonarr_ip}};
-        set $upstream_port 8989;
+        set $upstream_app {{ arr_suite_proxy_ip }};
+        set $upstream_port 7878;
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
 
     }
 
-    location ~ (/sonarr)?/api {
+    location ~ (/radarr)?/api {
         include /config/nginx/proxy.conf;
         include /config/nginx/resolver.conf;
-        set $upstream_app {{ proxy_sonarr_ip}};
-        set $upstream_port 8989;
+        set $upstream_app {{ arr_suite_proxy_ip }};
+        set $upstream_port 7878;
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
 
