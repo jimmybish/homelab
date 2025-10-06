@@ -120,45 +120,7 @@
   notify:
     - Start Swag
 
-- name: Deploy Sonarr config
-  ansible.builtin.template:
-    src: "templates/internal/sonarr.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/sonarr.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
-
-- name: Deploy Radarr config
-  ansible.builtin.template:
-    src: "templates/internal/radarr.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/radarr.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
-
-- name: Deploy Lidarr config
-  ansible.builtin.template:
-    src: "templates/internal/lidarr.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/lidarr.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
-
-- name: Deploy Prowlarr config
-  ansible.builtin.template:
-    src: "templates/internal/prowlarr.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/prowlarr.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
+# Sonarr, Radarr, Prowlarr, and Lidarr configs are now managed by the arr_suite role
 
 - name: Deploy Grafana config
   ansible.builtin.template:

@@ -11,11 +11,8 @@
   become: true
   roles:
 
-- name: Install Homepage
-  hosts: homepage_host
-  become: true
-  roles:
-    - homepage
+- name: Deploy Homepage
+  ansible.builtin.import_playbook: deploy_homepage.yaml
 
 - name: Install the *arr suite
   hosts: sonarr_host

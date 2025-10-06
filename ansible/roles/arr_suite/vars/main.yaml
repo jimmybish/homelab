@@ -9,3 +9,7 @@ arr_suite_sabnzbd_port: 8080
 arr_suite_qbittorrent_webui_port: 8081
 arr_suite_qbittorrent_peer_port: 6881
 arr_suite_lidarr_port: 8686
+
+# Feature flags
+arr_suite_configure_proxy: true
+arr_suite_configure_homepage: true
