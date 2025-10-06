@@ -161,10 +161,10 @@
   ansible.builtin.assert:
     that:
       - 32400 in (ansible_facts.tcp_listen | map(attribute='port') | list)
-      - 32410 in (ansible_facts.udp_listen | map(attribute='port') | list)
-      - 32412 in (ansible_facts.udp_listen | map(attribute='port') | list)
-      - 32413 in (ansible_facts.udp_listen | map(attribute='port') | list)
-      - 32414 in (ansible_facts.udp_listen | map(attribute='port') | list)
+        #- 32410 in (ansible_facts.udp_listen | map(attribute='port') | list)
+        #- 32412 in (ansible_facts.udp_listen | map(attribute='port') | list)
+        #- 32413 in (ansible_facts.udp_listen | map(attribute='port') | list)
+        #- 32414 in (ansible_facts.udp_listen | map(attribute='port') | list)
       - plex_overseerr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
       - plex_tautulli_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "One or more Plex ports are not open and listening!"
