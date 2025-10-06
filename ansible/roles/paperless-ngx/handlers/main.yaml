@@ -4,3 +4,15 @@
     project_src: "{{ paperless_folder }}"
     state: restarted
     remove_orphans: true
+
+- name: Restart Swag
+  community.docker.docker_compose_v2:
+    project_src: "{{ proxy_folder }}"
+    state: restarted
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+
+- name: Restart Homepage
+  community.docker.docker_compose_v2:
+    project_src: "{{ homepage_folder }}"
+    state: restarted
+  delegate_to: "{{ groups['homepage_host'][0] }}"
