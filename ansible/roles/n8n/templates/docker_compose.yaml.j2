@@ -1,0 +1,24 @@
+services:
+  n8n:
+    image: docker.io/n8nio/n8n:{{ n8n_version }}
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "{{ n8n_port }}:5678"
+    environment:
+      - N8N_HOST={{ internal_n8n_url }}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - NODE_ENV=production
+      - WEBHOOK_URL={{ internal_n8n_url }}
+      - GENERIC_TIMEZONE={{ timezone }}
+      - DB_SQLITE_POOL_SIZE=3
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_GIT_NODE_DISABLE_BARE_REPOS=true
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - {{ n8n_folder }}/local-files:/files
+
+volumes:
+  n8n_data:

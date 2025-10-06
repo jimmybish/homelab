@@ -110,6 +110,11 @@ paperless_host:
   hosts:
     docker-1:
 
+# n8n
+n8n_host:
+  hosts:
+    docker-2:
+
 # Klipper 3d printer
 sovol_sv08:
   hosts:
