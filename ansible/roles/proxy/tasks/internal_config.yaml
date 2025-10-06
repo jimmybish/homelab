@@ -119,15 +119,3 @@
     group: "{{ docker_user }}"
   notify:
     - Start Swag
-
-# Sonarr, Radarr, Prowlarr, and Lidarr configs are now managed by the arr_suite role
-
-- name: Deploy Grafana config
-  ansible.builtin.template:
-    src: "templates/internal/grafana.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/grafana.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag

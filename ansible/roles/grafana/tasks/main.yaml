@@ -110,3 +110,41 @@
       - grafana_prometheus_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "One or more Grafana stack ports are not open and listening!"
     success_msg: "All Grafana stack ports are open and listening."
+
+# Configure SWAG Internal Proxy
+- name: Resolve grafana host IP for proxy configuration
+  ansible.builtin.set_fact:
+    grafana_proxy_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+  when: grafana_configure_proxy | default(true)
+
+- name: Deploy Grafana nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: grafana.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/grafana.subdomain.conf"
+    mode: '0644'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag
+  when: grafana_configure_proxy | default(true)
+
+# Configure Homepage Services
+- name: Check if grafana service already exists in services.yaml
+  ansible.builtin.slurp:
+    src: "{{ homepage_folder }}/config/services.yaml"
+  register: homepage_services_content
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+  when: grafana_configure_homepage | default(true)
+
+- name: Add grafana service to Homepage Infra section
+  ansible.builtin.blockinfile:
+    path: "{{ homepage_folder }}/config/services.yaml"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - grafana service"
+    block: "{{ lookup('template', 'homepage_service.yaml.j2') }}"
+    insertafter: "^- Infra:"
+    mode: '0644'
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+  notify:
+    - Restart Homepage
+  when:
+    - grafana_configure_homepage | default(true)
+    - "'ANSIBLE MANAGED BLOCK - grafana service' not in (homepage_services_content['content'] | b64decode)"
