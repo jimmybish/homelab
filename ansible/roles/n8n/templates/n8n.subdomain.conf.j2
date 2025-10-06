@@ -1,0 +1,27 @@
+## n8n workflow automation configuration
+# make sure that your n8n container is named n8n
+# make sure that your dns has a cname set for n8n
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+
+    server_name n8n.{{ internal_domain }};
+
+    include /config/nginx/ssl.conf;
+
+    client_max_body_size 0;
+
+    location / {
+        include /config/nginx/proxy.conf;
+        include /config/nginx/resolver.conf;
+        set $upstream_app {{ n8n_proxy_ip }};
+        set $upstream_port {{ n8n_port }};
+        set $upstream_proto http;
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+        
+        # WebSocket support for n8n
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}

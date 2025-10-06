@@ -1,0 +1,129 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup n8n directory
+  ansible.builtin.file:
+    path: "{{ n8n_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup n8n local-files directory
+  ansible.builtin.file:
+    path: "{{ n8n_folder }}/local-files"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Allow n8n port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ n8n_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Deploy n8n using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ n8n_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start n8n
+
+- name: Run n8n docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ n8n_folder }}"
+    state: present
+    remove_orphans: true
+
+# Check if n8n port is open and listening
+- name: Check if n8n port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert n8n port is listening
+  ansible.builtin.assert:
+    that:
+      - n8n_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "n8n port {{ n8n_port }} is not open and listening!"
+    success_msg: "n8n port {{ n8n_port }} is open and listening."
+
+# Proxy Configuration (Optional)
+- name: Configure nginx proxy for n8n
+  when: n8n_configure_proxy | default(true)
+  block:
+    - name: Get n8n host IP for proxy
+      ansible.builtin.set_fact:
+        n8n_proxy_ip: "{{ ansible_default_ipv4.address }}"
+
+    - name: Deploy n8n nginx proxy config
+      ansible.builtin.template:
+        src: "templates/n8n.subdomain.conf.j2"
+        dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/n8n.subdomain.conf"
+        mode: '0644'
+        owner: "{{ docker_user }}"
+        group: "{{ docker_user }}"
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      notify: Restart Swag on proxy
+
+    - name: Debug proxy configuration
+      ansible.builtin.debug:
+        msg: "n8n proxy config deployed to {{ groups['proxy_host'][0] }} routing {{ n8n_proxy_ip }}:{{ n8n_port }} -> https://n8n.{{ internal_domain }}"
+
+# Homepage Configuration (Optional)
+- name: Configure homepage bookmark for n8n
+  when: n8n_configure_homepage | default(true)
+  block:
+    - name: Check if homepage bookmarks file exists
+      ansible.builtin.stat:
+        path: "{{ homepage_folder }}/config/bookmarks.yaml"
+      delegate_to: "{{ groups['homepage_host'][0] }}"
+      register: homepage_bookmarks_stat
+
+    - name: Read existing homepage bookmarks
+      ansible.builtin.slurp:
+        src: "{{ homepage_folder }}/config/bookmarks.yaml"
+      delegate_to: "{{ groups['homepage_host'][0] }}"
+      register: homepage_bookmarks_content
+      when: homepage_bookmarks_stat.stat.exists
+
+    - name: Check if n8n bookmark already exists
+      ansible.builtin.set_fact:
+        n8n_bookmark_exists: "{{ (homepage_bookmarks_content.content | b64decode | regex_search('n8n:')) is not none }}"
+      when: homepage_bookmarks_stat.stat.exists
+
+    - name: Append n8n bookmark to homepage
+      ansible.builtin.blockinfile:
+        path: "{{ homepage_folder }}/config/bookmarks.yaml"
+        marker: "# {mark} n8n ANSIBLE MANAGED BLOCK"
+        block: |2
+          - Automation:
+              - n8n:
+                  - abbr: N8N
+                    href: {{ internal_n8n_url }}
+        owner: "{{ docker_user }}"
+        group: "{{ docker_user }}"
+        mode: '0644'
+      delegate_to: "{{ groups['homepage_host'][0] }}"
+      when:
+        - homepage_bookmarks_stat.stat.exists
+        - not (n8n_bookmark_exists | default(false))
+      notify: Restart Homepage
+
+    - name: Debug homepage configuration
+      ansible.builtin.debug:
+        msg: "n8n bookmark configured on {{ groups['homepage_host'][0] }} at {{ homepage_folder }}/config/bookmarks.yaml"
+      when: homepage_bookmarks_stat.stat.exists

@@ -1,0 +1,11 @@
+---
+n8n_version: "latest"
+
+# External port
+n8n_port: 5678
+
+# Proxy configuration (set to false to skip proxy config deployment)
+# n8n_configure_proxy: true
+
+# Homepage configuration (set to false to skip homepage bookmark)
+# n8n_configure_homepage: true
