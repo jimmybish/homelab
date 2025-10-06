@@ -19,28 +19,28 @@
     group: "{{ docker_user }}"
 
 - name: Allow Swag external HTTPS port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ proxy_swag_external_https_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow Swag external HTTP port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ proxy_swag_external_http_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow Swag internal HTTPS port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ proxy_swag_internal_https_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow Swag internal HTTP port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ proxy_swag_internal_http_port }}"
     proto: tcp
