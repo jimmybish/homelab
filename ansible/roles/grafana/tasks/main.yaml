@@ -35,21 +35,21 @@
     group: "{{ docker_user }}"
 
 - name: Allow Grafana port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ grafana_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow Loki port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ grafana_loki_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Allow Prometheus port through UFW
-  ufw:
+  community.general.ufw:
     rule: allow
     port: "{{ grafana_prometheus_port }}"
     proto: tcp
