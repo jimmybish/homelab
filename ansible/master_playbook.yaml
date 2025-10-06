@@ -6,11 +6,6 @@
     - os_configure
     - docker
 
-- name: Install Docker
-  hosts: ubuntu
-  become: true
-  roles:
-
 - name: Deploy Proxy
   ansible.builtin.import_playbook: deploy_proxy.yaml
 
