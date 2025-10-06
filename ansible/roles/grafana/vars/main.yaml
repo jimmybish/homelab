@@ -11,3 +11,7 @@ grafana_prometheus_version: "v2.51.2"
 grafana_port: 3000
 grafana_loki_port: 3100
 grafana_prometheus_port: 9090
+
+# Feature flags
+grafana_configure_homepage: true
+grafana_configure_proxy: true

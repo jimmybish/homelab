@@ -47,8 +47,8 @@ server {
 
         include /config/nginx/proxy.conf;
         include /config/nginx/resolver.conf;
-        set $upstream_app {{ proxy_grafana_ip }};
-        set $upstream_port 3000;
+        set $upstream_app {{ grafana_proxy_ip }};
+        set $upstream_port {{ grafana_port }};
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
 
@@ -60,8 +60,8 @@ server {
     location ~ (/grafana)?/api {
         include /config/nginx/proxy.conf;
         include /config/nginx/resolver.conf;
-        set $upstream_app {{ proxy_grafana_ip }};
-        set $upstream_port 3000;
+        set $upstream_app {{ grafana_proxy_ip }};
+        set $upstream_port {{ grafana_port }};
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
 
