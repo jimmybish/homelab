@@ -50,15 +50,7 @@
   notify:
     - Start Swag
 
-- name: Deploy Homepage config
-  ansible.builtin.template:
-    src: "templates/internal/homepage.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/homepage.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
+# Homepage config is now managed by the homepage role
 
 - name: Deploy Jellyfin config
   ansible.builtin.template:

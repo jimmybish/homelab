@@ -4,9 +4,3 @@
   become: true
   roles:
     - grafana
-
-- name: Install NGINX
-  hosts: proxy_host
-  become: true
-  roles:
-    - proxy

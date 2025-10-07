@@ -4,3 +4,9 @@
     project_src: /etc/docker-storage/homepage
     state: restarted
     remove_orphans: false
+
+- name: Restart Swag
+  community.docker.docker_compose_v2:
+    project_src: "{{ proxy_folder }}"
+    state: restarted
+  delegate_to: "{{ groups['proxy_host'][0] }}"
