@@ -12,6 +12,8 @@ services:
     volumes:
      - {{ grafana_parent_folder }}:/var/lib/grafana
      - {{ grafana_parent_folder }}/provisioning:/etc/grafana/provisioning
+    networks:
+      - grafana_net
     depends_on:
       - loki
       - prometheus
@@ -26,6 +28,8 @@ services:
     - '{{ grafana_loki_port }}:3100'
     volumes:
       - {{ loki_data_folder }}:/loki
+    networks:
+      - grafana_net
 
   prometheus:
     image: prom/prometheus:{{ grafana_prometheus_version }}
@@ -37,3 +41,9 @@ services:
     volumes:
       - {{ prometheus_data_folder }}:/prometheus
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - grafana_net
+
+networks:
+  grafana_net:
+    driver: bridge
