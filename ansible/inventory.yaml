@@ -17,6 +17,11 @@ pfsense:
   hosts:
     router:
 
+# pfSense host for API operations
+pfsense_host:
+  hosts:
+    router:
+
 # TP-Link Omada Controller
 omada_controller:
   hosts:
