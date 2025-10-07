@@ -10,9 +10,3 @@
   become: true
   roles:
     - arr_suite
-
-- name: Install NGINX
-  hosts: proxy_host
-  become: true
-  roles:
-    - proxy

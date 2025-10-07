@@ -113,3 +113,27 @@
       - homepage_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "Homepage port {{ homepage_port }} is not open and listening!"
     success_msg: "Homepage port {{ homepage_port }} is open and listening."
+
+# Proxy Configuration
+- name: Configure nginx proxy for homepage
+  when: homepage_configure_proxy | default(true)
+  block:
+    - name: Get homepage host IP for proxy
+      ansible.builtin.set_fact:
+        homepage_proxy_ip: "{{ ansible_default_ipv4.address }}"
+
+    - name: Deploy homepage nginx proxy config
+      ansible.builtin.template:
+        src: "templates/homepage.subdomain.conf.j2"
+        dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/homepage.subdomain.conf"
+        mode: '0644'
+        owner: "{{ docker_user }}"
+        group: "{{ docker_user }}"
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      notify: Restart Swag
+
+    - name: Debug proxy configuration
+      ansible.builtin.debug:
+        msg: >-
+          Homepage proxy config deployed to {{ groups['proxy_host'][0] }}
+          routing {{ homepage_proxy_ip }}:{{ homepage_port }} -> https://homepage.{{ internal_domain }}
