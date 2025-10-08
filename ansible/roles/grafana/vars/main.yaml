@@ -1,19 +1,30 @@
 ---
+# Research Notes - Grafana Stack
+# Official Source: https://grafana.com/docs/grafana/latest/
+# Docker Hub: https://hub.docker.com/r/grafana/grafana - Default port: 3000
+# Loki: https://hub.docker.com/r/grafana/loki - Default port: 3100
+# Prometheus: https://hub.docker.com/r/prom/prometheus - Default port: 9090
+# Example Compose: https://github.com/grafana/loki/tree/main/production/docker-compose
+# NGINX Proxy Config: https://github.com/linuxserver/reverse-proxy-confs (grafana.subdomain.conf.sample available)
+# Last Updated: 2025-10-08
+
 grafana_version: "latest"
 grafana_plugins: "grafana-clock-panel"
 grafana_loki_version: "2.9.7"
 grafana_prometheus_version: "v2.51.2"
 
-# External ports for each service
+# External ports for each service (from official documentation)
 grafana_port: 3000
 grafana_loki_port: 3100
 grafana_prometheus_port: 9090
 
-# Volume paths
-grafana_parent_folder: "{{ docker_storage_folder }}/grafana"
-grafana_loki_data_folder: "{{ docker_storage_folder }}/loki/data"
-grafana_prometheus_data_folder: "{{ docker_storage_folder }}/prometheus/data"
+# Volume paths - organized under single parent folder
+grafana_parent_folder: "{{ docker_storage_folder }}/grafana-stack"
+grafana_folder: "{{ grafana_parent_folder }}/grafana"
+grafana_loki_data_folder: "{{ grafana_parent_folder }}/loki"
+grafana_prometheus_data_folder: "{{ grafana_parent_folder }}/prometheus"
 
-# Feature flags
+# Feature flags (ALL true - grafana has web interface)
 grafana_configure_homepage: true
 grafana_configure_proxy: true
+grafana_configure_dns: true

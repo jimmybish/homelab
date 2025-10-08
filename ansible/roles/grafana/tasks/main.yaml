@@ -10,9 +10,25 @@
     state: started
     enabled: true
 
-- name: Setup Parent directory
+- name: Setup Grafana directory
   ansible.builtin.file:
-    path: "{{ grafana_parent_folder }}"
+    path: "{{ grafana_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup Loki directory
+  ansible.builtin.file:
+    path: "{{ grafana_loki_data_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup Prometheus directory
+  ansible.builtin.file:
+    path: "{{ grafana_prometheus_data_folder }}"
     state: directory
     mode: '0755'
     owner: "{{ docker_user }}"
@@ -58,7 +74,7 @@
 - name: Deploy Prometheus config
   ansible.builtin.template:
     src: "templates/prometheus.yml.j2"
-    dest: "{{ grafana_parent_folder }}/prometheus.yml"
+    dest: "{{ grafana_prometheus_data_folder }}/prometheus.yml"
     mode: '0644'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
@@ -83,7 +99,7 @@
 
 - name: Ensure Grafana provisioning directory exists
   ansible.builtin.file:
-    path: "{{ grafana_parent_folder }}/provisioning/datasources"
+    path: "{{ grafana_folder }}/provisioning/datasources"
     state: directory
     mode: '0755'
     owner: "{{ docker_user }}"
@@ -92,7 +108,7 @@
 - name: Deploy Grafana datasources provisioning config
   ansible.builtin.template:
     src: "templates/provisioning_datasources.yaml.j2"
-    dest: "{{ grafana_parent_folder }}/provisioning/datasources/datasources.yaml"
+    dest: "{{ grafana_folder }}/provisioning/datasources/datasources.yaml"
     mode: '0644'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
@@ -214,13 +230,6 @@
     - alias_creation_result is succeeded
 
 # Configure Homepage Services
-- name: Check if grafana service already exists in services.yaml
-  ansible.builtin.slurp:
-    src: "{{ homepage_folder }}/config/services.yaml"
-  register: homepage_services_content
-  delegate_to: "{{ groups['homepage_host'][0] }}"
-  when: grafana_configure_homepage | default(true)
-
 - name: Add grafana service to Homepage Infra section
   ansible.builtin.blockinfile:
     path: "{{ homepage_folder }}/config/services.yaml"
@@ -231,6 +240,4 @@
   delegate_to: "{{ groups['homepage_host'][0] }}"
   notify:
     - Restart Homepage
-  when:
-    - grafana_configure_homepage | default(true)
-    - "'ANSIBLE MANAGED BLOCK - grafana service' not in (homepage_services_content['content'] | b64decode)"
+  when: grafana_configure_homepage | default(true)
