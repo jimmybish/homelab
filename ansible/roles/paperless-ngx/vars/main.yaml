@@ -1,4 +1,12 @@
 ---
+# Research and Documentation
+# Paperless-ngx: https://docs.paperless-ngx.com/
+# - Open source document management system
+# - PostgreSQL database: https://www.postgresql.org/
+# - Redis broker: https://redis.io/
+# - Gotenberg (document conversion): https://gotenberg.dev/
+# - Apache Tika (text extraction): https://tika.apache.org/
+
 paperless_version: "latest"
 redis_version: "7"
 postgres_version: "16"
@@ -12,5 +20,6 @@ paperless_port: 8000
 paperless_folder: "{{ docker_storage_folder }}/paperless"
 
 # Feature flags
-configure_proxy: true
-configure_homepage: true
+paperless_configure_dns: true
+paperless_configure_proxy: true
+paperless_configure_homepage: true
