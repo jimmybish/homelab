@@ -8,3 +8,7 @@ jellyfin_https_port: 8920
 jellyfin_udp_port1: 7359
 jellyfin_udp_port2: 1900
 jellyfin_jellyseerr_port: 5055
+
+# Volume paths
+jellyfin_folder: "{{ docker_storage_folder }}/jellyfin"
+jellyfin_jellyseerr_folder: "{{ docker_storage_folder }}/jellyseerr"

@@ -8,6 +8,9 @@ tika_version: "latest"
 # External port
 paperless_port: 8000
 
+# Volume paths
+paperless_folder: "{{ docker_storage_folder }}/paperless"
+
 # Feature flags
 configure_proxy: true
 configure_homepage: true

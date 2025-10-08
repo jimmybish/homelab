@@ -3,14 +3,16 @@ grafana_version: "latest"
 grafana_plugins: "grafana-clock-panel"
 grafana_loki_version: "2.9.7"
 grafana_prometheus_version: "v2.51.2"
-# Data folders now set globally in group_vars/all/vars.yaml
-# loki_data_folder: "/opt/loki/data"
-# prometheus_data_folder: "/opt/prometheus/data"
 
 # External ports for each service
 grafana_port: 3000
 grafana_loki_port: 3100
 grafana_prometheus_port: 9090
+
+# Volume paths
+grafana_parent_folder: "{{ docker_storage_folder }}/grafana"
+grafana_loki_data_folder: "{{ docker_storage_folder }}/loki/data"
+grafana_prometheus_data_folder: "{{ docker_storage_folder }}/prometheus/data"
 
 # Feature flags
 grafana_configure_homepage: true

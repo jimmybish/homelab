@@ -1,11 +1,22 @@
 ---
+# Research Notes - n8n
+# Official Source: https://n8n.io/
+# Docker Hub: https://hub.docker.com/r/n8nio/n8n
+# Example Compose: https://github.com/n8n-io/n8n/blob/master/docker/compose/withPostgres/docker-compose.yml
+# NGINX Proxy Config: https://github.com/linuxserver/reverse-proxy-confs (n8n.subdomain.conf.sample exists)
+# Default Port: 5678 (official documentation)
+# Last Updated: 2025-10-08
+
+# Version information (check Docker Hub for latest stable tag)
 n8n_version: "latest"
 
-# External port
-n8n_port: 5678
+# Port mappings (from official documentation)
+n8n_port: 5678  # Primary web interface port
 
-# Proxy configuration (set to false to skip proxy config deployment)
-# n8n_configure_proxy: true
+# Volume paths
+n8n_folder: "{{ docker_storage_folder }}/n8n"
 
-# Homepage configuration (set to false to skip homepage bookmark)
-# n8n_configure_homepage: true
+# Feature flags (ALL true since n8n has web interface)
+n8n_configure_homepage: true    # ALWAYS true - n8n has web interface
+n8n_configure_proxy: true       # ALWAYS true - n8n has web interface
+n8n_configure_dns: true         # ALWAYS true - n8n has web interface

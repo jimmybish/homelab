@@ -19,6 +19,7 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
       - {{ n8n_folder }}/local-files:/files
+    # Uses default Docker bridge network - no explicit network needed for single container
 
 volumes:
   n8n_data:

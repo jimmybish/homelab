@@ -10,6 +10,14 @@ arr_suite_qbittorrent_webui_port: 8081
 arr_suite_qbittorrent_peer_port: 6881
 arr_suite_lidarr_port: 8686
 
+# Volume paths
+arr_suite_sonarr_folder: "{{ docker_storage_folder }}/sonarr"
+arr_suite_radarr_folder: "{{ docker_storage_folder }}/radarr"
+arr_suite_prowlarr_folder: "{{ docker_storage_folder }}/prowlarr"
+arr_suite_sabnzbd_folder: "{{ docker_storage_folder }}/sabnzbd"
+arr_suite_qbittorrent_folder: "{{ docker_storage_folder }}/qbittorrent"
+arr_suite_lidarr_folder: "{{ docker_storage_folder }}/lidarr"
+
 # Feature flags
 arr_suite_configure_proxy: true
 arr_suite_configure_homepage: true

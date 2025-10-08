@@ -27,7 +27,7 @@ services:
     ports:
     - '{{ grafana_loki_port }}:3100'
     volumes:
-      - {{ loki_data_folder }}:/loki
+      - {{ grafana_loki_data_folder }}:/loki
     networks:
       - grafana_net
 
@@ -39,7 +39,7 @@ services:
     ports:
       - '{{ grafana_prometheus_port }}:9090'
     volumes:
-      - {{ prometheus_data_folder }}:/prometheus
+      - {{ grafana_prometheus_data_folder }}:/prometheus
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
       - grafana_net

@@ -20,7 +20,7 @@
 
 - name: Ensure Loki data directory exists
   ansible.builtin.file:
-    path: "{{ loki_data_folder }}"
+    path: "{{ grafana_loki_data_folder }}"
     state: directory
     mode: '0755'
     owner: "{{ docker_user }}"
@@ -28,7 +28,7 @@
 
 - name: Ensure Prometheus data directory exists
   ansible.builtin.file:
-    path: "{{ prometheus_data_folder }}"
+    path: "{{ grafana_prometheus_data_folder }}"
     state: directory
     mode: '0755'
     owner: "{{ docker_user }}"
