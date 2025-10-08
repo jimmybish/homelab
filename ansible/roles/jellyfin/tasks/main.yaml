@@ -10,6 +10,77 @@
     state: started
     enabled: true
 
+# Migration: Check if old structure exists
+- name: Check if old jellyfin folder exists
+  ansible.builtin.stat:
+    path: "{{ docker_storage_folder }}/jellyfin"
+  register: old_jellyfin_folder
+
+- name: Check if old jellyseerr folder exists
+  ansible.builtin.stat:
+    path: "{{ docker_storage_folder }}/jellyseerr"
+  register: old_jellyseerr_folder
+
+- name: Check if new parent folder exists
+  ansible.builtin.stat:
+    path: "{{ jellyfin_parent_folder }}"
+  register: new_parent_folder
+
+# Migration: Stop existing containers if migration is needed
+- name: Stop existing Jellyfin containers for migration
+  community.docker.docker_compose_v2:
+    project_src: "{{ docker_storage_folder }}/jellyfin"
+    state: stopped
+  when:
+    - old_jellyfin_folder.stat.exists
+    - not new_parent_folder.stat.exists
+  failed_when: false
+
+- name: Remove old Jellyfin containers for migration
+  ansible.builtin.command:
+    cmd: "docker rm jellyfin jellyseerr"
+  when:
+    - old_jellyfin_folder.stat.exists
+    - not new_parent_folder.stat.exists
+  failed_when: false
+  changed_when: true
+
+# Migration: Move folders to new structure
+- name: Create new jellyfin-stack parent directory for migration
+  ansible.builtin.file:
+    path: "{{ jellyfin_parent_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  when:
+    - old_jellyfin_folder.stat.exists
+    - not new_parent_folder.stat.exists
+
+- name: Move old jellyfin folder to new location
+  ansible.builtin.command:
+    cmd: "mv {{ docker_storage_folder }}/jellyfin {{ jellyfin_parent_folder }}/jellyfin"
+  when:
+    - old_jellyfin_folder.stat.exists
+    - not new_parent_folder.stat.exists
+  changed_when: true
+
+- name: Move old jellyseerr folder to new location
+  ansible.builtin.command:
+    cmd: "mv {{ docker_storage_folder }}/jellyseerr {{ jellyfin_parent_folder }}/jellyseerr"
+  when:
+    - old_jellyseerr_folder.stat.exists
+    - not new_parent_folder.stat.exists
+  changed_when: true
+
+- name: Setup Jellyfin parent directory
+  ansible.builtin.file:
+    path: "{{ jellyfin_parent_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
 - name: Setup Jellyfin directory
   ansible.builtin.file:
     path: "{{ jellyfin_folder }}/config"
@@ -68,7 +139,7 @@
 - name: Deploy Jellyfin using Docker Compose
   ansible.builtin.template:
     src: "templates/docker_compose.yaml.j2"
-    dest: "{{ jellyfin_folder }}/docker-compose.yaml"
+    dest: "{{ jellyfin_parent_folder }}/docker-compose.yaml"
     mode: '0755'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
@@ -78,7 +149,7 @@
 
 - name: Run Jellyfin docker-compose up
   community.docker.docker_compose_v2:
-    project_src: "{{ jellyfin_folder }}"
+    project_src: "{{ jellyfin_parent_folder }}"
     state: present
     remove_orphans: true
 
@@ -96,3 +167,175 @@
       - jellyfin_jellyseerr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "One or more Jellyfin ports are not open and listening!"
     success_msg: "All Jellyfin ports are open and listening."
+
+# Proxy Configuration
+- name: Resolve jellyfin host IP for proxy configuration
+  ansible.builtin.set_fact:
+    jellyfin_proxy_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+  when: jellyfin_configure_proxy | default(true)
+
+- name: Deploy Jellyfin nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: jellyfin.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/jellyfin.subdomain.conf"
+    mode: '0644'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag
+  when: jellyfin_configure_proxy | default(true)
+
+- name: Deploy Jellyseerr nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: jellyseerr.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/jellyseerr.subdomain.conf"
+    mode: '0644'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag
+  when: jellyfin_configure_proxy | default(true)
+
+# DNS Configuration
+- name: Get DNS resolver host overrides from pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_overrides"
+    method: GET
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: pfsense_dns_overrides
+  delegate_to: localhost
+  when: jellyfin_configure_dns | default(true)
+
+- name: Find proxy host override entry in pfSense
+  ansible.builtin.set_fact:
+    proxy_host_override: >-
+      {{ pfsense_dns_overrides.json.data
+         | selectattr('host', 'equalto', 'proxy')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | first
+         | default({}) }}
+  when:
+    - jellyfin_configure_dns | default(true)
+    - pfsense_dns_overrides.json.data is defined
+
+- name: Check if Jellyfin alias exists under proxy host override
+  ansible.builtin.set_fact:
+    jellyfin_alias_exists: >-
+      {{ proxy_host_override.aliases | default([])
+         | selectattr('host', 'equalto', 'jellyfin')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | length > 0 }}
+  when:
+    - jellyfin_configure_dns | default(true)
+    - proxy_host_override is defined
+    - proxy_host_override | length > 0
+
+- name: Check if Jellyseerr alias exists under proxy host override
+  ansible.builtin.set_fact:
+    jellyseerr_alias_exists: >-
+      {{ proxy_host_override.aliases | default([])
+         | selectattr('host', 'equalto', 'request')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | length > 0 }}
+  when:
+    - jellyfin_configure_dns | default(true)
+    - proxy_host_override is defined
+    - proxy_host_override | length > 0
+
+- name: Display Jellyfin DNS alias status
+  ansible.builtin.debug:
+    msg: >-
+      {% if proxy_host_override | length == 0 %}
+      Warning: Proxy host override not found in pfSense DNS
+      {% elif jellyfin_alias_exists %}
+      Jellyfin DNS alias exists under proxy.{{ internal_domain }}
+      {% else %}
+      Jellyfin DNS alias missing - will be created
+      {% endif %}
+  when: jellyfin_configure_dns | default(true)
+
+- name: Display Jellyseerr DNS alias status
+  ansible.builtin.debug:
+    msg: >-
+      {% if proxy_host_override | length == 0 %}
+      Warning: Proxy host override not found in pfSense DNS
+      {% elif jellyseerr_alias_exists %}
+      Jellyseerr DNS alias exists under proxy.{{ internal_domain }}
+      {% else %}
+      Jellyseerr DNS alias missing - will be created
+      {% endif %}
+  when: jellyfin_configure_dns | default(true)
+
+- name: Create Jellyfin DNS alias under proxy host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ proxy_host_override.id }}"
+      host: "jellyfin"
+      domain: "{{ internal_domain }}"
+      descr: "Jellyfin media server"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  register: jellyfin_alias_creation_result
+  when:
+    - jellyfin_configure_dns | default(true)
+    - proxy_host_override | length > 0
+    - not jellyfin_alias_exists
+
+- name: Create Jellyseerr DNS alias under proxy host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ proxy_host_override.id }}"
+      host: "request"
+      domain: "{{ internal_domain }}"
+      descr: "Jellyseerr media requests"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  register: jellyseerr_alias_creation_result
+  when:
+    - jellyfin_configure_dns | default(true)
+    - proxy_host_override | length > 0
+    - not jellyseerr_alias_exists
+
+- name: Apply DNS resolver changes in pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when:
+    - jellyfin_configure_dns | default(true)
+    - (jellyfin_alias_creation_result is succeeded) or (jellyseerr_alias_creation_result is succeeded)
+
+# Homepage Configuration
+- name: Add Jellyfin services to Homepage Media section
+  ansible.builtin.blockinfile:
+    path: "{{ homepage_folder }}/config/services.yaml"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - jellyfin services"
+    block: "{{ lookup('template', 'homepage_services.yaml.j2') }}"
+    insertafter: "^- Media:"
+    mode: '0644'
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+  notify:
+    - Restart Homepage
+  when: jellyfin_configure_homepage | default(true)

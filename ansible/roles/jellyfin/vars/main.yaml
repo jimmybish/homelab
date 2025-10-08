@@ -1,4 +1,13 @@
 ---
+# Research and Documentation
+# Jellyfin: https://jellyfin.org/docs/
+# - Open source media server
+# - Hardware transcoding with Intel QuickSync, NVIDIA, AMD
+# - Supports DLNA, live TV, DVR
+# Jellyseerr: https://github.com/Fallenbagel/jellyseerr
+# - Media request management for Jellyfin
+# - Integration with Radarr and Sonarr
+
 jellyfin_version: "latest"
 jellyfin_jellyseerr_version: "latest"
 
@@ -10,5 +19,11 @@ jellyfin_udp_port2: 1900
 jellyfin_jellyseerr_port: 5055
 
 # Volume paths
-jellyfin_folder: "{{ docker_storage_folder }}/jellyfin"
-jellyfin_jellyseerr_folder: "{{ docker_storage_folder }}/jellyseerr"
+jellyfin_parent_folder: "{{ docker_storage_folder }}/jellyfin-stack"
+jellyfin_folder: "{{ jellyfin_parent_folder }}/jellyfin"
+jellyfin_jellyseerr_folder: "{{ jellyfin_parent_folder }}/jellyseerr"
+
+# Feature flags
+jellyfin_configure_dns: true
+jellyfin_configure_proxy: true
+jellyfin_configure_homepage: true

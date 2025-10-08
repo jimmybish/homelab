@@ -1,0 +1,18 @@
+  - Jellyfin:
+      icon: jellyfin.png
+      href: {{ internal_jellyfin_url }}
+      description: Media Server
+      widget:
+        type: jellyfin
+        url: {{ internal_jellyfin_url }}
+        key: {{ homepage_jellyfin_key }}
+        enableBlocks: true
+        enableNowPlaying: false
+  - Jellyseerr:
+      icon: jellyseerr.png
+      href: {{ internal_jellyseerr_url }}
+      description: Media Requests
+      widget:
+        type: jellyseerr
+        url: {{ internal_jellyseerr_url }}
+        key: {{ homepage_jellyseerr_key }}
