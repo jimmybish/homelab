@@ -13,6 +13,8 @@ services:
     ports:
       - {{ arr_suite_sonarr_port }}:8989
     restart: unless-stopped
+    networks:
+      - arr_suite_net
   radarr:
     image: lscr.io/linuxserver/radarr:{{ arr_suite_version }}
     container_name: radarr
@@ -27,6 +29,8 @@ services:
     ports:
       - {{ arr_suite_radarr_port }}:7878
     restart: unless-stopped
+    networks:
+      - arr_suite_net
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:{{ arr_suite_version }}
     container_name: prowlarr
@@ -39,6 +43,8 @@ services:
     ports:
       - {{ arr_suite_prowlarr_port }}:9696
     restart: unless-stopped
+    networks:
+      - arr_suite_net
   sabnzbd:
     image: lscr.io/linuxserver/sabnzbd:{{ arr_suite_version }}
     container_name: sabnzbd
@@ -52,6 +58,8 @@ services:
     ports:
       - {{ arr_suite_sabnzbd_port }}:8080
     restart: unless-stopped
+    networks:
+      - arr_suite_net
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:{{ arr_suite_version }}
     container_name: qbittorrent
@@ -68,6 +76,8 @@ services:
       - {{ arr_suite_qbittorrent_peer_port }}:6881
       - {{ arr_suite_qbittorrent_peer_port }}:6881/udp
     restart: unless-stopped
+    networks:
+      - arr_suite_net
   lidarr:
     image: lscr.io/linuxserver/lidarr:{{ arr_suite_version }}
     container_name: lidarr
@@ -82,6 +92,8 @@ services:
     ports:
       - {{ arr_suite_lidarr_port }}:8686
     restart: unless-stopped
+    networks:
+      - arr_suite_net
 
 volumes:
   mytv:
@@ -102,3 +114,7 @@ volumes:
       type: nfs
       o: "addr={{ arr_fileserver_ip}},nolock,soft,rw"
       device: ":{{ fs_media_music }}"
+
+networks:
+  arr_suite_net:
+    driver: bridge

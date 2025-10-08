@@ -490,12 +490,6 @@ Create `templates/homepage_service.yaml.j2`:
 Add homepage configuration task:
 ```yaml
 # Configure Homepage Services (REQUIRED for web interfaces)
-- name: Check if service already exists in services.yaml
-  ansible.builtin.slurp:
-    src: "{{ homepage_folder }}/config/services.yaml"
-  register: homepage_services_content
-  delegate_to: "{{ groups['homepage_host'][0] }}"
-
 - name: Add service to Homepage section
   ansible.builtin.blockinfile:
     path: "{{ homepage_folder }}/config/services.yaml"
@@ -506,11 +500,14 @@ Add homepage configuration task:
   delegate_to: "{{ groups['homepage_host'][0] }}"
   notify:
     - Restart Homepage
-  when:
-    - "'ANSIBLE MANAGED BLOCK - <service> service' not in (homepage_services_content['content'] | b64decode)"
+  when: <service>_configure_homepage | default(true)
 ```
 
-**Note:** All web interfaces MUST appear on Homepage for easy access.
+**Important Notes:**
+- **DO NOT** add a check to skip if the block already exists - `blockinfile` will automatically update the block if the content changes
+- This allows the role to update Homepage entries when you add new services or modify descriptions
+- The `blockinfile` module is idempotent and will only trigger changes when the block content actually differs
+- All web interfaces MUST appear on Homepage for easy access
 
 ### 5. Create Handlers (`handlers/main.yaml`)
 
@@ -819,6 +816,7 @@ Does it have multiple containers?
 15. **Use Ansible vault for secrets** - Never commit plain-text credentials
 16. **Follow naming conventions** - Keep variable names consistent across roles
 17. **Add health checks** - Verify service is actually working, not just deployed
+18. **Let blockinfile handle updates** - Don't add conditional checks to skip existing blocks; blockinfile automatically updates content when it changes and is idempotent
 
 ## Example: Complete Minimal Web Service Role
 
