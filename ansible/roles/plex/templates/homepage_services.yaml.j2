@@ -1,19 +1,23 @@
   - Plex:
-      href: {{ internal_plex_url }}
+      href: https://plex.{{ internal_domain }}
       description: Plex Media Server
       icon: plex.png
+  - Tautulli:
+      href: https://tautulli.{{ internal_domain }}
+      description: Plex monitoring and statistics
+      icon: tautulli.png
       widget:
         type: tautulli
-        url: {{ internal_tautulli_url }}
-        key: {{ "{{HOMEPAGE_VAR_TAUTULLI_KEY}}" }}
+        url: https://tautulli.{{ internal_domain }}
+        key: {{ homepage_tautulli_key }}
         enableUser: true
         showEpisodeNumber: true
         expandOneStreamToTwoRows: false
   - Overseerr:
-      href: {{ internal_overseerr_url }}
+      href: https://overseerr.{{ internal_domain }}
       description: Overseerr (Plex requests)
       icon: overseerr.png
       widget:
         type: overseerr
-        url: {{ internal_overseerr_url }}
-        key: {{ "{{HOMEPAGE_VAR_OVERSEERR_KEY}}" }}
+        url: https://overseerr.{{ internal_domain }}
+        key: {{ homepage_overseerr_key }}

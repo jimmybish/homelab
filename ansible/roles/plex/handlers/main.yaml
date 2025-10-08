@@ -4,3 +4,17 @@
     project_src: "{{ plex_parent_folder }}"
     state: restarted
     remove_orphans: true
+
+- name: Restart Swag
+  community.docker.docker_compose_v2:
+    project_src: "{{ proxy_folder }}"
+    services:
+      - swag_internal
+    state: restarted
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+
+- name: Restart Homepage
+  community.docker.docker_compose_v2:
+    project_src: "{{ homepage_folder }}"
+    state: restarted
+  delegate_to: "{{ groups['homepage_host'][0] }}"
