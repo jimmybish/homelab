@@ -8,6 +8,8 @@
 - name: Restart Swag
   community.docker.docker_compose_v2:
     project_src: "{{ proxy_folder }}"
+    services:
+      - swag_internal
     state: restarted
   delegate_to: "{{ groups['proxy_host'][0] }}"
 

@@ -63,7 +63,7 @@
 
 # Proxy Configuration
 - name: Configure nginx proxy for paperless
-  when: configure_proxy | default(true)
+  when: paperless_configure_proxy | default(true)
   block:
     - name: Get paperless host IP for proxy
       ansible.builtin.set_fact:
@@ -79,22 +79,93 @@
       delegate_to: "{{ groups['proxy_host'][0] }}"
       notify: Restart Swag
 
-    - name: Debug proxy configuration
-      ansible.builtin.debug:
-        msg: >-
-          Paperless proxy config deployed to {{ groups['proxy_host'][0] }}
-          routing {{ paperless_proxy_ip }}:{{ paperless_port }} -> https://paperless.{{ internal_domain }}
+# DNS Configuration
+- name: Get DNS resolver host overrides from pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_overrides"
+    method: GET
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: pfsense_dns_overrides
+  delegate_to: localhost
+  when: paperless_configure_dns | default(true)
+
+- name: Find proxy host override entry in pfSense
+  ansible.builtin.set_fact:
+    proxy_host_override: >-
+      {{ pfsense_dns_overrides.json.data
+         | selectattr('host', 'equalto', 'proxy')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | first
+         | default({}) }}
+  when:
+    - paperless_configure_dns | default(true)
+    - pfsense_dns_overrides.json.data is defined
+
+- name: Check if paperless alias exists under proxy host override
+  ansible.builtin.set_fact:
+    paperless_alias_exists: >-
+      {{ proxy_host_override.aliases | default([])
+         | selectattr('host', 'equalto', 'paperless')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | length > 0 }}
+  when:
+    - paperless_configure_dns | default(true)
+    - proxy_host_override is defined
+    - proxy_host_override | length > 0
+
+- name: Display paperless DNS alias status
+  ansible.builtin.debug:
+    msg: >-
+      {% if proxy_host_override | length == 0 %}
+      Warning: Proxy host override not found in pfSense DNS
+      {% elif paperless_alias_exists %}
+      Paperless DNS alias exists under proxy.{{ internal_domain }}
+      {% else %}
+      Paperless DNS alias missing - will be created
+      {% endif %}
+  when: paperless_configure_dns | default(true)
+
+- name: Create paperless DNS alias under proxy host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ proxy_host_override.id }}"
+      host: "paperless"
+      domain: "{{ internal_domain }}"
+      descr: "Paperless-NGX document management"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  register: alias_creation_result
+  when:
+    - paperless_configure_dns | default(true)
+    - proxy_host_override | length > 0
+    - not paperless_alias_exists
+
+- name: Apply DNS resolver changes in pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when:
+    - paperless_configure_dns | default(true)
+    - alias_creation_result is succeeded
 
 # Homepage Configuration
-- name: Check if paperless service already exists in services.yaml
-  ansible.builtin.command:
-    cmd: grep -q "Paperless-NGX" {{ homepage_folder }}/config/services.yaml
-  delegate_to: "{{ groups['homepage_host'][0] }}"
-  register: paperless_in_homepage
-  failed_when: false
-  changed_when: false
-  when: configure_homepage | default(false)
-
 - name: Add paperless service to Homepage Smart Home section
   ansible.builtin.blockinfile:
     path: "{{ homepage_folder }}/config/services.yaml"
@@ -102,7 +173,5 @@
     insertafter: "- Smart Home:"
     block: "{{ lookup('template', 'homepage_service.yaml.j2') }}"
   delegate_to: "{{ groups['homepage_host'][0] }}"
-  when:
-    - configure_homepage | default(false)
-    - paperless_in_homepage.rc != 0
   notify: Restart Homepage
+  when: paperless_configure_homepage | default(true)

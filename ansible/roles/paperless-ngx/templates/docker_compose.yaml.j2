@@ -36,6 +36,8 @@ services:
     restart: unless-stopped
     volumes:
       - redisdata:/data
+    networks:
+      - paperless_net
 
   db:
     image: docker.io/library/postgres:{{ postgres_version }}
@@ -46,6 +48,8 @@ services:
       POSTGRES_DB: paperless
       POSTGRES_USER: paperless
       POSTGRES_PASSWORD: paperless
+    networks:
+      - paperless_net
 
   webserver:
     image: ghcr.io/paperless-ngx/paperless-ngx:{{ paperless_version }}
@@ -70,27 +74,34 @@ services:
       PAPERLESS_TIKA_ENDPOINT: http://tika:9998
       PAPERLESS_TIME_ZONE: {{ timezone }}
       PAPERLESS_OCR_LANGUAGE: eng
+      PAPERLESS_URL: {{ internal_paperless_url }}
+      PAPERLESS_CSRF_TRUSTED_ORIGINS: {{ internal_paperless_url }}
       PAPERLESS_TRUSTED_PROXIES: {{ paperless_trusted_proxies }}
       USERMAP_UID: "{{ docker_user_puid }}"
       USERMAP_GID: "{{ docker_user_pgid }}"
       PAPERLESS_SECRET_KEY: "{{ paperless_secret_key }}"
       PAPERLESS_ADMIN_USER: "{{ paperless_admin_user }}"
       PAPERLESS_ADMIN_PASSWORD: "{{ paperless_admin_password }}"
+    networks:
+      - paperless_net
 
   gotenberg:
     image: docker.io/gotenberg/gotenberg:{{ gotenberg_version }}
     restart: unless-stopped
-
     # The gotenberg chromium route is used to convert .eml files. We do not
     # want to allow external content like tracking pixels or even javascript.
     command:
       - "gotenberg"
       - "--chromium-disable-javascript=true"
       - "--chromium-allow-list=file:///tmp/.*"
+    networks:
+      - paperless_net
 
   tika:
     image: docker.io/apache/tika:{{ tika_version }}
     restart: unless-stopped
+    networks:
+      - paperless_net
 
 volumes:
   data:
@@ -102,3 +113,7 @@ volumes:
       device: ":{{ fs_scans }}"
   pgdata:
   redisdata:
+
+networks:
+  paperless_net:
+    driver: bridge
