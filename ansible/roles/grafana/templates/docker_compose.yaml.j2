@@ -10,8 +10,8 @@ services:
     ports:
      - '{{ grafana_port }}:3000'
     volumes:
-     - {{ grafana_parent_folder }}:/var/lib/grafana
-     - {{ grafana_parent_folder }}/provisioning:/etc/grafana/provisioning
+     - {{ grafana_folder }}:/var/lib/grafana
+     - {{ grafana_folder }}/provisioning:/etc/grafana/provisioning
     networks:
       - grafana_net
     depends_on:
@@ -40,7 +40,7 @@ services:
       - '{{ grafana_prometheus_port }}:9090'
     volumes:
       - {{ grafana_prometheus_data_folder }}:/prometheus
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - {{ grafana_prometheus_data_folder }}/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
       - grafana_net
 
