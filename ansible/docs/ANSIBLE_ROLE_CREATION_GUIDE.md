@@ -158,8 +158,14 @@ Use your research findings to populate accurate values:
 # <service>_additional_port: 9090  # Add if app uses multiple ports
 
 # Volume paths (use docker_storage_folder from group_vars)
+# For single-container services:
 <service>_folder: "{{ docker_storage_folder }}/<service>"
-# <service>_data_folder: "{{ docker_storage_folder }}/<service>/data"  # If separate data volume needed
+
+# For multi-container stacks, use parent folder pattern:
+# <service>_parent_folder: "{{ docker_storage_folder }}/<service>-stack"
+# <service>_folder: "{{ <service>_parent_folder }}/<service>"
+# <service>_database_folder: "{{ <service>_parent_folder }}/database"
+# <service>_cache_folder: "{{ <service>_parent_folder }}/cache"
 
 # Feature flags
 <service>_configure_homepage: true    # ALWAYS true if web interface exists
@@ -200,7 +206,14 @@ services:
 ```
 
 **For multi-container services:**
+
+Use the `<service>-stack` folder pattern:
 ```yaml
+# vars/main.yaml defines:
+# <service>_parent_folder: "{{ docker_storage_folder }}/<service>-stack"
+# <service>_folder: "{{ <service>_parent_folder }}/<service>"
+# <service>_database_folder: "{{ <service>_parent_folder }}/database"
+
 services:
   <service>:
     image: <image>:{{ <service>_version }}
@@ -215,7 +228,7 @@ services:
     ports:
       - '{{ <service>_port }}:<internal_port>'
     volumes:
-      - {{ <service>_folder }}:/config
+      - {{ <service>_folder }}:/config  # Points to <service>-stack/<service>/
     networks:
       - <service>_net
     depends_on:
@@ -228,7 +241,7 @@ services:
     environment:
       - POSTGRES_DB=appdb
     volumes:
-      - {{ <service>_db_folder }}:/var/lib/postgresql/data
+      - {{ <service>_database_folder }}:/var/lib/postgresql/data  # Points to <service>-stack/database/
     networks:
       - <service>_net
     # NO port mapping - internal access only
@@ -266,10 +279,39 @@ Follow this task order:
 ```
 
 #### 4.2 Directory Setup
+
+**For single-container services:**
 ```yaml
-- name: Setup parent directory
+- name: Setup service directory
   ansible.builtin.file:
     path: "{{ <service>_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+```
+
+**For multi-container stacks:**
+```yaml
+- name: Setup parent directory for multi-container stack
+  ansible.builtin.file:
+    path: "{{ <service>_parent_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup main service directory
+  ansible.builtin.file:
+    path: "{{ <service>_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup database directory
+  ansible.builtin.file:
+    path: "{{ <service>_database_folder }}"
     state: directory
     mode: '0755'
     owner: "{{ docker_user }}"
@@ -711,6 +753,13 @@ volumes:
 ### Multi-Container Stack with Internal Communication
 
 For services with databases or dependencies (like Grafana with Loki/Prometheus):
+
+**Folder Structure Pattern:** Use `<service>-stack` as parent folder with subfolders for each container:
+- `<service>-stack/docker-compose.yaml`
+- `<service>-stack/<service>/` (main service data)
+- `<service>-stack/database/` (database data)
+- `<service>-stack/cache/` (cache data if applicable)
+
 ```yaml
 services:
   app:
@@ -721,6 +770,8 @@ services:
       - '{{ app_port }}:3000'  # Only web interface exposed
     environment:
       - DATABASE_URL=postgresql://db:5432/appdb  # Container name for internal DNS
+    volumes:
+      - {{ <service>_folder }}:/config  # Uses <service>_parent_folder/<service>
     depends_on:
       - db
     networks:
@@ -734,7 +785,7 @@ services:
     environment:
       - POSTGRES_DB=appdb
     volumes:
-      - {{ <service>_db_folder }}:/var/lib/postgresql/data
+      - {{ <service>_database_folder }}:/var/lib/postgresql/data  # Uses <service>_parent_folder/database
     networks:
       - <service>_net
 
@@ -746,6 +797,14 @@ networks:
 **Key Differences:**
 - Single container: No explicit network needed, uses Docker's default bridge
 - Multi-container: Explicit network REQUIRED for proper isolation and internal DNS resolution
+
+**Folder Organization:**
+- Single container: Use `docker_storage_folder/<service>` (e.g., `/etc/docker-storage/n8n`)
+- Multi-container: Use `docker_storage_folder/<service>-stack` as parent with subfolders:
+  - Example: `/etc/docker-storage/grafana-stack/{grafana/,prometheus/,loki/}`
+  - Example: `/etc/docker-storage/jellyfin-stack/{jellyfin/,jellyseerr/}`
+  - Example: `/etc/docker-storage/paperless-stack/{webserver/,db/,broker/,gotenberg/,tika/}`
+- Benefits: Groups related services, simplifies backups, clearer organization
 
 ### Service Requiring Both Internal and External Access
 
@@ -789,11 +848,17 @@ Does it have a web interface?
 
 Does it have multiple containers?
 ├─ YES → MUST define explicit Docker network (<service>_net)
+│        MUST use <service>-stack parent folder structure
 │        Use container names for internal communication (e.g., postgres:5432)
 │        Only main web container needs port exposure
 │        Backend containers should NOT expose ports
+│        Example vars:
+│          <service>_parent_folder: "{{ docker_storage_folder }}/<service>-stack"
+│          <service>_folder: "{{ <service>_parent_folder }}/<service>"
+│          <service>_db_folder: "{{ <service>_parent_folder }}/database"
 └─ NO  → Default Docker bridge network is sufficient
          No explicit network definition needed
+         Use simple path: <service>_folder: "{{ docker_storage_folder }}/<service>"
 ```
 
 ## Best Practices
