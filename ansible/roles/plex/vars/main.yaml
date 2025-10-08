@@ -5,3 +5,9 @@ plex_overseerr_version: "latest"
 # External ports for each service
 plex_overseerr_port: 5055
 plex_tautulli_port: 8181
+
+# Volume paths
+plex_parent_folder: "{{ docker_storage_folder }}"
+plex_folder: "{{ docker_storage_folder }}/plex"
+plex_overseerr_folder: "{{ docker_storage_folder }}/overseerr"
+plex_tautulli_folder: "{{ docker_storage_folder }}/tautulli"

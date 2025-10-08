@@ -5,7 +5,7 @@
     state: restarted
     remove_orphans: true
 
-- name: Restart Swag on proxy
+- name: Restart Swag
   community.docker.docker_compose_v2:
     project_src: "{{ proxy_folder }}"
     state: restarted

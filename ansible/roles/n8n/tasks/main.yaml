@@ -77,11 +77,97 @@
         owner: "{{ docker_user }}"
         group: "{{ docker_user }}"
       delegate_to: "{{ groups['proxy_host'][0] }}"
-      notify: Restart Swag on proxy
+      notify: Restart Swag
 
     - name: Debug proxy configuration
       ansible.builtin.debug:
         msg: "n8n proxy config deployed to {{ groups['proxy_host'][0] }} routing {{ n8n_proxy_ip }}:{{ n8n_port }} -> https://n8n.{{ internal_domain }}"
+
+# DNS Alias Configuration (Required for web interface)
+- name: Get DNS resolver host overrides from pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_overrides"
+    method: GET
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: pfsense_dns_overrides
+  delegate_to: localhost
+  when: n8n_configure_dns | default(true)
+
+- name: Find proxy host override entry in pfSense
+  ansible.builtin.set_fact:
+    proxy_host_override: >-
+      {{ pfsense_dns_overrides.json.data
+         | selectattr('host', 'equalto', 'proxy')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | first
+         | default({}) }}
+  when:
+    - n8n_configure_dns | default(true)
+    - pfsense_dns_overrides.json.data is defined
+
+- name: Check if n8n alias exists under proxy host override
+  ansible.builtin.set_fact:
+    n8n_alias_exists: >-
+      {{ proxy_host_override.aliases | default([])
+         | selectattr('host', 'equalto', 'n8n')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | length > 0 }}
+  when:
+    - n8n_configure_dns | default(true)
+    - proxy_host_override is defined
+    - proxy_host_override | length > 0
+
+- name: Display n8n DNS alias status
+  ansible.builtin.debug:
+    msg: >-
+      {% if proxy_host_override | length == 0 %}
+      Warning: Proxy host override not found in pfSense DNS
+      {% elif n8n_alias_exists %}
+      n8n DNS alias exists under proxy.{{ internal_domain }}
+      {% else %}
+      n8n DNS alias missing - will be created
+      {% endif %}
+  when: n8n_configure_dns | default(true)
+
+- name: Create n8n DNS alias under proxy host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ proxy_host_override.id }}"
+      host: "n8n"
+      domain: "{{ internal_domain }}"
+      descr: "n8n Workflow Automation"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  register: alias_creation_result
+  when:
+    - n8n_configure_dns | default(true)
+    - proxy_host_override | length > 0
+    - not n8n_alias_exists
+
+- name: Apply DNS resolver changes in pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when:
+    - n8n_configure_dns | default(true)
+    - alias_creation_result is succeeded
 
 # Homepage Configuration (Optional)
 - name: Configure homepage service for n8n
