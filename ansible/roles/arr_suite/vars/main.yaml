@@ -1,7 +1,19 @@
 ---
+# Research Notes - *Arr Suite
+# Official Source: https://wiki.servarr.com/
+# Docker Hub: https://hub.docker.com/u/linuxserver (LinuxServer.io images)
+# Sonarr: https://hub.docker.com/r/linuxserver/sonarr - Default port: 8989
+# Radarr: https://hub.docker.com/r/linuxserver/radarr - Default port: 7878
+# Prowlarr: https://hub.docker.com/r/linuxserver/prowlarr - Default port: 9696
+# Lidarr: https://hub.docker.com/r/linuxserver/lidarr - Default port: 8686
+# SABnzbd: https://hub.docker.com/r/linuxserver/sabnzbd - Default port: 8080
+# qBittorrent: https://hub.docker.com/r/linuxserver/qbittorrent - Default port: 8080
+# NGINX Proxy Configs: https://github.com/linuxserver/reverse-proxy-confs (all available)
+# Last Updated: 2025-10-08
+
 arr_suite_version: "latest"
 
-# External ports for each service
+# External ports for each service (from official documentation)
 arr_suite_sonarr_port: 8989
 arr_suite_radarr_port: 7878
 arr_suite_prowlarr_port: 9696
@@ -18,6 +30,7 @@ arr_suite_sabnzbd_folder: "{{ docker_storage_folder }}/sabnzbd"
 arr_suite_qbittorrent_folder: "{{ docker_storage_folder }}/qbittorrent"
 arr_suite_lidarr_folder: "{{ docker_storage_folder }}/lidarr"
 
-# Feature flags
+# Feature flags (ALL true - multiple services have web interfaces)
 arr_suite_configure_proxy: true
+arr_suite_configure_dns: true
 arr_suite_configure_homepage: true

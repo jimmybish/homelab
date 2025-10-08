@@ -1,7 +1,7 @@
 ---
 - name: Start Containers
   community.docker.docker_compose_v2:
-    project_src: "{{ arr_suite_parent_folder }}"
+    project_src: "{{ docker_storage_folder }}"
     state: restarted
     remove_orphans: true
 
