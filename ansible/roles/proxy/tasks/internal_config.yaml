@@ -72,15 +72,7 @@
   notify:
     - Start Swag
 
-- name: Deploy Overseerr config
-  ansible.builtin.template:
-    src: "templates/internal/overseerr.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/overseerr.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
+# Overseerr and Tautulli configs are now managed by the plex role
 
 - name: Deploy pfSense config
   ansible.builtin.template:
@@ -96,16 +88,6 @@
   ansible.builtin.template:
     src: "templates/internal/proxmox.subdomain.conf.j2"
     dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/proxmox.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
-
-- name: Deploy Tautulli config
-  ansible.builtin.template:
-    src: "templates/internal/tautulli.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/tautulli.subdomain.conf"
     mode: '0644'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"

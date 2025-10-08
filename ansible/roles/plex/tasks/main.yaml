@@ -10,6 +10,14 @@
     state: started
     enabled: true
 
+- name: Create parent directory for Plex stack
+  ansible.builtin.file:
+    path: "{{ plex_parent_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
 - name: Setup Plex directory
   ansible.builtin.file:
     path: "{{ plex_folder }}/config"
@@ -116,6 +124,10 @@
   ansible.builtin.set_fact:
     plex_fileserver_ip: "{{ (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0] }}"
 
+- name: Get Plex host IP for proxy configuration
+  ansible.builtin.set_fact:
+    plex_host_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+
 - name: Deploy Plex using Docker Compose
   ansible.builtin.template:
     src: "templates/docker_compose.yaml.j2"
@@ -169,3 +181,178 @@
       - plex_tautulli_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "One or more Plex ports are not open and listening!"
     success_msg: "All Plex ports are open and listening."
+
+# Proxy Configuration
+- name: Deploy Overseerr proxy configuration
+  ansible.builtin.template:
+    src: overseerr.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/overseerr.subdomain.conf"
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0644'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify: Restart Swag
+  when: plex_configure_proxy | bool
+
+- name: Deploy Tautulli proxy configuration
+  ansible.builtin.template:
+    src: tautulli.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/tautulli.subdomain.conf"
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0644'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify: Restart Swag
+  when: plex_configure_proxy | bool
+
+# DNS Configuration
+- name: Get DNS resolver host overrides from pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_overrides"
+    method: GET
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: pfsense_dns_overrides
+  delegate_to: localhost
+  when: plex_configure_dns | default(true)
+
+- name: Find proxy host override entry in pfSense
+  ansible.builtin.set_fact:
+    proxy_host_override: >-
+      {{ pfsense_dns_overrides.json.data
+         | selectattr('host', 'equalto', 'proxy')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | first
+         | default({}) }}
+  when:
+    - plex_configure_dns | default(true)
+    - pfsense_dns_overrides.json.data is defined
+
+- name: Check if overseerr alias exists under proxy host override
+  ansible.builtin.set_fact:
+    overseerr_alias_exists: >-
+      {{ proxy_host_override.aliases | default([])
+         | selectattr('host', 'equalto', 'overseerr')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | length > 0 }}
+  when:
+    - plex_configure_dns | default(true)
+    - proxy_host_override is defined
+    - proxy_host_override | length > 0
+
+- name: Check if tautulli alias exists under proxy host override
+  ansible.builtin.set_fact:
+    tautulli_alias_exists: >-
+      {{ proxy_host_override.aliases | default([])
+         | selectattr('host', 'equalto', 'tautulli')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | length > 0 }}
+  when:
+    - plex_configure_dns | default(true)
+    - proxy_host_override is defined
+    - proxy_host_override | length > 0
+
+- name: Display DNS alias status for overseerr
+  ansible.builtin.debug:
+    msg: >-
+      {% if proxy_host_override | length == 0 %}
+      Warning: Proxy host override not found in pfSense DNS
+      {% elif overseerr_alias_exists %}
+      overseerr DNS alias exists under proxy.{{ internal_domain }}
+      {% else %}
+      overseerr DNS alias missing - will be created
+      {% endif %}
+  when: plex_configure_dns | default(true)
+
+- name: Create overseerr DNS alias under proxy host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ proxy_host_override.id }}"
+      host: "overseerr"
+      domain: "{{ internal_domain }}"
+      descr: "Overseerr (Plex request system)"
+    validate_certs: false
+    status_code: [200, 400]
+  register: overseerr_dns_result
+  delegate_to: localhost
+  when:
+    - plex_configure_dns | default(true)
+    - not overseerr_alias_exists
+    - proxy_host_override | length > 0
+  failed_when:
+    - overseerr_dns_result.status == 400
+    - "'already exists' not in (overseerr_dns_result.json.message | default(''))"
+
+- name: Display DNS alias status for tautulli
+  ansible.builtin.debug:
+    msg: >-
+      {% if proxy_host_override | length == 0 %}
+      Warning: Proxy host override not found in pfSense DNS
+      {% elif tautulli_alias_exists %}
+      tautulli DNS alias exists under proxy.{{ internal_domain }}
+      {% else %}
+      tautulli DNS alias missing - will be created
+      {% endif %}
+  when: plex_configure_dns | default(true)
+
+- name: Create tautulli DNS alias under proxy host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ proxy_host_override.id }}"
+      host: "tautulli"
+      domain: "{{ internal_domain }}"
+      descr: "Tautulli (Plex monitoring)"
+    validate_certs: false
+    status_code: [200, 400]
+  register: tautulli_dns_result
+  delegate_to: localhost
+  when:
+    - plex_configure_dns | default(true)
+    - not tautulli_alias_exists
+    - proxy_host_override | length > 0
+  failed_when:
+    - tautulli_dns_result.status == 400
+    - "'already exists' not in (tautulli_dns_result.json.message | default(''))"
+
+- name: Apply DNS resolver changes in pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when:
+    - plex_configure_dns | default(true)
+    - (overseerr_dns_result is changed) or (tautulli_dns_result is changed)
+
+# Homepage Configuration
+- name: Add Plex services to Homepage Media section
+  ansible.builtin.blockinfile:
+    path: "{{ homepage_folder }}/config/services.yaml"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - plex services"
+    block: "{{ lookup('template', 'homepage_services.yaml.j2') }}"
+    insertafter: "^- Media:"
+    mode: '0644'
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+  notify:
+    - Restart Homepage
+  when: plex_configure_homepage | default(true)

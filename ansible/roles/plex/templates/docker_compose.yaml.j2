@@ -26,6 +26,8 @@ services:
       - {{ plex_overseerr_port }}:5055
     volumes:
       - {{ plex_overseerr_folder }}:/config
+    networks:
+      - plex_net
     restart: unless-stopped
   tautulli:
     image: ghcr.io/tautulli/tautulli
@@ -39,6 +41,12 @@ services:
       - TZ={{ timezone }}
     ports:
       - {{ plex_tautulli_port }}:8181
+    networks:
+      - plex_net
+
+networks:
+  plex_net:
+    name: plex_net
 
 volumes:
   mytv:
