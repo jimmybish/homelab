@@ -19,6 +19,9 @@ services:
     devices:
       - /dev/dri:/dev/dri
     restart: unless-stopped
+    networks:
+      - jellyfin_net
+      
   jellyseerr:
     image: fallenbagel/jellyseerr:{{ jellyfin_jellyseerr_version }}
     container_name: jellyseerr
@@ -32,6 +35,8 @@ services:
     volumes:
       - {{ jellyfin_jellyseerr_folder }}:/app/config
     restart: unless-stopped
+    networks:
+      - jellyfin_net
 
 volumes:
   mytv:
@@ -46,3 +51,7 @@ volumes:
       type: nfs
       o: "addr={{ jellyfin_fileserver_ip}},nolock,soft,rw"
       device: ":{{ fs_media_movies }}"
+
+networks:
+  jellyfin_net:
+    driver: bridge

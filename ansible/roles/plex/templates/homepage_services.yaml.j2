@@ -1,0 +1,19 @@
+  - Plex:
+      href: {{ internal_plex_url }}
+      description: Plex Media Server
+      icon: plex.png
+      widget:
+        type: tautulli
+        url: {{ internal_tautulli_url }}
+        key: {{ "{{HOMEPAGE_VAR_TAUTULLI_KEY}}" }}
+        enableUser: true
+        showEpisodeNumber: true
+        expandOneStreamToTwoRows: false
+  - Overseerr:
+      href: {{ internal_overseerr_url }}
+      description: Overseerr (Plex requests)
+      icon: overseerr.png
+      widget:
+        type: overseerr
+        url: {{ internal_overseerr_url }}
+        key: {{ "{{HOMEPAGE_VAR_OVERSEERR_KEY}}" }}
