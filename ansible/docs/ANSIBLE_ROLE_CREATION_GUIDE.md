@@ -800,11 +800,14 @@ networks:
 
 **Folder Organization:**
 - Single container: Use `docker_storage_folder/<service>` (e.g., `/etc/docker-storage/n8n`)
-- Multi-container: Use `docker_storage_folder/<service>-stack` as parent with subfolders:
+- Multi-container with bind mounts: Use `docker_storage_folder/<service>-stack` as parent with subfolders:
   - Example: `/etc/docker-storage/grafana-stack/{grafana/,prometheus/,loki/}`
   - Example: `/etc/docker-storage/jellyfin-stack/{jellyfin/,jellyseerr/}`
-  - Example: `/etc/docker-storage/paperless-stack/{webserver/,db/,broker/,gotenberg/,tika/}`
-- Benefits: Groups related services, simplifies backups, clearer organization
+  - Benefits: Groups related services, simplifies backups, clearer organization
+- Multi-container with Docker named volumes: Use `docker_storage_folder/<service>` (no `-stack` suffix needed):
+  - Example: `/etc/docker-storage/paperless/` (uses named volumes: data, media, pgdata, redisdata)
+  - Rationale: Named volumes are managed by Docker, not visible on disk, so the folder only contains docker-compose.yaml and minimal config
+  - Benefits: Simpler folder structure when volumes are abstracted away by Docker
 
 ### Service Requiring Both Internal and External Access
 
@@ -848,14 +851,27 @@ Does it have a web interface?
 
 Does it have multiple containers?
 ├─ YES → MUST define explicit Docker network (<service>_net)
-│        MUST use <service>-stack parent folder structure
 │        Use container names for internal communication (e.g., postgres:5432)
 │        Only main web container needs port exposure
 │        Backend containers should NOT expose ports
-│        Example vars:
-│          <service>_parent_folder: "{{ docker_storage_folder }}/<service>-stack"
-│          <service>_folder: "{{ <service>_parent_folder }}/<service>"
-│          <service>_db_folder: "{{ <service>_parent_folder }}/database"
+│        
+│        Folder structure depends on volume strategy:
+│        
+│        ├─ Using bind mounts (host directories):
+│        │  MUST use <service>-stack parent folder structure
+│        │  Example vars:
+│        │    <service>_parent_folder: "{{ docker_storage_folder }}/<service>-stack"
+│        │    <service>_folder: "{{ <service>_parent_folder }}/<service>"
+│        │    <service>_db_folder: "{{ <service>_parent_folder }}/database"
+│        │  Example: grafana-stack/{grafana/,prometheus/,loki/}
+│        │
+│        └─ Using Docker named volumes:
+│           Use simple folder: <service>_folder: "{{ docker_storage_folder }}/<service>"
+│           No subfolders needed - volumes managed by Docker
+│           Example: paperless/ (contains docker-compose.yaml only)
+│           Example vars:
+│             <service>_folder: "{{ docker_storage_folder }}/<service>"
+│
 └─ NO  → Default Docker bridge network is sufficient
          No explicit network definition needed
          Use simple path: <service>_folder: "{{ docker_storage_folder }}/<service>"

@@ -51,27 +51,7 @@
     - Start Swag
 
 # Homepage config is now managed by the homepage role
-
-- name: Deploy Jellyfin config
-  ansible.builtin.template:
-    src: "templates/internal/jellyfin.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/jellyfin.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
-
-- name: Deploy Jellyseerr config
-  ansible.builtin.template:
-    src: "templates/internal/jellyseerr.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/jellyseerr.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
-
+# Jellyfin and Jellyseerr configs are now managed by the jellyfin role
 # Overseerr and Tautulli configs are now managed by the plex role
 
 - name: Deploy pfSense config

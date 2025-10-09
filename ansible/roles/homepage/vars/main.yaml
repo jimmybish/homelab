@@ -1,4 +1,10 @@
 ---
+# Research Notes - Homepage
+# Official Source: https://gethomepage.dev/
+# Docker Hub: https://hub.docker.com/r/ghcr.io/gethomepage/homepage
+# Default Port: 3000
+# Last Updated: 2025-10-09
+
 homepage_version: "latest"
 
 # External port
@@ -6,3 +12,5 @@ homepage_port: 3000
 
 # Feature flags
 homepage_configure_proxy: true
+homepage_configure_dns: true
+homepage_configure_homepage: false  # N/A - homepage doesn't add itself

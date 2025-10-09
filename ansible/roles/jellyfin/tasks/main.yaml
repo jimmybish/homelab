@@ -10,70 +10,7 @@
     state: started
     enabled: true
 
-# Migration: Check if old structure exists
-- name: Check if old jellyfin folder exists
-  ansible.builtin.stat:
-    path: "{{ docker_storage_folder }}/jellyfin"
-  register: old_jellyfin_folder
-
-- name: Check if old jellyseerr folder exists
-  ansible.builtin.stat:
-    path: "{{ docker_storage_folder }}/jellyseerr"
-  register: old_jellyseerr_folder
-
-- name: Check if new parent folder exists
-  ansible.builtin.stat:
-    path: "{{ jellyfin_parent_folder }}"
-  register: new_parent_folder
-
-# Migration: Stop existing containers if migration is needed
-- name: Stop existing Jellyfin containers for migration
-  community.docker.docker_compose_v2:
-    project_src: "{{ docker_storage_folder }}/jellyfin"
-    state: stopped
-  when:
-    - old_jellyfin_folder.stat.exists
-    - not new_parent_folder.stat.exists
-  failed_when: false
-
-- name: Remove old Jellyfin containers for migration
-  ansible.builtin.command:
-    cmd: "docker rm jellyfin jellyseerr"
-  when:
-    - old_jellyfin_folder.stat.exists
-    - not new_parent_folder.stat.exists
-  failed_when: false
-  changed_when: true
-
-# Migration: Move folders to new structure
-- name: Create new jellyfin-stack parent directory for migration
-  ansible.builtin.file:
-    path: "{{ jellyfin_parent_folder }}"
-    state: directory
-    mode: '0755'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  when:
-    - old_jellyfin_folder.stat.exists
-    - not new_parent_folder.stat.exists
-
-- name: Move old jellyfin folder to new location
-  ansible.builtin.command:
-    cmd: "mv {{ docker_storage_folder }}/jellyfin {{ jellyfin_parent_folder }}/jellyfin"
-  when:
-    - old_jellyfin_folder.stat.exists
-    - not new_parent_folder.stat.exists
-  changed_when: true
-
-- name: Move old jellyseerr folder to new location
-  ansible.builtin.command:
-    cmd: "mv {{ docker_storage_folder }}/jellyseerr {{ jellyfin_parent_folder }}/jellyseerr"
-  when:
-    - old_jellyseerr_folder.stat.exists
-    - not new_parent_folder.stat.exists
-  changed_when: true
-
-- name: Setup Jellyfin parent directory
+- name: Setup Jellyfin stack parent directory
   ansible.builtin.file:
     path: "{{ jellyfin_parent_folder }}"
     state: directory

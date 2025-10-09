@@ -10,9 +10,9 @@
     state: started
     enabled: true
 
-- name: Setup Parent directory
+- name: Setup Arr Suite stack parent directory
   ansible.builtin.file:
-    path: "{{ docker_storage_folder }}"
+    path: "{{ arr_suite_parent_folder }}"
     state: directory
     mode: '0755'
     owner: "{{ docker_user }}"
@@ -129,7 +129,7 @@
 - name: Deploy *Arr using Docker Compose
   ansible.builtin.template:
     src: "templates/docker_compose.yaml.j2"
-    dest: "{{ docker_storage_folder }}/docker-compose.yaml"
+    dest: "{{ arr_suite_parent_folder }}/docker-compose.yaml"
     mode: '0644'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
@@ -139,7 +139,7 @@
 
 - name: Run *Arr docker-compose up
   community.docker.docker_compose_v2:
-    project_src: "{{ docker_storage_folder }}"
+    project_src: "{{ arr_suite_parent_folder }}"
     state: present
     remove_orphans: true
 
