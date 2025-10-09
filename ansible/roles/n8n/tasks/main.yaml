@@ -169,29 +169,14 @@
     - n8n_configure_dns | default(true)
     - alias_creation_result is succeeded
 
-# Homepage Configuration (Optional)
-- name: Configure homepage service for n8n
+# Homepage Configuration
+- name: Add n8n service to Homepage Smart Home section
+  ansible.builtin.blockinfile:
+    path: "{{ homepage_folder }}/config/services.yaml"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - n8n service"
+    block: "{{ lookup('template', 'homepage_service.yaml.j2') }}"
+    insertafter: "^- Smart Home:"
+    mode: '0644'
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+  notify: Restart Homepage
   when: n8n_configure_homepage | default(true)
-  block:
-    - name: Check if n8n service already exists in services.yaml
-      ansible.builtin.slurp:
-        src: "{{ homepage_folder }}/config/services.yaml"
-      delegate_to: "{{ groups['homepage_host'][0] }}"
-      register: homepage_services_content
-
-    - name: Add n8n service to Homepage Smart Home section
-      ansible.builtin.blockinfile:
-        path: "{{ homepage_folder }}/config/services.yaml"
-        marker: "# {mark} ANSIBLE MANAGED BLOCK - n8n service"
-        block: "{{ lookup('template', 'homepage_service.yaml.j2') }}"
-        insertafter: "^- Smart Home:"
-        owner: "{{ docker_user }}"
-        group: "{{ docker_user }}"
-        mode: '0644'
-      delegate_to: "{{ groups['homepage_host'][0] }}"
-      when: "'ANSIBLE MANAGED BLOCK - n8n service' not in (homepage_services_content['content'] | b64decode)"
-      notify: Restart Homepage
-
-    - name: Debug homepage configuration
-      ansible.builtin.debug:
-        msg: "n8n service configured on {{ groups['homepage_host'][0] }} in Smart Home section"

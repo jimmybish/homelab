@@ -10,6 +10,14 @@
     state: started
     enabled: true
 
+- name: Setup Grafana stack parent directory
+  ansible.builtin.file:
+    path: "{{ grafana_parent_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
 - name: Setup Grafana directory
   ansible.builtin.file:
     path: "{{ grafana_folder }}"

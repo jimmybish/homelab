@@ -30,9 +30,6 @@
 - name: Deploy Paperless
   ansible.builtin.import_playbook: deploy_paperless.yaml
 
-- name: Deploy Scrypted
-  ansible.builtin.import_playbook: deploy_scrypted.yaml
-
 - name: Install Prometheus Node Exporter
   hosts: ubuntu
   become: true
