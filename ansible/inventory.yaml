@@ -1,7 +1,8 @@
-# Keeping the Ansible host in its own group.
-mgmt:
+# Jump box/Ansible hosts.
+mgmt_hosts:
   hosts:
     mgmt:
+    mgmt-2:
 
 # QNAP NAS
 qnap:
@@ -32,7 +33,7 @@ ubuntu:
   vars:
     ansible_python_interpreter: /usr/bin/python3.10
   hosts:
-    docker-1:
+    mgmt-2:
     docker-2:
     plex-lxc:
     jellyfin-lxc:
@@ -113,7 +114,7 @@ grafana_host:
 # Paperless
 paperless_host:
   hosts:
-    docker-1:
+    docker-2:
 
 # n8n
 n8n_host:

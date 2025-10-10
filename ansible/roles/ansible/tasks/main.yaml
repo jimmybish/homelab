@@ -1,0 +1,262 @@
+---
+- name: Ensure system packages are up to date
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+  become: true
+  become_user: root
+
+- name: Install Python3 and pip
+  ansible.builtin.package:
+    name:
+      - python3
+      - python3-pip
+      - python3-venv
+      - python3-dev
+      - build-essential
+      - libssl-dev
+      - libffi-dev
+      - git
+      - sshpass
+      - pipx
+    state: present
+  when: ansible_os_family == "Debian"
+  become: true
+  become_user: root
+
+- name: Ensure pipx PATH is set
+  ansible.builtin.command:
+    cmd: pipx ensurepath
+  when: ansible_install_method == "pipx"
+  changed_when: false
+
+- name: Install Ansible via pipx
+  community.general.pipx:
+    name: ansible
+    state: present
+  when: ansible_install_method == "pipx"
+
+- name: Ensure pipx creates symlinks for Ansible
+  ansible.builtin.command:
+    cmd: pipx ensurepath
+  when: ansible_install_method == "pipx"
+  changed_when: false
+
+- name: Ensure Ansible command symlinks exist in .local/bin
+  ansible.builtin.file:
+    src: "~/.local/pipx/venvs/ansible/bin/{{ item }}"
+    dest: "~/.local/bin/{{ item }}"
+    state: link
+    force: true
+  loop:
+    - ansible
+    - ansible-playbook
+    - ansible-galaxy
+    - ansible-vault
+    - ansible-config
+    - ansible-console
+    - ansible-doc
+    - ansible-inventory
+  when: ansible_install_method == "pipx"
+
+- name: Install ansible-dev-tools via pipx (optional)
+  community.general.pipx:
+    name: ansible-dev-tools
+    state: present
+  when:
+    - ansible_install_method == "pipx"
+    - ansible_install_dev_tools | default(false)
+
+- name: Inject Python dependencies into Ansible pipx environment
+  community.general.pipx:
+    name: ansible
+    state: inject
+    inject_packages: "{{ ansible_python_dependencies }}"
+  when: ansible_install_method == "pipx"
+
+- name: Create Ansible virtual environment directory
+  ansible.builtin.file:
+    path: "{{ ansible_venv_path }}"
+    state: directory
+    mode: '0755'
+  when: ansible_install_method == "pip"
+
+- name: Create Python virtual environment for Ansible
+  ansible.builtin.command:
+    cmd: "python3 -m venv {{ ansible_venv_path }}"
+    creates: "{{ ansible_venv_path }}/bin/activate"
+  when: ansible_install_method == "pip"
+
+- name: Upgrade pip in virtual environment
+  ansible.builtin.pip:
+    name: pip
+    state: present
+    extra_args: --upgrade
+    virtualenv: "{{ ansible_venv_path }}"
+  when: ansible_install_method == "pip"
+
+- name: Install Ansible in virtual environment
+  ansible.builtin.pip:
+    name: "ansible{% if ansible_package_version != 'latest' %}=={{ ansible_package_version }}{% endif %}"
+    virtualenv: "{{ ansible_venv_path }}"
+    state: "{{ 'latest' if ansible_package_version == 'latest' else 'present' }}"
+  when: ansible_install_method == "pip"
+
+- name: Install Ansible Python dependencies
+  ansible.builtin.pip:
+    name: "{{ ansible_python_dependencies }}"
+    virtualenv: "{{ ansible_venv_path }}"
+    state: present
+  when: ansible_install_method == "pip"
+
+- name: Install Ansible via system package manager
+  ansible.builtin.package:
+    name: ansible
+    state: present
+  when: ansible_install_method == "package"
+
+- name: Create Ansible configuration directory
+  ansible.builtin.file:
+    path: "{{ ansible_config_dir }}"
+    state: directory
+    mode: '0755'
+  become: true
+  become_user: root
+
+- name: Deploy Ansible configuration file
+  ansible.builtin.template:
+    src: "templates/ansible.cfg.j2"
+    dest: "{{ ansible_config_dir }}/ansible.cfg"
+    mode: '0644'
+    force: true
+  become: true
+  become_user: root
+
+- name: Create SSH directory for Ansible user
+  ansible.builtin.file:
+    path: "~/.ssh"
+    state: directory
+    mode: '0700'
+
+- name: Check if Ansible SSH key exists
+  ansible.builtin.stat:
+    path: "{{ ansible_ssh_key_path }}"
+  register: ansible_ssh_key_stat
+
+- name: Display SSH key status
+  ansible.builtin.debug:
+    msg: >-
+      {% if ansible_ssh_key_stat.stat.exists %}
+      Ansible SSH key already exists at {{ ansible_ssh_key_path }}
+      {% else %}
+      Ansible SSH key does not exist - manual creation required
+      {% endif %}
+
+- name: Create symlink to Ansible in /usr/local/bin
+  ansible.builtin.file:
+    src: "{{ ansible_venv_path }}/bin/ansible"
+    dest: "/usr/local/bin/ansible"
+    state: link
+  when: ansible_install_method == "pip"
+
+- name: Create symlink to ansible-playbook in /usr/local/bin
+  ansible.builtin.file:
+    src: "{{ ansible_venv_path }}/bin/ansible-playbook"
+    dest: "/usr/local/bin/ansible-playbook"
+    state: link
+  when: ansible_install_method == "pip"
+
+- name: Create symlink to ansible-galaxy in /usr/local/bin
+  ansible.builtin.file:
+    src: "{{ ansible_venv_path }}/bin/ansible-galaxy"
+    dest: "/usr/local/bin/ansible-galaxy"
+    state: link
+  when: ansible_install_method == "pip"
+
+- name: Create symlink to ansible-vault in /usr/local/bin
+  ansible.builtin.file:
+    src: "{{ ansible_venv_path }}/bin/ansible-vault"
+    dest: "/usr/local/bin/ansible-vault"
+    state: link
+  when: ansible_install_method == "pip"
+
+- name: Install Ansible collections
+  ansible.builtin.command:
+    cmd: "{{ ansible_venv_path }}/bin/ansible-galaxy collection install {{ item }} --force"
+  loop: "{{ ansible_collections }}"
+  when: ansible_install_method == "pip"
+  changed_when: true
+
+- name: Install Ansible collections (pipx method)
+  ansible.builtin.command:
+    cmd: "~/.local/bin/ansible-galaxy collection install {{ item }} --force"
+  loop: "{{ ansible_collections }}"
+  when: ansible_install_method == "pipx"
+  changed_when: true
+
+- name: Install Ansible collections (package method)
+  ansible.builtin.command:
+    cmd: "ansible-galaxy collection install {{ item }} --force"
+  loop: "{{ ansible_collections }}"
+  when: ansible_install_method == "package"
+  changed_when: true
+
+- name: Set ansible command path based on install method
+  ansible.builtin.set_fact:
+    ansible_cmd_path: >-
+      {% if ansible_install_method == 'pipx' %}
+      ~/.local/bin/ansible
+      {% elif ansible_install_method == 'pip' %}
+      {{ ansible_venv_path }}/bin/ansible
+      {% else %}
+      ansible
+      {% endif %}
+
+- name: Verify Ansible installation
+  ansible.builtin.command:
+    cmd: "{{ ansible_cmd_path }} --version"
+  register: ansible_version_check
+  changed_when: false
+
+- name: Display Ansible version
+  ansible.builtin.debug:
+    msg: "{{ ansible_version_check.stdout_lines }}"
+
+- name: Create bash profile additions for Ansible (pip method)
+  ansible.builtin.blockinfile:
+    path: "~/.bashrc"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - Ansible environment"
+    block: |
+      # Ansible virtual environment
+      export ANSIBLE_HOME="{{ ansible_venv_path }}"
+      export PATH="{{ ansible_venv_path }}/bin:$PATH"
+      
+      # Ansible configuration
+      export ANSIBLE_CONFIG="{{ ansible_config_dir }}/ansible.cfg"
+      
+      # Enable Ansible command completion
+      eval $(register-python-argcomplete ansible)
+      eval $(register-python-argcomplete ansible-config)
+      eval $(register-python-argcomplete ansible-console)
+      eval $(register-python-argcomplete ansible-doc)
+      eval $(register-python-argcomplete ansible-galaxy)
+      eval $(register-python-argcomplete ansible-inventory)
+      eval $(register-python-argcomplete ansible-playbook)
+      eval $(register-python-argcomplete ansible-pull)
+      eval $(register-python-argcomplete ansible-vault)
+    mode: '0644'
+  when: ansible_install_method == "pip"
+
+- name: Create bash profile additions for Ansible (pipx method)
+  ansible.builtin.blockinfile:
+    path: "~/.bashrc"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - Ansible environment"
+    block: |
+      # Ansible configuration
+      export ANSIBLE_CONFIG="{{ ansible_config_dir }}/ansible.cfg"
+      
+      # Ensure pipx bin directory is in PATH
+      export PATH="$HOME/.local/bin:$PATH"
+    mode: '0644'
+  when: ansible_install_method == "pipx"
