@@ -1,6 +1,7 @@
 ---
 - name: Initial OS Configuration
-  hosts: mgmt:ubuntu:debian
+  hosts: ubuntu:debian
   become: true
   roles:
     - os_configure
+    - docker

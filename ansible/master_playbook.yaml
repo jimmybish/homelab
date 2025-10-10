@@ -1,10 +1,6 @@
 ---
 - name: Initial OS Configuration
-  hosts: ubuntu:debian
-  become: true
-  roles:
-    - os_configure
-    - docker
+  ansible.builtin.import_playbook: os_setup.yaml
 
 - name: Deploy Proxy
   ansible.builtin.import_playbook: deploy_proxy.yaml
