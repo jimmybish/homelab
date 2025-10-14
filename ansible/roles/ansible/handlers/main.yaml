@@ -1,3 +1,0 @@
----
-# Ansible is not a service, so no handlers needed for restart
-# Keeping this file for consistency with role structure
