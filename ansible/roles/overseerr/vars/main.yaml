@@ -1,0 +1,23 @@
+---
+# Research Notes - Overseerr
+# Official Source: https://docs.overseerr.dev/
+# Docker Hub: https://hub.docker.com/r/linuxserver/overseerr
+# Example Compose: https://docs.overseerr.dev/getting-started/installation#docker
+# Default Port: 5055 (official documentation)
+# NGINX Proxy Config: https://github.com/linuxserver/reverse-proxy-confs/blob/master/overseerr.subdomain.conf.sample
+# Last Updated: 2025-10-14
+
+# Version information (check Docker Hub for latest stable tag)
+overseerr_version: "latest"
+
+# Port mappings (from official documentation)
+overseerr_port: 5055  # PRIMARY PORT - Official default port from documentation
+
+# Volume paths (use docker_storage_folder from group_vars)
+# Single-container service
+overseerr_folder: "{{ docker_storage_folder }}/overseerr"
+
+# Feature flags (ALL true - service has web interface)
+overseerr_configure_homepage: true    # ALWAYS true if web interface exists
+overseerr_configure_proxy: true       # ALWAYS true if web interface exists
+overseerr_configure_dns: true         # ALWAYS true if web interface exists

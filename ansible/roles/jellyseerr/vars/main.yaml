@@ -1,0 +1,23 @@
+---
+# Research Notes - Jellyseerr
+# Official Source: https://github.com/Fallenbagel/jellyseerr
+# Docker Hub: https://hub.docker.com/r/fallenbagel/jellyseerr
+# Example Compose: https://github.com/Fallenbagel/jellyseerr/blob/develop/docker-compose.yml
+# Default Port: 5055 (official documentation)
+# NGINX Proxy Config: Based on Overseerr config (Jellyseerr is a fork)
+# Last Updated: 2025-10-14
+
+# Version information (check Docker Hub for latest stable tag)
+jellyseerr_version: "latest"
+
+# Port mappings (from official documentation)
+jellyseerr_port: 5056  # Changed from 5055 to avoid conflict with Overseerr
+
+# Volume paths (use docker_storage_folder from group_vars)
+# Single-container service
+jellyseerr_folder: "{{ docker_storage_folder }}/jellyseerr"
+
+# Feature flags (ALL true - service has web interface)
+jellyseerr_configure_homepage: true    # ALWAYS true if web interface exists
+jellyseerr_configure_proxy: true       # ALWAYS true if web interface exists
+jellyseerr_configure_dns: true         # ALWAYS true if web interface exists

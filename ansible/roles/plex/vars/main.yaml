@@ -2,27 +2,22 @@
 # Research Notes - Plex Media Server Stack
 # Official Source: https://www.plex.tv/
 # Docker Hub: https://hub.docker.com/r/linuxserver/plex - Default port: 32400
-# Overseerr: https://hub.docker.com/r/linuxserver/overseerr - Default port: 5055
 # Tautulli: https://hub.docker.com/r/tautulli/tautulli - Default port: 8181
 # NGINX Proxy Configs: https://github.com/linuxserver/reverse-proxy-confs
-#   - overseerr.subdomain.conf.sample available
 #   - tautulli.subdomain.conf.sample available
-# Last Updated: 2025-10-08
+# Last Updated: 2025-10-14
 
 # Version information
 plex_version: "latest"
-plex_overseerr_version: "latest"
 plex_tautulli_version: "latest"
 
 # External ports for each service
 plex_port: 32400  # Plex main web interface (uses host networking)
-plex_overseerr_port: 5055
 plex_tautulli_port: 8181
 
 # Volume paths - Multi-container stack pattern
 plex_parent_folder: "{{ docker_storage_folder }}/plex-stack"
 plex_folder: "{{ plex_parent_folder }}/plex"
-plex_overseerr_folder: "{{ plex_parent_folder }}/overseerr"
 plex_tautulli_folder: "{{ plex_parent_folder }}/tautulli"
 
 # Feature flags (ALL true - all services have web interfaces)

@@ -1,0 +1,6 @@
+---
+- name: Install Jellyseerr
+  hosts: jellyseerr_host
+  become: true
+  roles:
+    - jellyseerr

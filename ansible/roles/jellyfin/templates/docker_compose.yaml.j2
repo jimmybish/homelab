@@ -21,22 +21,6 @@ services:
     restart: unless-stopped
     networks:
       - jellyfin_net
-      
-  jellyseerr:
-    image: fallenbagel/jellyseerr:{{ jellyfin_jellyseerr_version }}
-    container_name: jellyseerr
-    environment:
-      - LOG_LEVEL=info
-      - TZ={{ timezone }}
-      - PUID={{ docker_user_puid }}
-      - PGID={{ docker_user_pgid }}
-    ports:
-      - {{ jellyfin_jellyseerr_port }}:5055
-    volumes:
-      - {{ jellyfin_jellyseerr_folder }}:/app/config
-    restart: unless-stopped
-    networks:
-      - jellyfin_net
 
 volumes:
   mytv:

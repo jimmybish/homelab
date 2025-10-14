@@ -1,0 +1,6 @@
+---
+- name: Install Overseerr
+  hosts: overseerr_host
+  become: true
+  roles:
+    - overseerr

@@ -47,8 +47,8 @@ server {
 
         include /config/nginx/proxy.conf;
         include /config/nginx/resolver.conf;
-        set $upstream_app {{ plex_host_ip }};
-        set $upstream_port {{ plex_overseerr_port }};
+        set $upstream_app {{ overseerr_proxy_ip }};
+        set $upstream_port {{ overseerr_port }};
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
 
@@ -57,8 +57,8 @@ server {
     location ~ (/overseerr)?/api {
         include /config/nginx/proxy.conf;
         include /config/nginx/resolver.conf;
-        set $upstream_app {{ plex_host_ip }};
-        set $upstream_port {{ plex_overseerr_port }};
+        set $upstream_app {{ overseerr_proxy_ip }};
+        set $upstream_port {{ overseerr_port }};
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
 

@@ -1,0 +1,14 @@
+services:
+  overseerr:
+    image: lscr.io/linuxserver/overseerr:{{ overseerr_version }}
+    container_name: overseerr
+    restart: unless-stopped
+    environment:
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+      - TZ={{ timezone }}
+    ports:
+      - '{{ overseerr_port }}:5055'
+    volumes:
+      - {{ overseerr_folder }}:/config
+    # No explicit network needed - default Docker bridge network is sufficient

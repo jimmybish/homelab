@@ -59,13 +59,3 @@
     group: "{{ docker_user }}"
   notify:
     - Start Swag
-
-- name: Deploy Overseerr config
-  ansible.builtin.template:
-    src: "templates/external/overseerr.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/external/nginx/proxy-confs/overseerr.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
