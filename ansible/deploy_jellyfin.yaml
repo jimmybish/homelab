@@ -1,5 +1,5 @@
 ---
-- name: Install Jellyfin and Jellyseerr
+- name: Install Jellyfin
   hosts: jellyfin_host
   become: true
   roles:

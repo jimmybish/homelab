@@ -518,16 +518,25 @@ Add internal proxy configuration tasks:
 #### 4.8 Homepage Integration (REQUIRED if web interface exists)
 
 Create `templates/homepage_service.yaml.j2`:
+
+**CRITICAL: Use correct YAML indentation (2 spaces for list items, 6 spaces for properties)**
+
 ```yaml
-    - <Service Name>:
-        icon: <service>.png
-        href: {{ internal_<service>_url }}
-        description: Service description
-        widget:
-            type: <service>
-            url: {{ internal_<service>_url }}
-            key: {{ homepage_<service>_key }}
+  - <Service Name>:
+      icon: <service>.png
+      href: {{ internal_<service>_url }}
+      description: Service description
+      widget:
+        type: <service>
+        url: {{ internal_<service>_url }}
+        key: {{ homepage_<service>_key }}
 ```
+
+**Indentation Rules:**
+- List items (starting with `-`): 2 spaces from section level
+- Service properties (`icon`, `href`, etc.): 6 spaces from section level
+- Widget properties: 8 spaces from section level
+- **NEVER use 4 spaces** - this will break the YAML structure
 
 Add homepage configuration task:
 ```yaml
@@ -654,6 +663,16 @@ ansible-playbook -i inventory.yaml deploy_<service>.yaml --vault-password-file ~
 5. **Check Homepage integration (if applicable):**
    - Visit Homepage dashboard
    - Verify service appears with correct link
+   - **Verify YAML indentation is correct:**
+     ```bash
+     ssh <homepage_host> 'cat {{ homepage_folder }}/config/services.yaml | head -30'
+     ```
+   - Check that list items use 2-space indentation (not 4 spaces)
+   - **Check Homepage logs for YAML errors:**
+     ```bash
+     ssh <homepage_host> 'sudo docker logs homepage --tail 20'
+     ```
+   - Ensure no YAML parsing errors appear
 
 6. **Test idempotency:**
    ```bash
@@ -718,6 +737,8 @@ After creating the role, test the following:
 - [ ] Web interface accessible via proxy (if applicable)
 - [ ] DNS alias resolves correctly (if applicable)
 - [ ] Homepage widget displays correctly (if applicable)
+- [ ] **Homepage YAML indentation is correct** (2 spaces, not 4)
+- [ ] **Homepage container runs without YAML errors**
 - [ ] Firewall rules created correctly (if external access required)
 - [ ] Docker network created and containers connected
 - [ ] Service survives container restart

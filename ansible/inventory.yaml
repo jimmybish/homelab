@@ -51,6 +51,16 @@ plex_host:
   hosts:
     plex-lxc:
 
+# Overseerr
+overseerr_host:
+  hosts:
+    proxy:
+
+# Jellyseerr
+jellyseerr_host:
+  hosts:
+    proxy:
+
 # Jellyfin Media Server
 jellyfin_host:
   hosts:

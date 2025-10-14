@@ -1,5 +1,5 @@
 ---
-- name: Install Plex, Overseerr, and Tautulli
+- name: Install Plex and Tautulli
   hosts: plex_host
   become: true
   roles:

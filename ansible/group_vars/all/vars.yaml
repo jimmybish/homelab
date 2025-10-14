@@ -211,7 +211,16 @@ docker_storage_folder: "/etc/docker-storage"
 
 # Shared folders accessed by multiple roles
 proxy_folder: "{{ docker_storage_folder }}/swag"
+swag_external_gateway_ip: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          31653561663932393839356335393130343634353162336239363261326633383233633664393064
+          6162343632313239313165323864613639396339663462300a643339383030613530383332356632
+          37666637623435373131366137666232346465386539393262646535343163653332323961366662
+          6236306431363136370a373432316234356163313439363663323462396164653162643661323437
+          3037
 homepage_folder: "{{ docker_storage_folder }}/homepage"
+overseerr_folder: "{{ docker_storage_folder }}/overseerr"
+jellyseerr_folder: "{{ docker_storage_folder }}/jellyseerr"
 
 # Special case folders (not role-specific)
 scrypted_folder: "/share/nvr/scrypted"

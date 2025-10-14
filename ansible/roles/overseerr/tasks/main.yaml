@@ -1,0 +1,166 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup Overseerr directory
+  ansible.builtin.file:
+    path: "{{ overseerr_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Allow Overseerr port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ overseerr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Deploy Overseerr using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ overseerr_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Overseerr
+
+- name: Run docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ overseerr_folder }}"
+    state: present
+    remove_orphans: true
+
+- name: Check if Overseerr ports are open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Overseerr ports are listening
+  ansible.builtin.assert:
+    that:
+      - overseerr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Overseerr port is not open and listening!"
+    success_msg: "Overseerr port is open and listening."
+
+# Configure SWAG Internal Proxy (REQUIRED for web interfaces)
+- name: Resolve Overseerr host IP for proxy configuration
+  ansible.builtin.set_fact:
+    overseerr_proxy_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+
+- name: Deploy Overseerr nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: overseerr.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/overseerr.subdomain.conf"
+    mode: '0644'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag
+
+# Check pfSense DNS Resolver Host Overrides
+- name: Get DNS resolver host overrides from pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_overrides"
+    method: GET
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: pfsense_dns_overrides
+  delegate_to: localhost
+  when: overseerr_configure_dns | default(false)
+
+- name: Find proxy host override entry in pfSense
+  ansible.builtin.set_fact:
+    proxy_host_override: >-
+      {{ pfsense_dns_overrides.json.data
+         | selectattr('host', 'equalto', 'proxy')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | first
+         | default({}) }}
+  when:
+    - overseerr_configure_dns | default(false)
+    - pfsense_dns_overrides.json.data is defined
+
+- name: Check if Overseerr alias exists under proxy host override
+  ansible.builtin.set_fact:
+    overseerr_alias_exists: >-
+      {{ proxy_host_override.aliases | default([])
+         | selectattr('host', 'equalto', 'overseerr')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | length > 0 }}
+  when:
+    - overseerr_configure_dns | default(false)
+    - proxy_host_override is defined
+    - proxy_host_override | length > 0
+
+- name: Display Overseerr DNS alias status
+  ansible.builtin.debug:
+    msg: >-
+      {% if proxy_host_override | length == 0 %}
+      Warning: Proxy host override not found in pfSense DNS
+      {% elif overseerr_alias_exists %}
+      Overseerr DNS alias exists under proxy.{{ internal_domain }}
+      {% else %}
+      Overseerr DNS alias missing - will be created
+      {% endif %}
+  when: overseerr_configure_dns | default(false)
+
+- name: Create Overseerr DNS alias under proxy host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ proxy_host_override.id }}"
+      host: "overseerr"
+      domain: "{{ internal_domain }}"
+      descr: "Overseerr (Media request management)"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  register: alias_creation_result
+  when:
+    - overseerr_configure_dns | default(false)
+    - proxy_host_override | length > 0
+    - not overseerr_alias_exists
+
+- name: Apply DNS resolver changes in pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when:
+    - overseerr_configure_dns | default(false)
+    - alias_creation_result is succeeded
+
+# Configure Homepage Services (REQUIRED for web interfaces)
+- name: Add Overseerr to Homepage section
+  ansible.builtin.blockinfile:
+    path: "{{ homepage_folder }}/config/services.yaml"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - overseerr service"
+    block: "{{ lookup('template', 'homepage_service.yaml.j2') }}"
+    insertafter: "^- Media:"
+    mode: '0644'
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+  notify:
+    - Restart Homepage
+  when: overseerr_configure_homepage | default(true)
