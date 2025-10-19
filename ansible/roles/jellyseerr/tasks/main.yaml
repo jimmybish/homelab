@@ -164,3 +164,6 @@
   notify:
     - Restart Homepage
   when: jellyseerr_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config

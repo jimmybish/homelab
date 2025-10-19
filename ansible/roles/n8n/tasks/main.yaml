@@ -180,3 +180,6 @@
   delegate_to: "{{ groups['homepage_host'][0] }}"
   notify: Restart Homepage
   when: n8n_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config

@@ -2,7 +2,6 @@
 mgmt_hosts:
   hosts:
     mgmt:
-    mgmt-2:
 
 # QNAP NAS
 qnap:
@@ -33,9 +32,8 @@ ubuntu:
   vars:
     ansible_python_interpreter: /usr/bin/python3.10
   hosts:
-    mgmt-2:
+    mgmt:
     docker-2:
-    plex-lxc:
     jellyfin-lxc:
     proxy:
 
@@ -49,7 +47,7 @@ debian:
 # Plex Media Server
 plex_host:
   hosts:
-    plex-lxc:
+    jellyfin-lxc:
 
 # Overseerr
 overseerr_host:
@@ -80,12 +78,6 @@ homeassistant_host:
   hosts:
     homeassistant-new:
 
-# GitHub Enterprise Server
-ghes_hosts:
-  hosts:
-    ghes: # Primary
-    ghes-ha: # HA
-
 proxmox_hosts:
   hosts:
     proxmox-1:
@@ -102,7 +94,6 @@ sonarr_host:
 radarr_host:
   hosts:
     debian-downloader:
-
 
 prowlarr_host:
   hosts:

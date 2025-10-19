@@ -552,13 +552,18 @@ Add homepage configuration task:
   notify:
     - Restart Homepage
   when: <service>_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
 ```
 
 **Important Notes:**
+- **DO** add `notify: Restart Homepage` - ensures Homepage restarts when deploying a single service
 - **DO NOT** add a check to skip if the block already exists - `blockinfile` will automatically update the block if the content changes
 - This allows the role to update Homepage entries when you add new services or modify descriptions
 - The `blockinfile` module is idempotent and will only trigger changes when the block content actually differs
 - All web interfaces MUST appear on Homepage for easy access
+- When running `master_playbook.yaml --tags homepage_config`, handlers are flushed and one final restart occurs
 
 ### 5. Create Handlers (`handlers/main.yaml`)
 
@@ -920,7 +925,100 @@ Does it have multiple containers?
 17. **Add health checks** - Verify service is actually working, not just deployed
 18. **Let blockinfile handle updates** - Don't add conditional checks to skip existing blocks; blockinfile automatically updates content when it changes and is idempotent
 
-## Example: Complete Minimal Web Service Role
+## Tagging Strategy for Homepage Integration
+
+All roles that integrate with Homepage use standardized tags to enable targeted playbook execution. This allows you to update Homepage configurations across all services without running full deployments.
+
+### Tag Definitions
+
+**`homepage`** - Applied to all Homepage infrastructure and setup tasks
+- Homepage role: All tasks (directory setup, Docker deployment, networking, DNS, proxy)
+- Other roles: Homepage service integration tasks (blockinfile operations)
+
+**`homepage_config`** - Applied to Homepage configuration file deployment tasks
+- Homepage role: Config file deployment tasks (bookmarks, docker, services, settings, widgets)
+- Other roles: Homepage service integration tasks (same as `homepage` tag)
+
+### Tag Usage Examples
+
+```bash
+# Update ALL Homepage-related tasks across all roles
+# This includes Homepage infrastructure + all service integrations
+ansible-playbook master_playbook.yaml --tags homepage
+
+# Update ONLY Homepage configuration files
+# Faster - skips infrastructure setup, only updates configs
+ansible-playbook master_playbook.yaml --tags homepage_config
+
+# Force services.yaml template update and re-add all service blocks
+ansible-playbook master_playbook.yaml --tags homepage --extra-vars "force_services_update=true"
+
+# Update Homepage integration for a specific service
+ansible-playbook deploy_grafana.yaml --tags homepage
+
+# Run everything EXCEPT Homepage tasks
+ansible-playbook master_playbook.yaml --skip-tags homepage
+
+# Update Homepage for multiple services
+ansible-playbook deploy_grafana.yaml deploy_plex.yaml --tags homepage
+```
+
+### When to Use Tagged Execution
+
+**Use `--tags homepage` when:**
+- Adding a new service and want to update Homepage immediately
+- Modifying Homepage service entries (descriptions, icons, widgets)
+- Troubleshooting Homepage integration issues
+- Re-deploying Homepage after configuration changes
+- Updating all service entries after Homepage template changes
+
+**Use `--tags homepage_config` when:**
+- Only updating Homepage config files (settings, widgets, bookmarks)
+- Making changes to Homepage base template without re-running service integrations
+- Faster execution when infrastructure is already in place
+
+**Use full playbook (no tags) when:**
+- Initial deployment of new services
+- Major infrastructure changes
+- You want to ensure everything is in sync
+
+### Implementing Tags in New Roles
+
+When creating a new role with Homepage integration, always add both tags to the Homepage configuration task:
+
+```yaml
+# Configure Homepage Services
+- name: Add <service> to Homepage section
+  ansible.builtin.blockinfile:
+    path: "{{ homepage_folder }}/config/services.yaml"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - <service> service"
+    block: "{{ lookup('template', 'homepage_service.yaml.j2') }}"
+    insertafter: "^- <Section>:"
+    mode: '0644'
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+  notify:
+    - Restart Homepage
+  when: <service>_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+```
+
+**Tag Placement Rules:**
+- Always add tags at the task level (not block level, unless entire block is Homepage-related)
+- Use both `homepage` and `homepage_config` tags for service integration tasks
+- The Homepage role itself uses `homepage` for infrastructure and both tags for config deployment
+
+### Benefits of This Approach
+
+✅ **Targeted Updates:** Update only Homepage without redeploying services
+✅ **Faster Execution:** Skip lengthy service deployments when only updating Homepage
+✅ **Granular Control:** Choose between full Homepage rebuild or just config updates
+✅ **Easy Troubleshooting:** Re-run Homepage tasks without affecting running services
+✅ **Idempotent:** Safe to run repeatedly - only changes what's needed
+✅ **Consistent Pattern:** All roles follow the same tagging convention
+
+
 
 **Example: Deploying Uptime Kuma (based on real research)**
 

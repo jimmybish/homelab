@@ -249,3 +249,6 @@
   notify:
     - Restart Homepage
   when: grafana_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config

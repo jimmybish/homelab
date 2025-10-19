@@ -582,3 +582,6 @@
   notify:
     - Restart Homepage
   when: arr_suite_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
