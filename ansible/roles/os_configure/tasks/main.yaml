@@ -89,6 +89,38 @@
   notify: Restart SSH
   when: ansible_os_family == "Debian"
 
+- name: Ensure .ssh directory exists for {{ ansible_user }}
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.ssh"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0700'
+  when: ansible_os_family == "Debian"
+
+- name: Copy Ansible SSH private key
+  ansible.builtin.copy:
+    src: "{{ lookup('env', 'HOME') }}{{ ansible_private_key | regex_replace('^~', '') }}"
+    dest: "/home/{{ ansible_user }}{{ ansible_private_key | regex_replace('^~', '') }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+  when: ansible_os_family == "Debian"
+
+- name: Create SSH config file
+  ansible.builtin.blockinfile:
+    path: "/home/{{ ansible_user }}/.ssh/config"
+    create: true
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+    block: |
+      Host *
+        User {{ ansible_user }}
+        AddKeysToAgent yes
+        IdentityFile {{ ansible_private_key }}
+  when: ansible_os_family == "Debian"
+
 - name: Set timezone
   community.general.timezone:
     name: "{{ timezone }}"

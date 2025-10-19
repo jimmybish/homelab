@@ -3,12 +3,16 @@
   ansible.builtin.package:
     name: docker-compose
     state: present
+  tags:
+    - homepage
 
 - name: Ensure Docker service is running
   ansible.builtin.service:
     name: docker
     state: started
     enabled: true
+  tags:
+    - homepage
 
 - name: Setup Homepage directory
   ansible.builtin.file:
@@ -17,6 +21,8 @@
     mode: '0755'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
+  tags:
+    - homepage
 
 - name: Setup Homepage config directory
   ansible.builtin.file:
@@ -25,6 +31,8 @@
     mode: '0755'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
+  tags:
+    - homepage
 
 - name: Allow Homepage port through UFW
   community.general.ufw:
@@ -32,6 +40,8 @@
     port: "{{ homepage_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
+  tags:
+    - homepage
 
 - name: Deploy Bookmarks config
   ansible.builtin.template:
@@ -41,6 +51,9 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  tags:
+    - homepage
+    - homepage_config
 
 - name: Deploy Docker config
   ansible.builtin.template:
@@ -50,6 +63,9 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  tags:
+    - homepage
+    - homepage_config
 
 - name: Deploy Kubernetes config
   ansible.builtin.template:
@@ -59,6 +75,9 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  tags:
+    - homepage
+    - homepage_config
 
 - name: Deploy Services config
   ansible.builtin.template:
@@ -67,7 +86,10 @@
     mode: '0644'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
-    force: false
+    force: true
+  tags:
+    - homepage
+    - homepage_config
 
 - name: Deploy Settings config
   ansible.builtin.template:
@@ -77,6 +99,9 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  tags:
+    - homepage
+    - homepage_config
 
 - name: Deploy Widgets config
   ansible.builtin.template:
@@ -86,6 +111,9 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  tags:
+    - homepage
+    - homepage_config
 
 
 - name: Deploy Homepage using Docker Compose
@@ -95,17 +123,21 @@
     mode: '0644'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
-  notify:
-    - Start Homepage
+  tags:
+    - homepage
 
 - name: Run Homepage docker-compose up
   community.docker.docker_compose_v2:
     project_src: "{{ homepage_folder }}"
     state: present
     remove_orphans: false
+  tags:
+    - homepage
 
 - name: Check if Homepage port is open and listening
   community.general.listen_ports_facts:
+  tags:
+    - homepage
 
 - name: Assert Homepage port is listening
   ansible.builtin.assert:
@@ -113,10 +145,14 @@
       - homepage_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "Homepage port {{ homepage_port }} is not open and listening!"
     success_msg: "Homepage port {{ homepage_port }} is open and listening."
+  tags:
+    - homepage
 
 # Proxy Configuration
 - name: Configure nginx proxy for homepage
   when: homepage_configure_proxy | default(true)
+  tags:
+    - homepage
   block:
     - name: Get homepage host IP for proxy
       ansible.builtin.set_fact:
@@ -150,6 +186,8 @@
   register: pfsense_dns_overrides
   delegate_to: localhost
   when: homepage_configure_dns | default(true)
+  tags:
+    - homepage
 
 - name: Find proxy host override entry in pfSense
   ansible.builtin.set_fact:
@@ -163,6 +201,8 @@
   when:
     - homepage_configure_dns | default(true)
     - pfsense_dns_overrides.json.data is defined
+  tags:
+    - homepage
 
 - name: Check if homepage alias exists under proxy host override
   ansible.builtin.set_fact:
@@ -176,6 +216,8 @@
     - homepage_configure_dns | default(true)
     - proxy_host_override is defined
     - proxy_host_override | length > 0
+  tags:
+    - homepage
 
 - name: Display homepage DNS alias status
   ansible.builtin.debug:
@@ -188,6 +230,8 @@
       Homepage DNS alias missing - will be created
       {% endif %}
   when: homepage_configure_dns | default(true)
+  tags:
+    - homepage
 
 - name: Create homepage DNS alias under proxy host override
   ansible.builtin.uri:
@@ -210,6 +254,8 @@
     - homepage_configure_dns | default(true)
     - proxy_host_override | length > 0
     - not homepage_alias_exists
+  tags:
+    - homepage
 
 - name: Apply DNS resolver changes in pfSense
   ansible.builtin.uri:
@@ -223,3 +269,32 @@
   when:
     - homepage_configure_dns | default(true)
     - alias_creation_result is succeeded
+  tags:
+    - homepage
+
+- name: Restart Homepage to apply all configurations
+  community.docker.docker_compose_v2:
+    project_src: "{{ homepage_folder }}"
+    state: restarted
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Display next steps for populating Homepage with services
+  ansible.builtin.debug:
+    msg:
+      - "=========================================="
+      - "Homepage deployment complete!"
+      - "=========================================="
+      - ""
+      - "To populate Homepage with all deployed services, run:"
+      - "  ansible-playbook master_playbook.yaml --tags homepage_config --vault-password-file ~/ansible_key"
+      - ""
+      - "Or to update a specific service's Homepage entry:"
+      - "  ansible-playbook deploy_<service>.yaml --tags homepage --vault-password-file ~/ansible_key"
+      - ""
+      - "Homepage is accessible at: https://homepage.{{ internal_domain }}"
+      - "=========================================="
+  run_once: true
+  tags:
+    - homepage

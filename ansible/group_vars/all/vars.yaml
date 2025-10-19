@@ -1,6 +1,10 @@
 ---
 # ansible-vault encrypt_string --vault-password-file ~/ansible_key 'value' --name 'key_name'
 
+# Default SSH user for all hosts
+ansible_user: "jimmy"
+ansible_private_key: "~/.ssh/ansible"
+
 # Time and location
 locale_lang: "en_AU.UTF-8"
 timezone: !vault |
