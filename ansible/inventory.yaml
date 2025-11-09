@@ -33,6 +33,7 @@ ubuntu:
     ansible_python_interpreter: /usr/bin/python3.10
   hosts:
     mgmt:
+    docker-1:
     docker-2:
     jellyfin-lxc:
     proxy:
@@ -110,7 +111,7 @@ qbittorrent_host:
 # Grafana
 grafana_host:
   hosts:
-    mgmt:
+    docker-1:
 
 # Paperless
 paperless_host:

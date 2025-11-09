@@ -20,25 +20,25 @@
     - Start Swag
 
 # Static page to be served when attempting to access /settings from an external source
-- name: Deploy GHES Management Console page
-  ansible.builtin.template:
-    src: "templates/external/mconsole-nono.html.j2"
-    dest: "{{ proxy_folder }}/external/www/mconsole-nono.html"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
+# - name: Deploy GHES Management Console page
+#   ansible.builtin.template:
+#     src: "templates/external/mconsole-nono.html.j2"
+#     dest: "{{ proxy_folder }}/external/www/mconsole-nono.html"
+#     mode: '0644'
+#     owner: "{{ docker_user }}"
+#     group: "{{ docker_user }}"
+#   notify:
+#     - Start Swag
 
-- name: Deploy GHES config
-  ansible.builtin.template:
-    src: "templates/external/ghes.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/external/nginx/proxy-confs/ghes.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
+# - name: Deploy GHES config
+#   ansible.builtin.template:
+#     src: "templates/external/ghes.subdomain.conf.j2"
+#     dest: "{{ proxy_folder }}/external/nginx/proxy-confs/ghes.subdomain.conf"
+#     mode: '0644'
+#     owner: "{{ docker_user }}"
+#     group: "{{ docker_user }}"
+#   notify:
+#     - Start Swag
 
 - name: Deploy Jellyfin config
   ansible.builtin.template:
