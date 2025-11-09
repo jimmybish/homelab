@@ -161,7 +161,8 @@
     fail_msg: "One or more *Arr suite ports are not open and listening!"
     success_msg: "All *Arr suite ports are open and listening."
 
-# DNS Alias Configuration (Required for web interfaces)
+# DNS Configuration - Standardized workflow following guide
+# Step 1: Get current DNS overrides from pfSense
 - name: Get DNS resolver host overrides from pfSense
   ansible.builtin.uri:
     url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_overrides"
@@ -174,6 +175,83 @@
   delegate_to: localhost
   when: arr_suite_configure_dns | default(true)
 
+# Step 2: Ensure deployment host override exists
+- name: Find deployment host override entry in pfSense
+  ansible.builtin.set_fact:
+    deployment_host_override: >-
+      {{ pfsense_dns_overrides.json.data
+         | selectattr('host', 'equalto', inventory_hostname.split('.')[0])
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | first
+         | default({}) }}
+  when:
+    - arr_suite_configure_dns | default(true)
+    - pfsense_dns_overrides.json.data is defined
+
+- name: Create host override for deployment target if missing
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      host: "{{ inventory_hostname.split('.')[0] }}"
+      domain: "{{ internal_domain }}"
+      ip: ["{{ ansible_default_ipv4.address }}"]
+      descr: "{{ inventory_hostname.split('.')[0] | title }} host"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  register: host_override_creation
+  when:
+    - arr_suite_configure_dns | default(true)
+    - deployment_host_override | length == 0
+
+- name: Apply DNS resolver changes after host override creation
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when:
+    - arr_suite_configure_dns | default(true)
+    - host_override_creation is succeeded
+
+# Step 3: Refresh DNS overrides if we created the host override
+- name: Refresh DNS resolver host overrides after creation
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_overrides"
+    method: GET
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: pfsense_dns_overrides
+  delegate_to: localhost
+  when:
+    - arr_suite_configure_dns | default(true)
+    - host_override_creation is succeeded
+
+- name: Re-find deployment host override entry in pfSense
+  ansible.builtin.set_fact:
+    deployment_host_override: >-
+      {{ pfsense_dns_overrides.json.data
+         | selectattr('host', 'equalto', inventory_hostname.split('.')[0])
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | first
+         | default({}) }}
+  when:
+    - arr_suite_configure_dns | default(true)
+    - host_override_creation is succeeded
+
+# Step 4: Find proxy host override (for proxied services)
 - name: Find proxy host override entry in pfSense
   ansible.builtin.set_fact:
     proxy_host_override: >-
@@ -187,282 +265,333 @@
     - arr_suite_configure_dns | default(true)
     - pfsense_dns_overrides.json.data is defined
 
-- name: Check if sonarr alias exists under proxy host override
+# === Sonarr DNS Configuration ===
+# Step 5: Determine parent host override for Sonarr based on is_proxied variable
+- name: Set parent host override for Sonarr alias
+  ansible.builtin.set_fact:
+    sonarr_parent_override: "{{ proxy_host_override if (arr_suite_sonarr_is_proxied | default(true)) else deployment_host_override }}"
+  when:
+    - arr_suite_configure_dns | default(true)
+
+# Step 6: Check if Sonarr alias already exists
+- name: Check if sonarr alias exists under parent host override
   ansible.builtin.set_fact:
     sonarr_alias_exists: >-
-      {{ proxy_host_override.aliases | default([])
+      {{ sonarr_parent_override.aliases | default([])
          | selectattr('host', 'equalto', 'sonarr')
          | selectattr('domain', 'equalto', internal_domain)
          | list
          | length > 0 }}
   when:
     - arr_suite_configure_dns | default(true)
-    - proxy_host_override is defined
-    - proxy_host_override | length > 0
+    - sonarr_parent_override is defined
+    - sonarr_parent_override | length > 0
 
-- name: Check if radarr alias exists under proxy host override
+# Step 7: Display Sonarr DNS configuration status
+- name: Display DNS alias status for sonarr
+  ansible.builtin.debug:
+    msg: >-
+      {% if sonarr_parent_override | length == 0 %}
+      Warning: Parent host override not found in pfSense DNS for sonarr
+      {% elif sonarr_alias_exists %}
+      sonarr DNS alias exists under {{ sonarr_parent_override.host }}.{{ internal_domain }}
+      {% else %}
+      sonarr DNS alias missing - will be created under {{ sonarr_parent_override.host }}.{{ internal_domain }}
+      {% endif %}
+  when: arr_suite_configure_dns | default(true)
+
+# Step 8: Create Sonarr alias under parent host override
+- name: Create sonarr DNS alias under parent host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ sonarr_parent_override.id }}"
+      host: "sonarr"
+      domain: "{{ internal_domain }}"
+      descr: "Sonarr TV Show Management"
+    validate_certs: false
+    status_code: [200, 201]
+  register: sonarr_alias_result
+  delegate_to: localhost
+  when:
+    - arr_suite_configure_dns | default(true)
+    - sonarr_parent_override | length > 0
+    - not sonarr_alias_exists
+
+# === Radarr DNS Configuration ===
+# Step 5: Determine parent host override for Radarr based on is_proxied variable
+- name: Set parent host override for Radarr alias
+  ansible.builtin.set_fact:
+    radarr_parent_override: "{{ proxy_host_override if (arr_suite_radarr_is_proxied | default(true)) else deployment_host_override }}"
+  when:
+    - arr_suite_configure_dns | default(true)
+
+# Step 6: Check if Radarr alias already exists
+- name: Check if radarr alias exists under parent host override
   ansible.builtin.set_fact:
     radarr_alias_exists: >-
-      {{ proxy_host_override.aliases | default([])
+      {{ radarr_parent_override.aliases | default([])
          | selectattr('host', 'equalto', 'radarr')
          | selectattr('domain', 'equalto', internal_domain)
          | list
          | length > 0 }}
   when:
     - arr_suite_configure_dns | default(true)
-    - proxy_host_override is defined
-    - proxy_host_override | length > 0
+    - radarr_parent_override is defined
+    - radarr_parent_override | length > 0
 
-- name: Check if prowlarr alias exists under proxy host override
+# Step 7: Display Radarr DNS configuration status
+- name: Display DNS alias status for radarr
+  ansible.builtin.debug:
+    msg: >-
+      {% if radarr_parent_override | length == 0 %}
+      Warning: Parent host override not found in pfSense DNS for radarr
+      {% elif radarr_alias_exists %}
+      radarr DNS alias exists under {{ radarr_parent_override.host }}.{{ internal_domain }}
+      {% else %}
+      radarr DNS alias missing - will be created under {{ radarr_parent_override.host }}.{{ internal_domain }}
+      {% endif %}
+  when: arr_suite_configure_dns | default(true)
+
+# Step 8: Create Radarr alias under parent host override
+- name: Create radarr DNS alias under parent host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ radarr_parent_override.id }}"
+      host: "radarr"
+      domain: "{{ internal_domain }}"
+      descr: "Radarr Movie Management"
+    validate_certs: false
+    status_code: [200, 201]
+  register: radarr_alias_result
+  delegate_to: localhost
+  when:
+    - arr_suite_configure_dns | default(true)
+    - radarr_parent_override | length > 0
+    - not radarr_alias_exists
+
+# === Prowlarr DNS Configuration ===
+# Step 5: Determine parent host override for Prowlarr based on is_proxied variable
+- name: Set parent host override for Prowlarr alias
+  ansible.builtin.set_fact:
+    prowlarr_parent_override: "{{ proxy_host_override if (arr_suite_prowlarr_is_proxied | default(true)) else deployment_host_override }}"
+  when:
+    - arr_suite_configure_dns | default(true)
+
+# Step 6: Check if Prowlarr alias already exists
+- name: Check if prowlarr alias exists under parent host override
   ansible.builtin.set_fact:
     prowlarr_alias_exists: >-
-      {{ proxy_host_override.aliases | default([])
+      {{ prowlarr_parent_override.aliases | default([])
          | selectattr('host', 'equalto', 'prowlarr')
          | selectattr('domain', 'equalto', internal_domain)
          | list
          | length > 0 }}
   when:
     - arr_suite_configure_dns | default(true)
-    - proxy_host_override is defined
-    - proxy_host_override | length > 0
+    - prowlarr_parent_override is defined
+    - prowlarr_parent_override | length > 0
 
-- name: Check if lidarr alias exists under proxy host override
+# Step 7: Display Prowlarr DNS configuration status
+- name: Display DNS alias status for prowlarr
+  ansible.builtin.debug:
+    msg: >-
+      {% if prowlarr_parent_override | length == 0 %}
+      Warning: Parent host override not found in pfSense DNS for prowlarr
+      {% elif prowlarr_alias_exists %}
+      prowlarr DNS alias exists under {{ prowlarr_parent_override.host }}.{{ internal_domain }}
+      {% else %}
+      prowlarr DNS alias missing - will be created under {{ prowlarr_parent_override.host }}.{{ internal_domain }}
+      {% endif %}
+  when: arr_suite_configure_dns | default(true)
+
+# Step 8: Create Prowlarr alias under parent host override
+- name: Create prowlarr DNS alias under parent host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ prowlarr_parent_override.id }}"
+      host: "prowlarr"
+      domain: "{{ internal_domain }}"
+      descr: "Prowlarr Indexer Manager"
+    validate_certs: false
+    status_code: [200, 201]
+  register: prowlarr_alias_result
+  delegate_to: localhost
+  when:
+    - arr_suite_configure_dns | default(true)
+    - prowlarr_parent_override | length > 0
+    - not prowlarr_alias_exists
+
+# === Lidarr DNS Configuration ===
+# Step 5: Determine parent host override for Lidarr based on is_proxied variable
+- name: Set parent host override for Lidarr alias
+  ansible.builtin.set_fact:
+    lidarr_parent_override: "{{ proxy_host_override if (arr_suite_lidarr_is_proxied | default(true)) else deployment_host_override }}"
+  when:
+    - arr_suite_configure_dns | default(true)
+
+# Step 6: Check if Lidarr alias already exists
+- name: Check if lidarr alias exists under parent host override
   ansible.builtin.set_fact:
     lidarr_alias_exists: >-
-      {{ proxy_host_override.aliases | default([])
+      {{ lidarr_parent_override.aliases | default([])
          | selectattr('host', 'equalto', 'lidarr')
          | selectattr('domain', 'equalto', internal_domain)
          | list
          | length > 0 }}
   when:
     - arr_suite_configure_dns | default(true)
-    - proxy_host_override is defined
-    - proxy_host_override | length > 0
+    - lidarr_parent_override is defined
+    - lidarr_parent_override | length > 0
 
-- name: Check if sabnzbd alias exists under proxy host override
+# Step 7: Display Lidarr DNS configuration status
+- name: Display DNS alias status for lidarr
+  ansible.builtin.debug:
+    msg: >-
+      {% if lidarr_parent_override | length == 0 %}
+      Warning: Parent host override not found in pfSense DNS for lidarr
+      {% elif lidarr_alias_exists %}
+      lidarr DNS alias exists under {{ lidarr_parent_override.host }}.{{ internal_domain }}
+      {% else %}
+      lidarr DNS alias missing - will be created under {{ lidarr_parent_override.host }}.{{ internal_domain }}
+      {% endif %}
+  when: arr_suite_configure_dns | default(true)
+
+# Step 8: Create Lidarr alias under parent host override
+- name: Create lidarr DNS alias under parent host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ lidarr_parent_override.id }}"
+      host: "lidarr"
+      domain: "{{ internal_domain }}"
+      descr: "Lidarr Music Management"
+    validate_certs: false
+    status_code: [200, 201]
+  register: lidarr_alias_result
+  delegate_to: localhost
+  when:
+    - arr_suite_configure_dns | default(true)
+    - lidarr_parent_override | length > 0
+    - not lidarr_alias_exists
+
+# === SABnzbd DNS Configuration ===
+# Step 5: Determine parent host override for SABnzbd based on is_proxied variable
+- name: Set parent host override for SABnzbd alias
+  ansible.builtin.set_fact:
+    sabnzbd_parent_override: "{{ proxy_host_override if (arr_suite_sabnzbd_is_proxied | default(true)) else deployment_host_override }}"
+  when:
+    - arr_suite_configure_dns | default(true)
+
+# Step 6: Check if SABnzbd alias already exists
+- name: Check if sabnzbd alias exists under parent host override
   ansible.builtin.set_fact:
     sabnzbd_alias_exists: >-
-      {{ proxy_host_override.aliases | default([])
+      {{ sabnzbd_parent_override.aliases | default([])
          | selectattr('host', 'equalto', 'sabnzbd')
          | selectattr('domain', 'equalto', internal_domain)
          | list
          | length > 0 }}
   when:
     - arr_suite_configure_dns | default(true)
-    - proxy_host_override is defined
-    - proxy_host_override | length > 0
+    - sabnzbd_parent_override is defined
+    - sabnzbd_parent_override | length > 0
 
-- name: Check if qbittorrent alias exists under proxy host override
+# Step 7: Display SABnzbd DNS configuration status
+- name: Display DNS alias status for sabnzbd
+  ansible.builtin.debug:
+    msg: >-
+      {% if sabnzbd_parent_override | length == 0 %}
+      Warning: Parent host override not found in pfSense DNS for sabnzbd
+      {% elif sabnzbd_alias_exists %}
+      sabnzbd DNS alias exists under {{ sabnzbd_parent_override.host }}.{{ internal_domain }}
+      {% else %}
+      sabnzbd DNS alias missing - will be created under {{ sabnzbd_parent_override.host }}.{{ internal_domain }}
+      {% endif %}
+  when: arr_suite_configure_dns | default(true)
+
+# Step 8: Create SABnzbd alias under parent host override
+- name: Create sabnzbd DNS alias under parent host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ sabnzbd_parent_override.id }}"
+      host: "sabnzbd"
+      domain: "{{ internal_domain }}"
+      descr: "SABnzbd Usenet Downloader"
+    validate_certs: false
+    status_code: [200, 201]
+  register: sabnzbd_alias_result
+  delegate_to: localhost
+  when:
+    - arr_suite_configure_dns | default(true)
+    - sabnzbd_parent_override | length > 0
+    - not sabnzbd_alias_exists
+
+# === qBittorrent DNS Configuration ===
+# Step 5: Determine parent host override for qBittorrent based on is_proxied variable
+- name: Set parent host override for qBittorrent alias
+  ansible.builtin.set_fact:
+    qbittorrent_parent_override: "{{ proxy_host_override if (arr_suite_qbittorrent_is_proxied | default(true)) else deployment_host_override }}"
+  when:
+    - arr_suite_configure_dns | default(true)
+
+# Step 6: Check if qBittorrent alias already exists
+- name: Check if qbittorrent alias exists under parent host override
   ansible.builtin.set_fact:
     qbittorrent_alias_exists: >-
-      {{ proxy_host_override.aliases | default([])
+      {{ qbittorrent_parent_override.aliases | default([])
          | selectattr('host', 'equalto', 'qbittorrent')
          | selectattr('domain', 'equalto', internal_domain)
          | list
          | length > 0 }}
   when:
     - arr_suite_configure_dns | default(true)
-    - proxy_host_override is defined
-    - proxy_host_override | length > 0
+    - qbittorrent_parent_override is defined
+    - qbittorrent_parent_override | length > 0
 
-- name: Display DNS alias status for sonarr
-  ansible.builtin.debug:
-    msg: >-
-      {% if proxy_host_override | length == 0 %}
-      Warning: Proxy host override not found in pfSense DNS
-      {% elif sonarr_alias_exists %}
-      sonarr DNS alias exists under proxy.{{ internal_domain }}
-      {% else %}
-      sonarr DNS alias missing - will be created
-      {% endif %}
-  when: arr_suite_configure_dns | default(true)
-
-- name: Create sonarr DNS alias under proxy host override
-  ansible.builtin.uri:
-    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
-    method: POST
-    headers:
-      X-API-Key: "{{ pfsense_api_key }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      parent_id: "{{ proxy_host_override.id }}"
-      host: "sonarr"
-      domain: "{{ internal_domain }}"
-      descr: "Sonarr TV Show Management"
-    validate_certs: false
-    status_code: [200, 400]
-  register: sonarr_dns_result
-  delegate_to: localhost
-  when:
-    - arr_suite_configure_dns | default(true)
-    - not sonarr_alias_exists
-    - proxy_host_override | length > 0
-  failed_when:
-    - sonarr_dns_result.status == 400
-    - "'already exists' not in (sonarr_dns_result.json.message | default(''))"
-
-- name: Display DNS alias status for radarr
-  ansible.builtin.debug:
-    msg: >-
-      {% if proxy_host_override | length == 0 %}
-      Warning: Proxy host override not found in pfSense DNS
-      {% elif radarr_alias_exists %}
-      radarr DNS alias exists under proxy.{{ internal_domain }}
-      {% else %}
-      radarr DNS alias missing - will be created
-      {% endif %}
-  when: arr_suite_configure_dns | default(true)
-
-- name: Create radarr DNS alias under proxy host override
-  ansible.builtin.uri:
-    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
-    method: POST
-    headers:
-      X-API-Key: "{{ pfsense_api_key }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      parent_id: "{{ proxy_host_override.id }}"
-      host: "radarr"
-      domain: "{{ internal_domain }}"
-      descr: "Radarr Movie Management"
-    validate_certs: false
-    status_code: [200, 400]
-  register: radarr_dns_result
-  delegate_to: localhost
-  when:
-    - arr_suite_configure_dns | default(true)
-    - not radarr_alias_exists
-    - proxy_host_override | length > 0
-  failed_when:
-    - radarr_dns_result.status == 400
-    - "'already exists' not in (radarr_dns_result.json.message | default(''))"
-
-- name: Display DNS alias status for prowlarr
-  ansible.builtin.debug:
-    msg: >-
-      {% if proxy_host_override | length == 0 %}
-      Warning: Proxy host override not found in pfSense DNS
-      {% elif prowlarr_alias_exists %}
-      prowlarr DNS alias exists under proxy.{{ internal_domain }}
-      {% else %}
-      prowlarr DNS alias missing - will be created
-      {% endif %}
-  when: arr_suite_configure_dns | default(true)
-
-- name: Create prowlarr DNS alias under proxy host override
-  ansible.builtin.uri:
-    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
-    method: POST
-    headers:
-      X-API-Key: "{{ pfsense_api_key }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      parent_id: "{{ proxy_host_override.id }}"
-      host: "prowlarr"
-      domain: "{{ internal_domain }}"
-      descr: "Prowlarr Indexer Manager"
-    validate_certs: false
-    status_code: [200, 400]
-  register: prowlarr_dns_result
-  delegate_to: localhost
-  when:
-    - arr_suite_configure_dns | default(true)
-    - not prowlarr_alias_exists
-    - proxy_host_override | length > 0
-  failed_when:
-    - prowlarr_dns_result.status == 400
-    - "'already exists' not in (prowlarr_dns_result.json.message | default(''))"
-
-- name: Display DNS alias status for lidarr
-  ansible.builtin.debug:
-    msg: >-
-      {% if proxy_host_override | length == 0 %}
-      Warning: Proxy host override not found in pfSense DNS
-      {% elif lidarr_alias_exists %}
-      lidarr DNS alias exists under proxy.{{ internal_domain }}
-      {% else %}
-      lidarr DNS alias missing - will be created
-      {% endif %}
-  when: arr_suite_configure_dns | default(true)
-
-- name: Create lidarr DNS alias under proxy host override
-  ansible.builtin.uri:
-    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
-    method: POST
-    headers:
-      X-API-Key: "{{ pfsense_api_key }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      parent_id: "{{ proxy_host_override.id }}"
-      host: "lidarr"
-      domain: "{{ internal_domain }}"
-      descr: "Lidarr Music Management"
-    validate_certs: false
-    status_code: [200, 400]
-  register: lidarr_dns_result
-  delegate_to: localhost
-  when:
-    - arr_suite_configure_dns | default(true)
-    - not lidarr_alias_exists
-    - proxy_host_override | length > 0
-  failed_when:
-    - lidarr_dns_result.status == 400
-    - "'already exists' not in (lidarr_dns_result.json.message | default(''))"
-
-- name: Display DNS alias status for sabnzbd
-  ansible.builtin.debug:
-    msg: >-
-      {% if proxy_host_override | length == 0 %}
-      Warning: Proxy host override not found in pfSense DNS
-      {% elif sabnzbd_alias_exists %}
-      sabnzbd DNS alias exists under proxy.{{ internal_domain }}
-      {% else %}
-      sabnzbd DNS alias missing - will be created
-      {% endif %}
-  when: arr_suite_configure_dns | default(true)
-
-- name: Create sabnzbd DNS alias under proxy host override
-  ansible.builtin.uri:
-    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
-    method: POST
-    headers:
-      X-API-Key: "{{ pfsense_api_key }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      parent_id: "{{ proxy_host_override.id }}"
-      host: "sabnzbd"
-      domain: "{{ internal_domain }}"
-      descr: "SABnzbd Usenet Downloader"
-    validate_certs: false
-    status_code: [200, 400]
-  register: sabnzbd_dns_result
-  delegate_to: localhost
-  when:
-    - arr_suite_configure_dns | default(true)
-    - not sabnzbd_alias_exists
-    - proxy_host_override | length > 0
-  failed_when:
-    - sabnzbd_dns_result.status == 400
-    - "'already exists' not in (sabnzbd_dns_result.json.message | default(''))"
-
+# Step 7: Display qBittorrent DNS configuration status
 - name: Display DNS alias status for qbittorrent
   ansible.builtin.debug:
     msg: >-
-      {% if proxy_host_override | length == 0 %}
-      Warning: Proxy host override not found in pfSense DNS
+      {% if qbittorrent_parent_override | length == 0 %}
+      Warning: Parent host override not found in pfSense DNS for qbittorrent
       {% elif qbittorrent_alias_exists %}
-      qbittorrent DNS alias exists under proxy.{{ internal_domain }}
+      qbittorrent DNS alias exists under {{ qbittorrent_parent_override.host }}.{{ internal_domain }}
       {% else %}
-      qbittorrent DNS alias missing - will be created
+      qbittorrent DNS alias missing - will be created under {{ qbittorrent_parent_override.host }}.{{ internal_domain }}
       {% endif %}
   when: arr_suite_configure_dns | default(true)
 
-- name: Create qbittorrent DNS alias under proxy host override
+# Step 8: Create qBittorrent alias under parent host override
+- name: Create qbittorrent DNS alias under parent host override
   ansible.builtin.uri:
     url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
     method: POST
@@ -471,39 +600,38 @@
       Content-Type: "application/json"
     body_format: json
     body:
-      parent_id: "{{ proxy_host_override.id }}"
+      parent_id: "{{ qbittorrent_parent_override.id }}"
       host: "qbittorrent"
       domain: "{{ internal_domain }}"
       descr: "qBittorrent Torrent Client"
     validate_certs: false
-    status_code: [200, 400]
-  register: qbittorrent_dns_result
+    status_code: [200, 201]
+  register: qbittorrent_alias_result
   delegate_to: localhost
   when:
     - arr_suite_configure_dns | default(true)
+    - qbittorrent_parent_override | length > 0
     - not qbittorrent_alias_exists
-    - proxy_host_override | length > 0
-  failed_when:
-    - qbittorrent_dns_result.status == 400
-    - "'already exists' not in (qbittorrent_dns_result.json.message | default(''))"
 
-- name: Apply DNS resolver changes
+# Step 9: Apply DNS changes in pfSense
+- name: Apply DNS resolver changes in pfSense
   ansible.builtin.uri:
     url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
     method: POST
     headers:
       X-API-Key: "{{ pfsense_api_key }}"
     validate_certs: false
-    status_code: 200
+    status_code: [200, 201]
   delegate_to: localhost
   when:
     - arr_suite_configure_dns | default(true)
-    - (sonarr_dns_result is changed) or
-      (radarr_dns_result is changed) or
-      (prowlarr_dns_result is changed) or
-      (lidarr_dns_result is changed) or
-      (sabnzbd_dns_result is changed) or
-      (qbittorrent_dns_result is changed)
+    - (sonarr_alias_result is succeeded or
+       radarr_alias_result is succeeded or
+       prowlarr_alias_result is succeeded or
+       lidarr_alias_result is succeeded or
+       sabnzbd_alias_result is succeeded or
+       qbittorrent_alias_result is succeeded or
+       host_override_creation is succeeded)
 
 # Configure SWAG Internal Proxy
 - name: Resolve arr_suite host IP for proxy configuration

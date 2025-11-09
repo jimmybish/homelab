@@ -30,15 +30,15 @@
   notify:
     - Start Swag
 
-- name: Deploy GHES config
-  ansible.builtin.template:
-    src: "templates/internal/ghes.subdomain.conf.j2"
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/ghes.subdomain.conf"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-  notify:
-    - Start Swag
+# - name: Deploy GHES config
+#   ansible.builtin.template:
+#     src: "templates/internal/ghes.subdomain.conf.j2"
+#     dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/ghes.subdomain.conf"
+#     mode: '0644'
+#     owner: "{{ docker_user }}"
+#     group: "{{ docker_user }}"
+#   notify:
+#     - Start Swag
 
 - name: Deploy Home Assistant config
   ansible.builtin.template:

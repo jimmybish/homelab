@@ -68,10 +68,10 @@
       {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0]) == '127.0.1.1') |
       ternary((lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0] ~ '.' ~ internal_domain,
       lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0])) }}
-    proxy_ghes_ip: >-
-      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'ghes_hosts').split(','))[0]) == '127.0.1.1') |
-      ternary((lookup('ansible.builtin.inventory_hostnames', 'ghes_hosts').split(','))[0] ~ '.' ~ internal_domain,
-      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'ghes_hosts').split(','))[0])) }}
+    # proxy_ghes_ip: >-
+    #   {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'ghes_hosts').split(','))[0]) == '127.0.1.1') |
+    #   ternary((lookup('ansible.builtin.inventory_hostnames', 'ghes_hosts').split(','))[0] ~ '.' ~ internal_domain,
+    #   lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'ghes_hosts').split(','))[0])) }}
     proxy_homeassistant_ip: >-
       {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'homeassistant_host').split(','))[0]) == '127.0.1.1') |
       ternary((lookup('ansible.builtin.inventory_hostnames', 'homeassistant_host').split(','))[0] ~ '.' ~ internal_domain,
@@ -117,7 +117,7 @@
       - "- proxy_plex_ip = {{ proxy_plex_ip }}"
       - "- proxy_jellyfin_ip = {{ proxy_jellyfin_ip }}"
       - "- proxy_fileserver_ip = {{ proxy_fileserver_ip }}"
-      - "- proxy_ghes_ip = {{ proxy_ghes_ip }}"
+      # - "- proxy_ghes_ip = {{ proxy_ghes_ip }}"
       - "- proxy_homeassistant_ip = {{ proxy_homeassistant_ip }}"
       - "- proxy_prowlarr_ip = {{ proxy_prowlarr_ip }}"
       - "- proxy_sonarr_ip = {{ proxy_sonarr_ip }}"

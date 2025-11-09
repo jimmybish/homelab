@@ -35,3 +35,11 @@ arr_suite_lidarr_folder: "{{ arr_suite_parent_folder }}/lidarr"
 arr_suite_configure_proxy: true
 arr_suite_configure_dns: true
 arr_suite_configure_homepage: true
+
+# DNS configuration - individual is_proxied flags per service
+arr_suite_sonarr_is_proxied: true
+arr_suite_radarr_is_proxied: true
+arr_suite_prowlarr_is_proxied: true
+arr_suite_lidarr_is_proxied: true
+arr_suite_sabnzbd_is_proxied: true
+arr_suite_qbittorrent_is_proxied: true

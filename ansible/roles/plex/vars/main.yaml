@@ -22,5 +22,9 @@ plex_tautulli_folder: "{{ plex_parent_folder }}/tautulli"
 
 # Feature flags (ALL true - all services have web interfaces)
 plex_configure_dns: true
+plex_is_proxied: false  # Plex accessed directly on port 32400, not through reverse proxy
 plex_configure_proxy: true
 plex_configure_homepage: true
+
+plex_tautulli_configure_dns: true
+plex_tautulli_is_proxied: true  # Tautulli IS proxied through NGINX
