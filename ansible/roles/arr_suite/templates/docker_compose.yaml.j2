@@ -78,22 +78,6 @@ services:
     restart: unless-stopped
     networks:
       - arr_suite_net
-  lidarr:
-    image: lscr.io/linuxserver/lidarr:{{ arr_suite_version }}
-    container_name: lidarr
-    environment:
-      - PUID={{ docker_user_puid }}
-      - PGID={{ docker_user_pgid }}
-      - TZ={{ timezone }}
-    volumes:
-      - {{ arr_suite_lidarr_folder }}:/config
-      - mymusic:/music
-      - {{ arr_suite_downloads_folder }}:/downloads
-    ports:
-      - {{ arr_suite_lidarr_port }}:8686
-    restart: unless-stopped
-    networks:
-      - arr_suite_net
 
 volumes:
   mytv:
@@ -108,12 +92,6 @@ volumes:
       type: nfs
       o: "addr={{ arr_fileserver_ip}},nolock,soft,rw"
       device: ":{{ fs_media_movies }}"
-  mymusic:
-    driver: local
-    driver_opts:
-      type: nfs
-      o: "addr={{ arr_fileserver_ip}},nolock,soft,rw"
-      device: ":{{ fs_media_music }}"
 
 networks:
   arr_suite_net:
