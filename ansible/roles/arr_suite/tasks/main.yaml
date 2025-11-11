@@ -50,17 +50,17 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
-- name: Setup Lidarr directory
+- name: Setup qBittorrent directory
   ansible.builtin.file:
-    path: "{{ arr_suite_lidarr_folder }}"
+    path: "{{ arr_suite_qbittorrent_folder }}"
     state: directory
     mode: '0755'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
-- name: Setup qBittorrent directory
+- name: Setup downloads directory
   ansible.builtin.file:
-    path: "{{ arr_suite_qbittorrent_folder }}"
+    path: "{{ arr_suite_downloads_folder }}"
     state: directory
     mode: '0755'
     owner: "{{ docker_user }}"
@@ -115,13 +115,6 @@
     proto: udp
   when: ansible_os_family == "Debian"
 
-- name: Allow Lidarr port through UFW
-  community.general.ufw:
-    rule: allow
-    port: "{{ arr_suite_lidarr_port }}"
-    proto: tcp
-  when: ansible_os_family == "Debian"
-
 - name: Get fileserver IP
   ansible.builtin.set_fact:
     arr_fileserver_ip: "{{ lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0]) }}"
@@ -157,7 +150,6 @@
       - arr_suite_qbittorrent_webui_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
       - arr_suite_qbittorrent_peer_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
       - arr_suite_qbittorrent_peer_port | int in (ansible_facts.udp_listen | map(attribute='port') | list)
-      - arr_suite_lidarr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "One or more *Arr suite ports are not open and listening!"
     success_msg: "All *Arr suite ports are open and listening."
 

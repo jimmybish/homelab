@@ -39,11 +39,11 @@ ubuntu:
     proxy:
 
 # All Debian hosts
-debian:
-  vars:
-    ansible_python_interpreter: /usr/bin/python3.11
-  hosts:
-    debian-downloader:
+#debian:
+#  vars:
+#    ansible_python_interpreter: /usr/bin/python3.11
+#  hosts:
+#    debian-downloader:
 
 # Plex Media Server
 plex_host:
@@ -86,28 +86,28 @@ proxmox_hosts:
 
 lidarr_host:
   hosts:
-    debian-downloader:
+    docker-1:
 
 sonarr_host:
   hosts:
-    debian-downloader:
+    docker-1:
 
 radarr_host:
   hosts:
-    debian-downloader:
+    docker-1:
 
 prowlarr_host:
   hosts:
-    debian-downloader:
+    docker-1:
 
 sabnzbd_host:
   hosts:
-    debian-downloader:
+    docker-1:
 
 qbittorrent_host:
   hosts:
-    debian-downloader:
-
+    docker-1:
+    
 # Grafana
 grafana_host:
   hosts:
