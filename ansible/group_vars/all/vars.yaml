@@ -104,6 +104,7 @@ internal_prowlarr_url: "https://prowlarr.{{ internal_domain }}"
 internal_lidarr_url: "https://lidarr.{{ internal_domain }}"
 internal_sabnzbd_url: "https://sabnzbd.{{ internal_domain }}"
 internal_qbittorrent_url: "https://qbittorrent.{{ internal_domain }}"
+internal_huntarr_url: "https://huntarr.{{ internal_domain }}"
 internal_sovol_url: "http://{{ (lookup('ansible.builtin.inventory_hostnames', 'sovol_sv08').split(','))[0] }}/"
 internal_tautulli_url: "https://tautulli.{{ internal_domain }}"
 

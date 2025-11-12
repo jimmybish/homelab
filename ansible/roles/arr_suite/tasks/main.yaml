@@ -58,6 +58,14 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
+- name: Setup Huntarr directory
+  ansible.builtin.file:
+    path: "{{ arr_suite_huntarr_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
 - name: Setup downloads directory
   ansible.builtin.file:
     path: "{{ arr_suite_downloads_folder }}"
@@ -115,6 +123,13 @@
     proto: udp
   when: ansible_os_family == "Debian"
 
+- name: Allow Huntarr port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ arr_suite_huntarr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
 - name: Get fileserver IP
   ansible.builtin.set_fact:
     arr_fileserver_ip: "{{ lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0]) }}"
@@ -150,6 +165,7 @@
       - arr_suite_qbittorrent_webui_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
       - arr_suite_qbittorrent_peer_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
       - arr_suite_qbittorrent_peer_port | int in (ansible_facts.udp_listen | map(attribute='port') | list)
+      - arr_suite_huntarr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "One or more *Arr suite ports are not open and listening!"
     success_msg: "All *Arr suite ports are open and listening."
 
@@ -605,6 +621,64 @@
     - qbittorrent_parent_override | length > 0
     - not qbittorrent_alias_exists
 
+# === Huntarr DNS Configuration ===
+# Step 5: Determine parent host override for Huntarr based on is_proxied variable
+- name: Set parent host override for Huntarr alias
+  ansible.builtin.set_fact:
+    huntarr_parent_override: "{{ proxy_host_override if (arr_suite_huntarr_is_proxied | default(true)) else deployment_host_override }}"
+  when:
+    - arr_suite_configure_dns | default(true)
+
+# Step 6: Check if Huntarr alias already exists
+- name: Check if huntarr alias exists under parent host override
+  ansible.builtin.set_fact:
+    huntarr_alias_exists: >-
+      {{ huntarr_parent_override.aliases | default([])
+         | selectattr('host', 'equalto', 'huntarr')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | length > 0 }}
+  when:
+    - arr_suite_configure_dns | default(true)
+    - huntarr_parent_override is defined
+    - huntarr_parent_override | length > 0
+
+# Step 7: Display Huntarr DNS configuration status
+- name: Display DNS alias status for huntarr
+  ansible.builtin.debug:
+    msg: >-
+      {% if huntarr_parent_override | length == 0 %}
+      Warning: Parent host override not found in pfSense DNS for huntarr
+      {% elif huntarr_alias_exists %}
+      huntarr DNS alias exists under {{ huntarr_parent_override.host }}.{{ internal_domain }}
+      {% else %}
+      huntarr DNS alias missing - will be created under {{ huntarr_parent_override.host }}.{{ internal_domain }}
+      {% endif %}
+  when: arr_suite_configure_dns | default(true)
+
+# Step 8: Create Huntarr alias under parent host override
+- name: Create huntarr DNS alias under parent host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ huntarr_parent_override.id }}"
+      host: "huntarr"
+      domain: "{{ internal_domain }}"
+      descr: "Huntarr Missing Content Hunter"
+    validate_certs: false
+    status_code: [200, 201]
+  register: huntarr_alias_result
+  delegate_to: localhost
+  when:
+    - arr_suite_configure_dns | default(true)
+    - huntarr_parent_override | length > 0
+    - not huntarr_alias_exists
+
 # Step 9: Apply DNS changes in pfSense
 - name: Apply DNS resolver changes in pfSense
   ansible.builtin.uri:
@@ -623,6 +697,7 @@
        lidarr_alias_result is succeeded or
        sabnzbd_alias_result is succeeded or
        qbittorrent_alias_result is succeeded or
+       huntarr_alias_result is succeeded or
        host_override_creation is succeeded)
 
 # Configure SWAG Internal Proxy
@@ -685,6 +760,16 @@
   ansible.builtin.template:
     src: qbittorrent.subdomain.conf.j2
     dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/qbittorrent.subdomain.conf"
+    mode: '0644'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag
+  when: arr_suite_configure_proxy | default(true)
+
+- name: Deploy Huntarr nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: huntarr.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/huntarr.subdomain.conf"
     mode: '0644'
   delegate_to: "{{ groups['proxy_host'][0] }}"
   notify:

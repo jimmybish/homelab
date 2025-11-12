@@ -21,6 +21,7 @@ arr_suite_sabnzbd_port: 8080
 arr_suite_qbittorrent_webui_port: 8081
 arr_suite_qbittorrent_peer_port: 6881
 arr_suite_lidarr_port: 8686
+arr_suite_huntarr_port: 9705
 
 # Volume paths - Multi-container stack pattern
 arr_suite_parent_folder: "{{ docker_storage_folder }}/arr-suite-stack"
@@ -30,6 +31,7 @@ arr_suite_prowlarr_folder: "{{ arr_suite_parent_folder }}/prowlarr"
 arr_suite_sabnzbd_folder: "{{ arr_suite_parent_folder }}/sabnzbd"
 arr_suite_qbittorrent_folder: "{{ arr_suite_parent_folder }}/qbittorrent"
 arr_suite_lidarr_folder: "{{ arr_suite_parent_folder }}/lidarr"
+arr_suite_huntarr_folder: "{{ arr_suite_parent_folder }}/huntarr"
 
 # Feature flags (ALL true - multiple services have web interfaces)
 arr_suite_configure_proxy: true
@@ -43,3 +45,4 @@ arr_suite_prowlarr_is_proxied: true
 arr_suite_lidarr_is_proxied: true
 arr_suite_sabnzbd_is_proxied: true
 arr_suite_qbittorrent_is_proxied: true
+arr_suite_huntarr_is_proxied: true

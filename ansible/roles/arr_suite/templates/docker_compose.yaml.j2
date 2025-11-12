@@ -78,6 +78,18 @@ services:
     restart: unless-stopped
     networks:
       - arr_suite_net
+  huntarr:
+    image: ghcr.io/plexguide/huntarr:latest
+    container_name: huntarr
+    environment:
+      - TZ={{ timezone }}
+    volumes:
+      - {{ arr_suite_huntarr_folder }}:/config
+    ports:
+      - {{ arr_suite_huntarr_port }}:9705
+    restart: unless-stopped
+    networks:
+      - arr_suite_net
 
 volumes:
   mytv:
