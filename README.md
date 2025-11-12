@@ -1,41 +1,41 @@
 ## Jimmy's Home Lab
 All the self-hosted thangs, mostly controlled by Ansible.
 
+### Ansible Automation with GitHub Copilot
+
+I'm using GitHub Copilot as an AI-powered Ansible administrator to help automate the deployment and management of services across the homelab. The agent follows a detailed role creation guide that keeps things consistent - it always starts by researching official documentation and Docker Hub examples before creating anything, uses battle-tested configurations from LinuxServer.io where available, and automatically wires up DNS, reverse proxies, Homepage dashboard entries, and health checks for each service. The approach emphasizes idempotent deployments (so you can run playbooks repeatedly without breaking things) and proper network isolation for multi-container stacks. It's basically letting an LLM do the heavy lifting while keeping guardrails in place to ensure everything follows best practices.
+
+The agent prompts are in [./github/agents](./github/agents).
+
 **This is a work in progress - Not all deployed apps are via Ansible yet, not all roles are used by playbooks (or even tested) yet, and there's probably smarter ways of doing things. I'm always learning!**
 
 This will deploy:
 - Docker
 - [Homepage](https://gethomepage.dev/)
-- Jellyfin Host
+- **Media Services:**
   - [Jellyfin](https://hub.docker.com/r/linuxserver/jellyfin)
-  - [Jellyseerr](https://hub.docker.com/r/fallenbagel/jellyseerr)
-- Plex Host
   - [Plex](https://hub.docker.com/r/linuxserver/plex)
-  - [Overseerr](https://hub.docker.com/r/linuxserver/overseerr)
   - [Tautulli](https://tautulli.com/)
-- [SWAG](https://docs.linuxserver.io/general/swag/) (internal and externally facing reverse proxies)
-  - External
-    - GitHub Enterprise Server (kind of works, not all features tested)
-    - Jellyfin
-    - Jellyseerr
-    - Overseerr
-  - Internal
-    - Frigate
-    - GitHub Enterprise Server
-    - Home Assistant
-    - Homepage
-    - Jellyfin
-    - Jellyseerr
-    - Overseerr
-    - pfSense
-    - Prowlarr
-    - Proxmox Web UI
-    - Radarr
-    - Sonarr
-    - Tautulli
-    - Lidarr
-- [Node Exporter](https://github.com/prometheus/node_exporter) (on each Ubuntu host, monitored by Prometheus)
-- [Prometheus](https://prometheus.io/) (runs in Docker, scrapes Node Exporter metrics from all hosts)
+  - [Jellyseerr](https://hub.docker.com/r/fallenbagel/jellyseerr)
+  - [Overseerr](https://hub.docker.com/r/linuxserver/overseerr) (not in master playbook)
+- **Arr Suite Stack (media automation):**
+  - [Sonarr](https://hub.docker.com/r/linuxserver/sonarr)
+  - [Radarr](https://hub.docker.com/r/linuxserver/radarr)
+  - [Prowlarr](https://hub.docker.com/r/linuxserver/prowlarr)
+  - [Lidarr](https://hub.docker.com/r/linuxserver/lidarr)
+  - [SABnzbd](https://hub.docker.com/r/linuxserver/sabnzbd)
+  - [qBittorrent](https://hub.docker.com/r/linuxserver/qbittorrent)
+  - [Huntarr](https://github.com/plexguide/huntarr)
+- **Productivity:**
+  - [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx)
+  - [n8n](https://n8n.io/)
+- **Grafana Stack (monitoring & logs):**
+  - [Grafana](https://grafana.com/)
+  - [Prometheus](https://prometheus.io/)
+  - [Loki](https://grafana.com/oss/loki/)
+- **Infrastructure:**
+  - [SWAG](https://docs.linuxserver.io/general/swag/) - Internal and external reverse proxies
+  - [Node Exporter](https://github.com/prometheus/node_exporter) - Deployed on all Ubuntu hosts
 
 ### Hardware
 - pfSense router from AliExpress (Intel Celeron J4125 Mini PC with 4x 2.5gbe eth ports)
@@ -44,68 +44,6 @@ This will deploy:
 - QNAP TS-664 NAS and TR-004 add-on. 6x 8TB drives and 4x 4TB drives in RAID 5 storage pools.
 
 ![image](images/Network-rack.jpg)
-
-### Architecture Overview
-
-```mermaid
-graph TD
-    Internet((Internet))
-    
-    Internet --> Router[pfSense Router<br/>Intel Celeron J4125]
-    Router --> Switch[TP-Link Omada Switch<br/>24 Port PoE]
-    
-    Switch --> Controller[TP-Link Controller]
-    Switch --> APs[WiFi APs]
-    
-    Switch --> ProxmoxCluster
-    Switch --> NAS
-    Switch --> Printer[Sovol SV08<br/>3D Printer]
-    
-    subgraph ProxmoxCluster["Proxmox HA Cluster (2x Intel NUC 12 Pro)"]
-        direction TB
-        
-        subgraph VMs["Virtual Machines & LXC Containers"]
-            direction TB
-            
-            subgraph Row1["Infrastructure Services"]
-                Proxy[proxy<br/>SWAG Proxies]
-                Mgmt[mgmt<br/>Monitoring]
-            end
-            
-            subgraph Row2["Docker Hosts"]
-                Docker1[docker-1<br/>Paperless]
-                Docker2[docker-2<br/>Homepage]
-            end
-            
-            subgraph Row3["Media Services"]
-                PlexLXC[plex-lxc<br/>Plex + Overseerr + Tautulli]
-                JellyfinLXC[jellyfin-lxc<br/>Jellyfin + Jellyseerr]
-            end
-            
-            subgraph Row4["Enterprise & HA"]
-                GHES[GitHub Enterprise]
-                GHES_HA[GitHub Enterprise HA]
-                HomeAssistant[Home Assistant OS]
-            end
-        end
-    end
-    
-    subgraph NAS["QNAP TS-664 NAS (6x8TB + 4x4TB RAID5)"]
-        direction TB
-        Storage[Storage Arrays]
-        DebianDownloader[debian-downloader<br/>*Only VM not on NUCs<br/><br/>• Sonarr/Radarr/Lidarr<br/>• Prowlarr<br/>• SABnzbd/qBittorrent]
-        
-        Storage --- DebianDownloader
-    end
-    
-    style Internet fill:#e1f5fe
-    style Router fill:#fff3e0
-    style ProxmoxCluster fill:#f3e5f5
-    style NAS fill:#e8f5e8
-    style DebianDownloader fill:#fff8e1
-    style Proxy fill:#ffebee
-    style Mgmt fill:#f1f8e9
-```
 
 ### Software
 Services are Docker Compose files, wherever possible. These are hosted on a combination of VMs and LXC containers on the Proxmox host, with a couple of containers that are heavier on storage I/O, or use the Coral TPU, running on the QNAP NAS.
@@ -143,12 +81,13 @@ ansible-playbook master_playbook.yaml -i inventory.yaml --vault-password-file ~/
 ```
 
 ### Monitoring & Metrics
-- Node Exporter is deployed on all Ubuntu hosts (VMs and LXCs) for system metrics.
-- Prometheus runs in Docker and scrapes metrics from all Node Exporter endpoints using FQDNs.
-- Prometheus configuration and DNS are set up to ensure all hosts are reachable and monitored.
-- If new hosts are added, ensure Node Exporter is running and the FQDN is resolvable from the Prometheus container.
-
-### To Do
+- **Grafana Stack (docker-1):** Grafana, Prometheus, and Loki deployed together for monitoring and log aggregation
+### Monitoring & Metrics
+- **Grafana Stack:** Grafana, Prometheus, and Loki deployed together for monitoring and log aggregation
+- **Node Exporter:** Deployed on all Ubuntu hosts (VMs and LXCs) for system metrics
+- Prometheus scrapes metrics from all Node Exporter endpoints using FQDNs
+- Loki aggregates logs from all services
+- If new hosts are added, ensure Node Exporter is running and the FQDN is resolvable from the Prometheus container
 - Change the structure of the playbooks. If I deploy an app, it should make changes on any hosts required for that app to work (proxy, DNS, collectd, etc). This probably means limiting role templates to the initial config for deployment and having playbooks drop in chunks of config to those existing files, instead.
 - Split out the internal proxy to each host and have the container tags add the service automatically.
 - Have the playbook reserve DHCP leases and add aliases to DNS when a new host is created. Currently, these are in pfSense, but I may switch to OPNsense before adding this functionality.
