@@ -1107,6 +1107,8 @@ Does it have multiple containers?
 16. **Follow naming conventions** - Keep variable names consistent across roles
 17. **Add health checks** - Verify service is actually working, not just deployed
 18. **Let blockinfile handle updates** - Don't add conditional checks to skip existing blocks; blockinfile automatically updates content when it changes and is idempotent
+19. **Test the HTML body for an expected output** - When possible, verify web interfaces load correctly, either via the proxy or directly
+20. **Check Homepage YAML indentation** - Ensure 2-space indentation for list items to avoid
 
 ## Tagging Strategy for Homepage Integration
 
