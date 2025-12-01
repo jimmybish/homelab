@@ -1,0 +1,53 @@
+---
+# JellyPlex-Watched deployment tasks
+# This role deploys a background sync service (no web interface)
+
+# Docker Prerequisites
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+# Directory Setup
+- name: Setup JellyPlex-Watched directory
+  ansible.builtin.file:
+    path: "{{ jellyplex_watched_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+# Deploy Configuration Files
+- name: Deploy JellyPlex-Watched .env file
+  ansible.builtin.template:
+    src: "templates/env.j2"
+    dest: "{{ jellyplex_watched_folder }}/.env"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start JellyPlex-Watched
+
+- name: Deploy JellyPlex-Watched using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ jellyplex_watched_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start JellyPlex-Watched
+
+- name: Run docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ jellyplex_watched_folder }}"
+    state: present
+    remove_orphans: true

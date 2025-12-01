@@ -1,0 +1,6 @@
+---
+- name: Install JellyPlex-Watched
+  hosts: jellyplex_watched_host
+  become: true
+  roles:
+    - jellyplex_watched

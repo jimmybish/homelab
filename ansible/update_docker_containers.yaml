@@ -5,50 +5,29 @@
 - name: Update all Docker Compose containers
   hosts:
     - ubuntu
-    - debian
   become: true
-  vars:
-    compose_projects:
-      - "{{ plex_parent_folder }}"
-      - "{{ jellyfin_folder }}"
-      - "{{ proxy_folder }}"
-      - "{{ homepage_folder }}"
-      - "{{ paperless_folder }}"
-      - "{{ grafana_parent_folder }}"
-      - "{{ loki_data_folder }}"
-      - "{{ prometheus_data_folder }}"
-      # Add more as needed, e.g. arr_suite_sonarr_folder, arr_suite_radarr_folder, etc.
   tasks:
-    - name: Check for docker-compose.yaml or docker-compose.yml in each project
-      ansible.builtin.stat:
-        path: "{{ item }}/docker-compose.yaml"
-      register: compose_yaml
-      loop: "{{ compose_projects }}"
-      ignore_errors: yes
+    - name: Find all docker-compose.yaml files
+      ansible.builtin.find:
+        paths: "{{ docker_storage_folder }}"
+        patterns: "docker-compose.yaml,docker-compose.yml"
+        recurse: true
+      register: compose_files
 
-    - name: Check for docker-compose.yml in each project (if .yaml not found)
-      ansible.builtin.stat:
-        path: "{{ item }}/docker-compose.yml"
-      register: compose_yml
-      loop: "{{ compose_projects }}"
-      when: not compose_yaml.results[loop.index0].stat.exists
-      ignore_errors: yes
-
-    - name: Set list of valid compose projects
+    - name: Set list of valid compose projects (parent directories)
       ansible.builtin.set_fact:
-        valid_compose_projects: >-
-          {{ compose_projects | zip(compose_yaml.results) | selectattr('1.stat.exists', 'equalto', true) | map(attribute='0') | list }}
+        valid_compose_projects: "{{ compose_files.files | map(attribute='path') | map('dirname') | unique | list }}"
 
     - name: Remove stopped containers for each project
       community.docker.docker_prune:
         containers: true
-      ignore_errors: yes
+      failed_when: false
 
     - name: Pull latest images (docker compose v2)
       community.docker.docker_compose_v2_pull:
         project_src: "{{ item }}"
       loop: "{{ valid_compose_projects }}"
-      ignore_errors: yes
+      ignore_errors: true
       register: pull_results
 
     - name: Bring up containers (docker compose v2)
@@ -57,13 +36,13 @@
         state: present
         remove_orphans: true
       loop: "{{ valid_compose_projects }}"
-      ignore_errors: yes
+      ignore_errors: true
       register: up_results
 
     - name: Show pull results
-      debug:
+      ansible.builtin.debug:
         var: pull_results
 
     - name: Show up results
-      debug:
+      ansible.builtin.debug:
         var: up_results
