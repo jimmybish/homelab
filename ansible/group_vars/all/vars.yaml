@@ -96,7 +96,7 @@ internal_omada_url: "https://tp-oc200.{{ internal_domain }}"
 internal_overseerr_url: "https://overseerr.{{ internal_domain }}"
 internal_paperless_url: "https://paperless.{{ internal_domain }}"
 internal_pfsense_url: "https://pfsense.{{ internal_domain }}"
-internal_plex_url: "http://plex-lxc.{{ internal_domain }}:32400"
+internal_plex_url: "https://plex.{{ internal_domain }}:32400"
 internal_portainer_url: "https://portainer.{{ internal_domain }}"
 internal_radarr_url: "https://radarr.{{ internal_domain }}"
 internal_sonarr_url: "https://sonarr.{{ internal_domain }}"
@@ -226,6 +226,27 @@ swag_external_gateway_ip: !vault |
 homepage_folder: "{{ docker_storage_folder }}/homepage"
 overseerr_folder: "{{ docker_storage_folder }}/overseerr"
 jellyseerr_folder: "{{ docker_storage_folder }}/jellyseerr"
+
+# JellyPlex-Watched Configuration
+jellyplex_watched_folder: "{{ docker_storage_folder }}/jellyplex-watched"
+# TODO: Add encrypted tokens with these commands:
+# ansible-vault encrypt_string --vault-password-file ~/ansible_key 'your_plex_token' --name 'jellyplex_plex_token'
+# ansible-vault encrypt_string --vault-password-file ~/ansible_key 'your_jellyfin_token' --name 'jellyplex_jellyfin_token'
+jellyplex_plex_token: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          38616435663861363963646339376638613434396134626437363561363533393630353332643634
+          3533646432393030623933306562333538306138393561640a653030376337663133653064643839
+          31376233643534626238623563666361623666376166666339306533383761373666323635396364
+          3537336163356439310a353266643665386230613330303266613736643066313466666366386138
+          31386466316532346537613534396139386537303831363065353730626636633361
+jellyplex_jellyfin_token: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          32306433616535643232346130346235353430636265633534643235383230663432336337343035
+          3731336435303435303135353132353235333436636464340a383932346338633732316263616462
+          65363161373637306264623763616335323238313235373036646232346563353363353763643439
+          3064333035373630310a666136306339313766613662616264623534343361356662623466393436
+          39316662343630323333623038386465333538366433323638386630653730303730303063666166
+          6665376130636266653033306635353339393438623662353031
 
 # Special case folders (not role-specific)
 scrypted_folder: "/share/nvr/scrypted"

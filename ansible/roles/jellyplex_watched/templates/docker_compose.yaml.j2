@@ -1,0 +1,12 @@
+services:
+  jellyplex-watched:
+    image: luigi311/jellyplex-watched:{{ jellyplex_watched_version }}
+    container_name: jellyplex-watched
+    restart: unless-stopped
+    environment:
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+      - TZ={{ timezone }}
+    env_file: "./.env"
+    volumes:
+      - {{ jellyplex_watched_folder }}:/app/data
