@@ -8,6 +8,9 @@
 - name: Deploy Homepage
   ansible.builtin.import_playbook: deploy_homepage.yaml
 
+- name: Deploy Maintainerr
+  ansible.builtin.import_playbook: deploy_maintainerr.yaml
+
 - name: Deploy Arr Suite
   ansible.builtin.import_playbook: deploy_arr.yaml
 

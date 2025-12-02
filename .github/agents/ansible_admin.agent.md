@@ -922,7 +922,7 @@ After creating the role, test the following:
 - [ ] Docker compose template uses official image and follows official examples
 - [ ] Container(s) start and remain running
 - [ ] Health check passes (ports listening)
-- [ ] Web interface accessible via proxy (if applicable)
+- [ ] Web interface accessible via proxy (if applicable) (not just the HTTP response code, but check for body content)
 - [ ] DNS alias resolves correctly (if applicable)
 - [ ] Homepage widget displays correctly (if applicable)
 - [ ] **Homepage YAML indentation is correct** (2 spaces, not 4)

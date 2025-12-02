@@ -1,0 +1,24 @@
+---
+# Research Notes - Maintainerr
+# Official Source: https://github.com/Maintainerr/Maintainerr
+# Docker Hub: https://hub.docker.com/r/jorenn92/maintainerr
+# Example Compose: https://github.com/Maintainerr/Maintainerr#installation
+# NGINX Proxy Config: https://github.com/linuxserver/reverse-proxy-confs/blob/master/maintainerr.subdomain.conf.sample
+# Default Port: 6246 (official documentation)
+# Last Updated: 2025-12-02
+
+# Version information (using latest stable tag)
+maintainerr_version: "latest"
+
+# Port mappings (from official documentation)
+maintainerr_port: 6246  # PRIMARY PORT - Official default port
+
+# Volume paths (use docker_storage_folder from group_vars)
+# Single-container service
+maintainerr_folder: "{{ docker_storage_folder }}/maintainerr"
+
+# Feature flags - Maintainerr has a web interface
+maintainerr_configure_homepage: true    # ALWAYS true if web interface exists
+maintainerr_configure_proxy: true       # ALWAYS true if web interface exists
+maintainerr_configure_dns: true         # ALWAYS true if web interface exists
+maintainerr_is_proxied: true            # Service is behind reverse proxy
