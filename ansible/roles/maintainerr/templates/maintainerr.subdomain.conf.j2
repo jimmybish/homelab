@@ -1,0 +1,30 @@
+## Version 2025/07/18 - Adapted for homelab
+# make sure that your maintainerr container is named maintainerr
+# make sure that your dns has a cname set for maintainerr
+# maintainerr v2.0.0+ only. for prior versions, set upstream_port to 80
+
+## Version 2025/12/02 - Adapted for homelab
+# make sure that your maintainerr container is named maintainerr
+# make sure that your dns has a cname set for maintainerr
+# maintainerr v2.0.0+ only. for prior versions, set upstream_port to 80
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+
+    server_name maintainerr.{{ internal_domain }};
+
+    include /config/nginx/ssl.conf;
+
+    client_max_body_size 0;
+
+    location / {
+        include /config/nginx/proxy.conf;
+        include /config/nginx/resolver.conf;
+        set $upstream_app {{ maintainerr_proxy_ip }};
+        set $upstream_port {{ maintainerr_port }};
+        set $upstream_proto http;
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+    }
+}

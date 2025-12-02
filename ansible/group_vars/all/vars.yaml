@@ -105,6 +105,7 @@ internal_lidarr_url: "https://lidarr.{{ internal_domain }}"
 internal_sabnzbd_url: "https://sabnzbd.{{ internal_domain }}"
 internal_qbittorrent_url: "https://qbittorrent.{{ internal_domain }}"
 internal_huntarr_url: "https://huntarr.{{ internal_domain }}"
+internal_maintainerr_url: "https://maintainerr.{{ internal_domain }}"
 internal_sovol_url: "http://{{ (lookup('ansible.builtin.inventory_hostnames', 'sovol_sv08').split(','))[0] }}/"
 internal_tautulli_url: "https://tautulli.{{ internal_domain }}"
 
@@ -171,6 +172,7 @@ homepage_tautulli_key: !vault |
           6238376464366432390a396666366161653630646433303536343236383033343037376137653766
           62363437326666393530303537383333386336383634663965643339353633633764373862646134
           3065306236326535383132656233643935356165353737336537
+homepage_maintainerr_key: "PLACEHOLDER_KEY"  # TODO: Generate API key after deployment
 scrypted_webhook_auth: !vault |
           $ANSIBLE_VAULT;1.1;AES256
           37386337333033303061383034373161396134653138356533366531373937313434383134366631
@@ -224,6 +226,7 @@ swag_external_gateway_ip: !vault |
           6236306431363136370a373432316234356163313439363663323462396164653162643661323437
           3037
 homepage_folder: "{{ docker_storage_folder }}/homepage"
+maintainerr_folder: "{{ docker_storage_folder }}/maintainerr"
 overseerr_folder: "{{ docker_storage_folder }}/overseerr"
 jellyseerr_folder: "{{ docker_storage_folder }}/jellyseerr"
 

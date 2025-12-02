@@ -1,0 +1,6 @@
+---
+- name: Install Maintainerr
+  hosts: maintainerr_host
+  become: true
+  roles:
+    - maintainerr

@@ -65,11 +65,6 @@ jellyfin_host:
   hosts:
     jellyfin-lxc:
 
-# Jellyplex-Watched (sync Plex and Jellyfin watched status)
-jellyplex_watched_host:
-  hosts:
-    jellyfin-lxc:
-
 # NGINX Reverse Proxy
 proxy_host:
   hosts:
@@ -125,6 +120,11 @@ paperless_host:
 
 # n8n
 n8n_host:
+  hosts:
+    docker-2:
+
+# Maintainerr
+maintainerr_host:
   hosts:
     docker-2:
 

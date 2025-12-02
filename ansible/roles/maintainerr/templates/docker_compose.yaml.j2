@@ -1,0 +1,14 @@
+services:
+  maintainerr:
+    image: jorenn92/maintainerr:{{ maintainerr_version }}
+    container_name: maintainerr
+    restart: unless-stopped
+    user: "{{ docker_user_puid }}:{{ docker_user_pgid }}"
+    environment:
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+      - TZ={{ timezone }}
+    ports:
+      - '{{ maintainerr_port }}:6246'
+    volumes:
+      - {{ maintainerr_folder }}:/opt/data
