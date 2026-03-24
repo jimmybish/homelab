@@ -38,6 +38,13 @@ ubuntu:
     jellyfin-lxc:
     proxy:
 
+# Docker VM hosts (non-LXC) - used for cAdvisor scraping
+docker_vm_hosts:
+  hosts:
+    docker-1:
+    docker-2:
+    proxy:
+
 # All Debian hosts
 #debian:
 #  vars:
