@@ -77,3 +77,30 @@
     name: docker
     enabled: true
     state: started
+
+# cAdvisor - container monitoring for Prometheus
+# Skipped on LXC containers as cAdvisor requires /proc mount access
+- name: Allow cAdvisor port through UFW
+  community.general.ufw:
+    rule: allow
+    port: 8089
+    proto: tcp
+  when:
+    - ansible_os_family == "Debian"
+    - ansible_virtualization_type != "lxc"
+
+- name: Run cAdvisor container
+  community.docker.docker_container:
+    name: cadvisor
+    image: gcr.io/cadvisor/cadvisor:latest
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "8089:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+  when: ansible_virtualization_type != "lxc"

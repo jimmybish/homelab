@@ -33,7 +33,7 @@
   ansible.builtin.import_playbook: deploy_paperless.yaml
 
 - name: Install Prometheus Node Exporter
-  hosts: ubuntu
+  hosts: ubuntu:proxmox_hosts
   become: true
   roles:
     - role: prometheus.prometheus.node_exporter

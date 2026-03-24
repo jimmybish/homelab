@@ -10,7 +10,31 @@ scrape_configs:
       - targets: ['loki:3100']
   - job_name: 'node_exporter'
     static_configs:
-      - targets:
 {% for host in groups['ubuntu'] %}
+{% if host == inventory_hostname %}
+      - targets:
+        - {{ ansible_default_ipv4.address }}:9100
+        labels:
+          instance: {{ host }}.{{ internal_domain }}:9100
+{% else %}
+      - targets:
         - {{ host }}.{{ internal_domain }}:9100
+{% endif %}
+{% endfor %}
+{% for host in groups.get('proxmox_hosts', []) %}
+      - targets:
+        - {{ host }}.{{ internal_domain }}:9100
+{% endfor %}
+  - job_name: 'cadvisor'
+    static_configs:
+{% for host in groups.get('docker_vm_hosts', []) %}
+{% if host == inventory_hostname %}
+      - targets:
+        - {{ ansible_default_ipv4.address }}:8089
+        labels:
+          instance: {{ host }}.{{ internal_domain }}:8089
+{% else %}
+      - targets:
+        - {{ host }}.{{ internal_domain }}:8089
+{% endif %}
 {% endfor %}
