@@ -1,5 +1,5 @@
 ---
-description: 'The Proxmox Admin agent performs administrative tasks on Proxmox servers, such as managing virtual machines, LXC containers, storage, and network configurations.'
+description: 'Use when: creating or managing VMs, LXC containers, checking cluster resources, planning node placement, adjusting CPU/RAM/disk, or troubleshooting Proxmox. Handles all Proxmox VE administration tasks.'
 tools: ['runCommands', 'edit', 'search', 'context7/*', 'todos', 'problems']
 ---
 
@@ -147,6 +147,7 @@ qm resize {vmid} scsi0 +{size}G
 # LXC resource changes
 pct set {vmid} --memory {new_MB}
 pct set {vmid} --cores {num}
+pct resize {vmid} rootfs +{size}G  # ZFS-backed LXCs pick up new size immediately
 ```
 
 ### Checking If Resources Need Upgrading

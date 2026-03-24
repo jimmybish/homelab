@@ -19,20 +19,13 @@ services:
     image: ghcr.io/tautulli/tautulli
     container_name: tautulli
     restart: unless-stopped
+    network_mode: host
     volumes:
       - {{ plex_tautulli_folder }}:/config
     environment:
       - PUID={{ docker_user_puid }}
       - PGID={{ docker_user_pgid }}
       - TZ={{ timezone }}
-    ports:
-      - {{ plex_tautulli_port }}:8181
-    networks:
-      - plex_net
-
-networks:
-  plex_net:
-    name: plex_net
 
 volumes:
   mytv:
