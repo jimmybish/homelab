@@ -133,6 +133,11 @@ jellyplex_watched_host:
   hosts:
     docker-2:
 
+# Linux Desktop
+linux_desktop:
+  hosts:
+    mgmt:
+
 # Klipper 3d printer
 sovol_sv08:
   hosts:

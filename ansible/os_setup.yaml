@@ -5,3 +5,9 @@
   roles:
     - os_configure
     - docker
+
+- name: Install KDE Plasma Desktop and xrdp
+  hosts: linux_desktop
+  become: true
+  roles:
+    - kde_desktop

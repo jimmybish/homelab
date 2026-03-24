@@ -1,0 +1,6 @@
+---
+- name: Install KDE Desktop
+  hosts: linux_desktop
+  become: true
+  roles:
+    - kde_desktop

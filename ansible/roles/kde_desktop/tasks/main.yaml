@@ -1,0 +1,106 @@
+---
+# Tasks to install KDE Plasma desktop and configure xrdp for RDP access
+- name: Install KDE Plasma desktop
+  ansible.builtin.apt:
+    name: kde-plasma-desktop
+    state: present
+    update_cache: true
+  become: true
+
+- name: Install xrdp
+  ansible.builtin.apt:
+    name: xrdp
+    state: present
+  become: true
+
+- name: Add xrdp user to ssl-cert group
+  ansible.builtin.user:
+    name: xrdp
+    groups: ssl-cert
+    append: true
+  become: true
+
+- name: Deploy xsessionrc for KDE Plasma
+  ansible.builtin.template:
+    src: xsessionrc.j2
+    dest: "/home/{{ ansible_user }}/.xsessionrc"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0755'
+
+- name: Add Mozilla Team PPA for Firefox deb package
+  ansible.builtin.apt_repository:
+    repo: ppa:mozillateam/ppa
+    state: present
+  become: true
+
+- name: Pin Mozilla PPA Firefox over snap package
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/mozilla-firefox
+    content: |
+      Package: *
+      Pin: release o=LP-PPA-mozillateam
+      Pin-Priority: 1001
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Install Firefox
+  ansible.builtin.apt:
+    name: firefox
+    state: present
+    update_cache: true
+  become: true
+
+- name: Install VS Code dependencies
+  ansible.builtin.apt:
+    name:
+      - wget
+      - gpg
+      - apt-transport-https
+    state: present
+  become: true
+
+- name: Add Microsoft GPG key
+  ansible.builtin.apt_key:
+    url: https://packages.microsoft.com/keys/microsoft.asc
+    keyring: /etc/apt/keyrings/packages.microsoft.gpg
+    state: present
+  become: true
+
+- name: Add VS Code repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main"
+    filename: vscode
+    state: present
+  become: true
+
+- name: Install VS Code
+  ansible.builtin.apt:
+    name: code
+    state: present
+    update_cache: true
+  become: true
+
+- name: Allow xrdp port through UFW
+  community.general.ufw:
+    rule: allow
+    port: 3389
+    proto: tcp
+    comment: xrdp
+  when: ansible_os_family == "Debian"
+
+- name: Enable and start xrdp service
+  ansible.builtin.service:
+    name: xrdp
+    state: started
+    enabled: true
+  become: true
+
+- name: Enable and start xrdp-sesman service
+  ansible.builtin.service:
+    name: xrdp-sesman
+    state: started
+    enabled: true
+  become: true
