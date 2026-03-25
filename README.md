@@ -24,7 +24,7 @@ MCP server configuration is in [.github/copilot/mcp.json](.github/copilot/mcp.js
   - [Sonarr](https://hub.docker.com/r/linuxserver/sonarr), [Radarr](https://hub.docker.com/r/linuxserver/radarr), [Prowlarr](https://hub.docker.com/r/linuxserver/prowlarr), [Lidarr](https://hub.docker.com/r/linuxserver/lidarr)
   - [SABnzbd](https://hub.docker.com/r/linuxserver/sabnzbd), [qBittorrent](https://hub.docker.com/r/linuxserver/qbittorrent), [Huntarr](https://github.com/plexguide/huntarr)
 - **Productivity:** [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx), [n8n](https://n8n.io/)
-- **Monitoring:** [Grafana](https://grafana.com/), [Prometheus](https://prometheus.io/), [Loki](https://grafana.com/oss/loki/), [Node Exporter](https://github.com/prometheus/node_exporter) (all Ubuntu hosts)
+- **Monitoring:** [Grafana](https://grafana.com/), [Prometheus](https://prometheus.io/), [Loki](https://grafana.com/oss/loki/), [InfluxDB](https://www.influxdata.com/), [Alloy](https://grafana.com/oss/alloy/) (all Ubuntu hosts), [Node Exporter](https://github.com/prometheus/node_exporter) (all Ubuntu hosts)
 - **Infrastructure:** [SWAG](https://docs.linuxserver.io/general/swag/) (internal & external reverse proxies)
 
 ### Hardware
@@ -62,6 +62,8 @@ ansible-playbook master_playbook.yaml -i inventory.yaml --vault-password-file ~/
 ```
 
 ### Monitoring
-- Grafana, Prometheus, and Loki are deployed together for metrics and log aggregation.
+- Grafana, Prometheus, Loki, and InfluxDB are deployed together as a monitoring stack.
+- Alloy runs on all Ubuntu hosts, shipping Docker container logs and system journal to Loki.
 - Node Exporter runs on all Ubuntu hosts. Prometheus scrapes via FQDNs.
 - cAdvisor outputs Docker metrics via Prometheus.
+- InfluxDB receives metrics from Proxmox hosts and Home Assistant.

@@ -1,0 +1,73 @@
+// Grafana Alloy configuration - Managed by Ansible
+
+// ============================================================
+// Docker container log collection
+// ============================================================
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.docker.containers.targets
+  forward_to = [loki.process.docker.receiver]
+}
+
+loki.process "docker" {
+  stage.static_labels {
+    values = {
+      host   = "{{ ansible_hostname }}",
+      source = "docker",
+    }
+  }
+  forward_to = [loki.write.default.receiver]
+}
+
+// ============================================================
+// System log collection (journald)
+// ============================================================
+
+loki.source.journal "system" {
+  forward_to    = [loki.process.journal.receiver]
+  relabel_rules = loki.relabel.journal.rules
+}
+
+loki.relabel "journal" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+
+  rule {
+    source_labels = ["__journal__transport"]
+    target_label  = "transport"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+loki.process "journal" {
+  stage.static_labels {
+    values = {
+      host   = "{{ ansible_hostname }}",
+      source = "journal",
+    }
+  }
+  forward_to = [loki.write.default.receiver]
+}
+
+// ============================================================
+// Loki output
+// ============================================================
+
+loki.write "default" {
+  endpoint {
+    url = "{{ alloy_loki_url }}"
+  }
+}
