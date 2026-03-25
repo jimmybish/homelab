@@ -1,0 +1,5 @@
+---
+- name: Restart Alloy
+  community.docker.docker_container:
+    name: alloy
+    restart: true

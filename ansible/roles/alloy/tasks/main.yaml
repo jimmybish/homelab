@@ -1,0 +1,32 @@
+---
+- name: Create Alloy config directory
+  ansible.builtin.file:
+    path: "{{ alloy_folder }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Deploy Alloy configuration
+  ansible.builtin.template:
+    src: alloy_config.alloy.j2
+    dest: "{{ alloy_folder }}/config.alloy"
+    mode: '0644'
+    owner: root
+    group: root
+  notify: Restart Alloy
+
+- name: Run Alloy container
+  community.docker.docker_container:
+    name: alloy
+    image: "grafana/alloy:{{ alloy_version }}"
+    state: started
+    restart_policy: unless-stopped
+    command: ["run", "/etc/alloy/config.alloy", "--server.http.listen-addr=0.0.0.0:12345"]
+    volumes:
+      - "{{ alloy_folder }}:/etc/alloy:ro"
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+    network_mode: host
