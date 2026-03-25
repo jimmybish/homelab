@@ -14,3 +14,29 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     editable: true
+
+  - name: InfluxDB
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    isDefault: false
+    editable: true
+    jsonData:
+      version: Flux
+      organization: {{ grafana_influxdb_org }}
+      defaultBucket: {{ grafana_influxdb_bucket }}
+    secureJsonData:
+      token: "{{ grafana_influxdb_admin_token }}"
+
+  - name: InfluxDB - Proxmox
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    isDefault: false
+    editable: true
+    jsonData:
+      version: Flux
+      organization: {{ grafana_influxdb_proxmox_org }}
+      defaultBucket: {{ grafana_influxdb_proxmox_bucket }}
+    secureJsonData:
+      token: "{{ grafana_influxdb_admin_token }}"
