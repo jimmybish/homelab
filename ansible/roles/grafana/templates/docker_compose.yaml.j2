@@ -17,6 +17,7 @@ services:
     depends_on:
       - loki
       - prometheus
+      - influxdb
 
   loki:
     image: grafana/loki:{{ grafana_loki_version }}
@@ -41,6 +42,25 @@ services:
     volumes:
       - {{ grafana_prometheus_data_folder }}:/prometheus
       - {{ grafana_prometheus_data_folder }}/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - grafana_net
+
+  influxdb:
+    image: influxdb:{{ grafana_influxdb_version }}
+    container_name: influxdb
+    restart: unless-stopped
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME={{ grafana_influxdb_admin_user }}
+      - DOCKER_INFLUXDB_INIT_PASSWORD={{ grafana_influxdb_admin_password }}
+      - DOCKER_INFLUXDB_INIT_ORG={{ grafana_influxdb_org }}
+      - DOCKER_INFLUXDB_INIT_BUCKET={{ grafana_influxdb_bucket }}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN={{ grafana_influxdb_admin_token }}
+    ports:
+      - '{{ grafana_influxdb_port }}:8086'
+    volumes:
+      - {{ grafana_influxdb_data_folder }}/data:/var/lib/influxdb2
+      - {{ grafana_influxdb_data_folder }}/config:/etc/influxdb2
     networks:
       - grafana_net
 

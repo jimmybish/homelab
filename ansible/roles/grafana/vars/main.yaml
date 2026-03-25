@@ -4,6 +4,7 @@
 # Docker Hub: https://hub.docker.com/r/grafana/grafana - Default port: 3000
 # Loki: https://hub.docker.com/r/grafana/loki - Default port: 3100
 # Prometheus: https://hub.docker.com/r/prom/prometheus - Default port: 9090
+# InfluxDB: https://hub.docker.com/_/influxdb - Default port: 8086
 # Example Compose: https://github.com/grafana/loki/tree/main/production/docker-compose
 # NGINX Proxy Config: https://github.com/linuxserver/reverse-proxy-confs (grafana.subdomain.conf.sample available)
 # Last Updated: 2025-10-08
@@ -12,17 +13,27 @@ grafana_version: "latest"
 grafana_plugins: "grafana-clock-panel"
 grafana_loki_version: "2.9.7"
 grafana_prometheus_version: "v2.51.2"
+grafana_influxdb_version: "2.7"
 
 # External ports for each service (from official documentation)
 grafana_port: 3000
 grafana_loki_port: 3100
 grafana_prometheus_port: 9090
+grafana_influxdb_port: 8086
 
 # Volume paths - organized under single parent folder
 grafana_parent_folder: "{{ docker_storage_folder }}/grafana-stack"
 grafana_folder: "{{ grafana_parent_folder }}/grafana"
 grafana_loki_data_folder: "{{ grafana_parent_folder }}/loki"
 grafana_prometheus_data_folder: "{{ grafana_parent_folder }}/prometheus"
+grafana_influxdb_data_folder: "{{ grafana_parent_folder }}/influxdb"
+
+# InfluxDB settings (set sensitive values in group_vars with vault encryption:
+#   grafana_influxdb_admin_user, grafana_influxdb_admin_password, grafana_influxdb_admin_token)
+grafana_influxdb_org: "homelab"
+grafana_influxdb_bucket: "default"
+grafana_influxdb_proxmox_org: "proxmox"
+grafana_influxdb_proxmox_bucket: "proxmox"
 
 # Feature flags (ALL true - grafana has web interface)
 grafana_configure_homepage: true
