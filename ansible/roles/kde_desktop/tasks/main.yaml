@@ -76,6 +76,12 @@
     state: present
   become: true
 
+- name: Remove VS Code auto-generated sources file to prevent GPG key conflict
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/vscode.sources
+    state: absent
+  become: true
+
 - name: Install VS Code
   ansible.builtin.apt:
     name: code

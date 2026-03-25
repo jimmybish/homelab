@@ -1,0 +1,3 @@
+#!/bin/bash
+# Remove unused Docker images older than 2 months
+/usr/bin/docker image prune --all --force --filter "until=1440h"

@@ -78,6 +78,23 @@
     enabled: true
     state: started
 
+- name: Deploy Docker image cleanup script
+  ansible.builtin.template:
+    src: "templates/docker_image_cleanup.sh.j2"
+    dest: "/usr/local/bin/docker-image-cleanup.sh"
+    owner: 'root'
+    group: 'root'
+    mode: '0755'
+
+- name: Schedule weekly Docker image cleanup
+  ansible.builtin.cron:
+    name: "Docker image cleanup"
+    job: "/usr/local/bin/docker-image-cleanup.sh >> /var/log/docker-image-cleanup.log 2>&1"
+    weekday: "3"
+    hour: "3"
+    minute: "0"
+    user: "root"
+
 # cAdvisor - container monitoring for Prometheus
 # Skipped on LXC containers as cAdvisor requires /proc mount access
 - name: Allow cAdvisor port through UFW
