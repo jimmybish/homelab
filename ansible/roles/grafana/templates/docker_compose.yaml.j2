@@ -64,6 +64,17 @@ services:
     networks:
       - grafana_net
 
+  snmp-exporter:
+    image: prom/snmp-exporter:{{ grafana_snmp_exporter_version }}
+    container_name: snmp-exporter
+    restart: unless-stopped
+    ports:
+      - '{{ grafana_snmp_exporter_port }}:9116'
+    volumes:
+      - {{ grafana_snmp_exporter_data_folder }}/snmp.yml:/etc/snmp_exporter/snmp.yml:ro
+    networks:
+      - grafana_net
+
 networks:
   grafana_net:
     driver: bridge

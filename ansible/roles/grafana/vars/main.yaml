@@ -35,6 +35,21 @@ grafana_influxdb_bucket: "default"
 grafana_influxdb_proxmox_org: "proxmox"
 grafana_influxdb_proxmox_bucket: "proxmox"
 
+# SNMP Exporter - for monitoring QNAP NAS and other SNMP devices
+# Docker Hub: https://hub.docker.com/r/prom/snmp-exporter - Default port: 9116
+# GitHub: https://github.com/prometheus/snmp_exporter
+grafana_snmp_exporter_version: "v0.26.0"
+grafana_snmp_exporter_port: 9116
+grafana_snmp_exporter_data_folder: "{{ grafana_parent_folder }}/snmp-exporter"
+
+# SNMP targets - list of devices to monitor
+# Set snmpv3_username, snmpv3_auth_passphrase, snmpv3_priv_passphrase
+# in group_vars/all/vars.yaml with vault encryption
+grafana_snmp_targets:
+  - name: "{{ groups['qnap'][0] }}"
+    target: "{{ groups['qnap'][0] }}.{{ internal_domain }}"
+    module: if_mib
+
 # Feature flags (ALL true - grafana has web interface)
 grafana_configure_homepage: true
 grafana_configure_proxy: true

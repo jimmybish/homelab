@@ -38,3 +38,45 @@ scrape_configs:
         - {{ host }}.{{ internal_domain }}:8089
 {% endif %}
 {% endfor %}
+  - job_name: 'snmp_qnap'
+    scrape_interval: 1m
+    scrape_timeout: 1m
+    static_configs:
+{% for snmp_target in grafana_snmp_targets %}
+      - targets:
+        - {{ snmp_target.target }}
+        labels:
+          instance: {{ snmp_target.name }}
+{% endfor %}
+    metrics_path: /snmp
+    params:
+      auth: [qnap_v3]
+      module: [qnap]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: snmp-exporter:9116
+  - job_name: 'snmp_qnap_long'
+    scrape_interval: 5m
+    scrape_timeout: 2m
+    static_configs:
+{% for snmp_target in grafana_snmp_targets %}
+      - targets:
+        - {{ snmp_target.target }}
+        labels:
+          instance: {{ snmp_target.name }}
+{% endfor %}
+    metrics_path: /snmp
+    params:
+      auth: [qnap_v3]
+      module: [qnaplong]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: snmp-exporter:9116

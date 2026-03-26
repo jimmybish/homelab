@@ -66,6 +66,25 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
+- name: Setup SNMP Exporter directory
+  ansible.builtin.file:
+    path: "{{ grafana_snmp_exporter_data_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Deploy SNMP Exporter configuration
+  ansible.builtin.template:
+    src: "templates/snmp_exporter_config.yml.j2"
+    dest: "{{ grafana_snmp_exporter_data_folder }}/snmp.yml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Grafana
+
 - name: Allow Grafana port through UFW
   community.general.ufw:
     rule: allow
