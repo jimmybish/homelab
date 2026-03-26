@@ -5,12 +5,16 @@ All the self-hosted thangs, mostly controlled by Ansible.
 
 ### GitHub Copilot Agents
 
-I use GitHub Copilot with custom agents to manage the homelab. Each agent has domain-specific knowledge and tool access defined in [.github/agents](.github/agents):
+I use GitHub Copilot with custom agents and reusable skills to manage the homelab.
+
+**Agents** have domain-specific knowledge and tool access, defined in [.github/agents](.github/agents):
 
 - **ansible_admin** — Deploys and manages services via Ansible. Follows a [role creation guide](ansible/docs/ANSIBLE_ROLE_CREATION_GUIDE.md) for consistency: researches official docs, uses LinuxServer.io images where available, and wires up reverse proxies, Homepage entries, and health checks automatically.
 - **grafana_admin** — Queries dashboards, explores Prometheus/Loki metrics, checks alerts, and manages incidents via MCP.
 - **home_assistant_admin** — Manages Home Assistant entities, automations, scenes, and dashboards via MCP.
 - **proxmox_admin** — Manages VMs, LXC containers, and cluster resources via MCP.
+
+**Skills** are step-by-step instructions in [.github/skills](.github/skills) that Copilot loads on demand when a task matches their domain. They encode repeatable patterns — like scaffolding an Ansible role, templating a Docker Compose file, or wiring up a SWAG proxy config — so each deployment follows the same conventions without re-explaining the process. Current skills cover: application research, role scaffolding, Docker deployment tasks, Compose templating, vault secrets, Homepage integration, NGINX/SWAG proxy configs, pfSense DNS management, UFW firewall rules, service health checks, and playbook creation/testing.
 
 MCP server configuration is in [.github/copilot/mcp.json](.github/copilot/mcp.json).
 
