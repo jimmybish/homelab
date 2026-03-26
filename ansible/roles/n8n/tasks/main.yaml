@@ -77,7 +77,7 @@
         owner: "{{ docker_user }}"
         group: "{{ docker_user }}"
       delegate_to: "{{ groups['proxy_host'][0] }}"
-      notify: Restart Swag
+      notify: Restart Swag Internal
 
     - name: Debug proxy configuration
       ansible.builtin.debug:

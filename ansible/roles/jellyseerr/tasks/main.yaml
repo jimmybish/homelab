@@ -64,7 +64,7 @@
     mode: '0644'
   delegate_to: "{{ groups['proxy_host'][0] }}"
   notify:
-    - Restart Swag
+    - Restart Swag Internal
 
 # Check pfSense DNS Resolver Host Overrides
 - name: Get DNS resolver host overrides from pfSense
@@ -77,7 +77,7 @@
     return_content: true
   register: pfsense_dns_overrides
   delegate_to: localhost
-  when: jellyseerr_configure_dns | default(false)
+  when: jellyseerr_configure_dns | default(true)
 
 - name: Find proxy host override entry in pfSense
   ansible.builtin.set_fact:
@@ -89,7 +89,7 @@
          | first
          | default({}) }}
   when:
-    - jellyseerr_configure_dns | default(false)
+    - jellyseerr_configure_dns | default(true)
     - pfsense_dns_overrides.json.data is defined
 
 - name: Check if Jellyseerr alias exists under proxy host override
@@ -101,7 +101,7 @@
          | list
          | length > 0 }}
   when:
-    - jellyseerr_configure_dns | default(false)
+    - jellyseerr_configure_dns | default(true)
     - proxy_host_override is defined
     - proxy_host_override | length > 0
 
@@ -115,7 +115,7 @@
       {% else %}
       Jellyseerr DNS alias missing - will be created
       {% endif %}
-  when: jellyseerr_configure_dns | default(false)
+  when: jellyseerr_configure_dns | default(true)
 
 - name: Create Jellyseerr DNS alias under proxy host override
   ansible.builtin.uri:
@@ -135,7 +135,7 @@
   delegate_to: localhost
   register: alias_creation_result
   when:
-    - jellyseerr_configure_dns | default(false)
+    - jellyseerr_configure_dns | default(true)
     - proxy_host_override | length > 0
     - not jellyseerr_alias_exists
 
@@ -149,7 +149,7 @@
     status_code: [200, 201]
   delegate_to: localhost
   when:
-    - jellyseerr_configure_dns | default(false)
+    - jellyseerr_configure_dns | default(true)
     - alias_creation_result is succeeded
 
 # Configure Homepage Services (REQUIRED for web interfaces)

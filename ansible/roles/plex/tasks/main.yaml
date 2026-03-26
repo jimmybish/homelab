@@ -175,7 +175,7 @@
     group: "{{ docker_user }}"
     mode: '0644'
   delegate_to: "{{ groups['proxy_host'][0] }}"
-  notify: Restart Swag
+  notify: Restart Swag Internal
   when: plex_configure_proxy | bool
 
 # DNS Configuration - Standardized workflow for both Plex and Tautulli

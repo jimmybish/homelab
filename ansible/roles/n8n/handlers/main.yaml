@@ -5,16 +5,16 @@
     state: restarted
     remove_orphans: true
 
-- name: Restart Swag
+- name: Restart Swag Internal
   community.docker.docker_compose_v2:
     project_src: "{{ proxy_folder }}"
+    services:
+      - swag_internal
     state: restarted
-    remove_orphans: true
   delegate_to: "{{ groups['proxy_host'][0] }}"
 
 - name: Restart Homepage
   community.docker.docker_compose_v2:
     project_src: "{{ homepage_folder }}"
     state: restarted
-    remove_orphans: false
   delegate_to: "{{ groups['homepage_host'][0] }}"

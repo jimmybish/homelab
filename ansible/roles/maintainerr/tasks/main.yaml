@@ -69,7 +69,7 @@
     mode: '0644'
   delegate_to: "{{ groups['proxy_host'][0] }}"
   notify:
-    - Restart Swag
+    - Restart Swag Internal
 
 # DNS Configuration (REQUIRED for web interfaces)
 - name: Get DNS resolver host overrides from pfSense
@@ -82,7 +82,7 @@
     return_content: true
   register: pfsense_dns_overrides
   delegate_to: localhost
-  when: maintainerr_configure_dns | default(false)
+  when: maintainerr_configure_dns | default(true)
 
 - name: Find deployment host override entry in pfSense
   ansible.builtin.set_fact:
@@ -94,7 +94,7 @@
          | first
          | default({}) }}
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - pfsense_dns_overrides.json.data is defined
 
 - name: Create host override for deployment target if missing
@@ -115,7 +115,7 @@
   delegate_to: localhost
   register: host_override_creation
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - deployment_host_override | length == 0
 
 - name: Apply DNS resolver changes after host override creation
@@ -128,7 +128,7 @@
     status_code: [200, 201]
   delegate_to: localhost
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - host_override_creation is succeeded
 
 - name: Refresh DNS resolver host overrides after creation
@@ -142,7 +142,7 @@
   register: pfsense_dns_overrides
   delegate_to: localhost
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - host_override_creation is succeeded
 
 - name: Re-find deployment host override entry in pfSense
@@ -155,7 +155,7 @@
          | first
          | default({}) }}
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - host_override_creation is succeeded
 
 - name: Find proxy host override entry in pfSense
@@ -168,7 +168,7 @@
          | first
          | default({}) }}
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - maintainerr_is_proxied | default(true)
     - pfsense_dns_overrides.json.data is defined
 
@@ -176,7 +176,7 @@
   ansible.builtin.set_fact:
     maintainerr_parent_override: "{{ proxy_host_override if (maintainerr_is_proxied | default(true)) else deployment_host_override }}"
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
 
 - name: Find all existing aliases for Maintainerr across all host overrides
   ansible.builtin.set_fact:
@@ -189,7 +189,7 @@
          | selectattr('domain', 'equalto', internal_domain)
          | list }}
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - pfsense_dns_overrides.json.data is defined
 
 - name: Identify aliases to delete (not under correct parent)
@@ -199,7 +199,7 @@
          | rejectattr('parent_id', 'equalto', maintainerr_parent_override.id | default(0))
          | list }}
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - maintainerr_all_existing_aliases is defined
 
 - name: Delete incorrect Maintainerr DNS aliases
@@ -220,7 +220,7 @@
   loop: "{{ maintainerr_aliases_to_delete }}"
   register: maintainerr_delete_results
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - maintainerr_aliases_to_delete is defined
     - maintainerr_aliases_to_delete | length > 0
 
@@ -234,7 +234,7 @@
     status_code: [200, 201]
   delegate_to: localhost
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - maintainerr_delete_results is changed
 
 - name: Check if Maintainerr alias exists under parent host override
@@ -246,7 +246,7 @@
          | list
          | length > 0 }}
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - maintainerr_parent_override is defined
     - maintainerr_parent_override | length > 0
 
@@ -260,7 +260,7 @@
       {% else %}
       Maintainerr DNS alias missing - will be created under {{ maintainerr_parent_override.host }}.{{ internal_domain }}
       {% endif %}
-  when: maintainerr_configure_dns | default(false)
+  when: maintainerr_configure_dns | default(true)
 
 - name: Create Maintainerr DNS alias under parent host override
   ansible.builtin.uri:
@@ -280,7 +280,7 @@
   delegate_to: localhost
   register: maintainerr_alias_result
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - maintainerr_parent_override | length > 0
     - not maintainerr_alias_exists
 
@@ -294,7 +294,7 @@
     status_code: [200, 201]
   delegate_to: localhost
   when:
-    - maintainerr_configure_dns | default(false)
+    - maintainerr_configure_dns | default(true)
     - (maintainerr_alias_result is succeeded or host_override_creation is succeeded)
 
 # Configure Homepage Services (REQUIRED for web interfaces)
