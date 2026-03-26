@@ -1,0 +1,966 @@
+# WARNING: This file was auto-generated using snmp_exporter generator, manual changes will be lost.
+auths:
+  qnap_v3:
+    community: public
+    security_level: authPriv
+    username: {{ snmpv3_username }}
+    password: {{ snmpv3_auth_passphrase }}
+    auth_protocol: SHA
+    priv_protocol: DES
+    priv_password: {{ snmpv3_priv_passphrase }}
+    version: 3
+modules:
+  qnap:
+    walk:
+    - 1.3.6.1.4.1.24681.1.2.15
+    - 1.3.6.1.4.1.24681.1.3.15
+    - 1.3.6.1.4.1.24681.1.3.17
+    - 1.3.6.1.4.1.24681.1.3.9
+    - 1.3.6.1.4.1.24681.1.4.1.1.1.1.1
+    - 1.3.6.1.4.1.24681.1.4.1.1.1.1.4
+    - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5
+    - 1.3.6.1.4.1.24681.1.4.1.1.1.2
+    - 1.3.6.1.4.1.24681.1.4.1.11.5.6
+    get:
+    - 1.3.6.1.4.1.24681.1.2.16.0
+    - 1.3.6.1.4.1.24681.1.2.3.0
+    - 1.3.6.1.4.1.24681.1.3.1.0
+    - 1.3.6.1.4.1.24681.1.3.3.0
+    - 1.3.6.1.4.1.24681.1.3.4.0
+    - 1.3.6.1.4.1.24681.1.3.6.0
+    metrics:
+    - name: sysFanIndex
+      oid: 1.3.6.1.4.1.24681.1.2.15.1.1
+      type: gauge
+      help: A unique value for each system fan - 1.3.6.1.4.1.24681.1.2.15.1.1
+      indexes:
+      - labelname: sysFanIndex
+        type: gauge
+    - name: sysFanDescr
+      oid: 1.3.6.1.4.1.24681.1.2.15.1.2
+      type: OctetString
+      help: A textual string containing information about the interface - 1.3.6.1.4.1.24681.1.2.15.1.2
+      indexes:
+      - labelname: sysFanIndex
+        type: gauge
+    - name: sysFanSpeed
+      oid: 1.3.6.1.4.1.24681.1.2.15.1.3
+      type: OctetString
+      help: System fan speed. - 1.3.6.1.4.1.24681.1.2.15.1.3
+      indexes:
+      - labelname: sysFanIndex
+        type: gauge
+    - name: sysVolumeNumber
+      oid: 1.3.6.1.4.1.24681.1.2.16
+      type: gauge
+      help: The number of system volumes (regardless of their current state) present
+        on this system. - 1.3.6.1.4.1.24681.1.2.16
+    - name: systemFreeMem
+      oid: 1.3.6.1.4.1.24681.1.2.3
+      type: OctetString
+      help: System free memory - 1.3.6.1.4.1.24681.1.2.3
+    - name: systemCPU_UsageEX
+      oid: 1.3.6.1.4.1.24681.1.3.1
+      type: gauge
+      help: system CPU usage - 1.3.6.1.4.1.24681.1.3.1
+    - name: sysFanIndexEX
+      oid: 1.3.6.1.4.1.24681.1.3.15.1.1
+      type: gauge
+      help: A unique value for each system fan - 1.3.6.1.4.1.24681.1.3.15.1.1
+      indexes:
+      - labelname: sysFanIndexEX
+        type: gauge
+    - name: sysFanDescrEX
+      oid: 1.3.6.1.4.1.24681.1.3.15.1.2
+      type: OctetString
+      help: A textual string containing information about the interface - 1.3.6.1.4.1.24681.1.3.15.1.2
+      indexes:
+      - labelname: sysFanIndexEX
+        type: gauge
+    - name: sysFanSpeedEX
+      oid: 1.3.6.1.4.1.24681.1.3.15.1.3
+      type: gauge
+      help: System fan speed (RPM). - 1.3.6.1.4.1.24681.1.3.15.1.3
+      indexes:
+      - labelname: sysFanIndexEX
+        type: gauge
+    - name: sysVolumeIndexEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.1
+      type: gauge
+      help: A unique value for each system volume - 1.3.6.1.4.1.24681.1.3.17.1.1
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: sysVolumeDescrEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.2
+      type: OctetString
+      help: A textual string containing information about the volume. - 1.3.6.1.4.1.24681.1.3.17.1.2
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: sysVolumeFSEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.3
+      type: OctetString
+      help: System Volume file system. - 1.3.6.1.4.1.24681.1.3.17.1.3
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: sysVolumeTotalSizeEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.4
+      type: counter
+      help: System Volume total size in byte. - 1.3.6.1.4.1.24681.1.3.17.1.4
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: sysVolumeFreeSizeEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.5
+      type: counter
+      help: System Volume free size in byte. - 1.3.6.1.4.1.24681.1.3.17.1.5
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: sysVolumeStatusEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.6
+      type: OctetString
+      help: System Volume status. - 1.3.6.1.4.1.24681.1.3.17.1.6
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: systemFreeMemEX
+      oid: 1.3.6.1.4.1.24681.1.3.3
+      type: counter
+      help: System free memory in byte - 1.3.6.1.4.1.24681.1.3.3
+    - name: systemUptimeEX
+      oid: 1.3.6.1.4.1.24681.1.3.4
+      type: gauge
+      help: The amount of time since this host was last initialized - 1.3.6.1.4.1.24681.1.3.4
+    - name: systemTemperatureEX
+      oid: 1.3.6.1.4.1.24681.1.3.6
+      type: gauge
+      help: System temperature in centigrade - 1.3.6.1.4.1.24681.1.3.6
+    - name: ifIndexEX
+      oid: 1.3.6.1.4.1.24681.1.3.9.1.1
+      type: gauge
+      help: A unique value for each interface - 1.3.6.1.4.1.24681.1.3.9.1.1
+      indexes:
+      - labelname: ifIndexEX
+        type: gauge
+    - name: ifDescrEX
+      oid: 1.3.6.1.4.1.24681.1.3.9.1.2
+      type: OctetString
+      help: A textual string containing information about the interface - 1.3.6.1.4.1.24681.1.3.9.1.2
+      indexes:
+      - labelname: ifIndexEX
+        type: gauge
+    - name: ifPacketsReceivedEX
+      oid: 1.3.6.1.4.1.24681.1.3.9.1.3
+      type: counter
+      help: System packets received. - 1.3.6.1.4.1.24681.1.3.9.1.3
+      indexes:
+      - labelname: ifIndexEX
+        type: gauge
+    - name: ifPacketsSentEX
+      oid: 1.3.6.1.4.1.24681.1.3.9.1.4
+      type: counter
+      help: System packets sent. - 1.3.6.1.4.1.24681.1.3.9.1.4
+      indexes:
+      - labelname: ifIndexEX
+        type: gauge
+    - name: ifErrorPacketsEX
+      oid: 1.3.6.1.4.1.24681.1.3.9.1.5
+      type: counter
+      help: System error packets. - 1.3.6.1.4.1.24681.1.3.9.1.5
+      indexes:
+      - labelname: ifIndexEX
+        type: gauge
+    - name: enclosurelNumber
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.1
+      type: gauge
+      help: The number of Enclosures (regardless of their current state) present on
+        this system. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.1
+    - name: enclosureIndex
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.1
+      type: gauge
+      help: EnclosureIndex. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.1
+      indexes:
+      - labelname: enclosureIndex
+        type: gauge
+    - name: enclosureID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.2
+      type: gauge
+      help: enclosureID. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.2
+      indexes:
+      - labelname: enclosureIndex
+        type: gauge
+    - name: enclosureModel
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.3
+      type: OctetString
+      help: EnclosureModel. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.3
+      indexes:
+      - labelname: enclosureIndex
+        type: gauge
+    - name: enclosureSerialNum
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.4
+      type: OctetString
+      help: EnclosureSerialNum. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.4
+      indexes:
+      - labelname: enclosureIndex
+        type: gauge
+    - name: enclosureSlot
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.5
+      type: gauge
+      help: EnclosureSlot. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.5
+      indexes:
+      - labelname: enclosureIndex
+        type: gauge
+    - name: enclosureName
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.6
+      type: OctetString
+      help: Enclosure Name. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.6
+      indexes:
+      - labelname: enclosureIndex
+        type: gauge
+    - name: enclosureSystemTemp
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.7
+      type: gauge
+      help: Enclosure System temperature in centigrade. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.1.2.1.7
+      indexes:
+      - labelname: enclosureIndex
+        type: gauge
+    - name: cpuNumber
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.4.1
+      type: gauge
+      help: The number of CPUs (regardless of their current state) present on this
+        system. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.4.1
+    - name: cpuTemp
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.4.2
+      type: gauge
+      help: CPU temperature in centigrade. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.4.2
+    - name: cpuIndex
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.4.3.1.1
+      type: gauge
+      help: CPUIndex. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.4.3.1.1
+      indexes:
+      - labelname: cpuIndex
+        type: gauge
+    - name: cpuID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.4.3.1.2
+      type: gauge
+      help: CPUID. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.4.3.1.2
+      indexes:
+      - labelname: cpuIndex
+        type: gauge
+    - name: cpuUsage
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.4.3.1.3
+      type: gauge
+      help: CPUUsage. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.4.3.1.3
+      indexes:
+      - labelname: cpuIndex
+        type: gauge
+    - name: diskNumber
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.1
+      type: gauge
+      help: The number of disks (regardless of their current state) present on this
+        system. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.1
+    - name: diskIndex
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.1
+      type: gauge
+      help: DiskIndex. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.1
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.2
+      type: gauge
+      help: DiskID. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.2
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskEnclosureID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.3
+      type: gauge
+      help: disk EnclosureID. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.3
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskSummary
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.4
+      type: OctetString
+      help: DiskSummary - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.4
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskSmartInfo
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.5
+      type: gauge
+      help: DiskSmartInfo. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.5
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+      enum_values:
+        -1: error
+        0: good
+        1: warning
+        2: abnormal
+    - name: diskTemperture
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.6
+      type: gauge
+      help: DiskTemperture. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.6
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskGlobalSpare
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.7
+      type: gauge
+      help: DiskGlobalSpare. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.7
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+      enum_values:
+        0: "no"
+        1: "yes"
+    - name: diskModel
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.8
+      type: OctetString
+      help: DiskModel. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.8
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskCapacity
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.9
+      type: counter
+      help: DiskCapacity. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.9
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: raidNumber
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.1
+      type: gauge
+      help: The number of RAIDs (regardless of their current state) present on this
+        system. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.1
+    - name: raidIndex
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.1
+      type: gauge
+      help: RAIDIndex. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.1
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: raidID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.2
+      type: gauge
+      help: RAIDID. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.2
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: raidCapacity
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.3
+      type: counter
+      help: RAID capacity in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.3
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: raidFreeSize
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.4
+      type: counter
+      help: RAID freesize in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.4
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: raidStatus
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.5
+      type: OctetString
+      help: RAID status. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.5
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: raidBitmap
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.6
+      type: gauge
+      help: RAID bitmap. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.6
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+      enum_values:
+        0: "no"
+        1: "yes"
+    - name: raidLevel
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.7
+      type: OctetString
+      help: RAID level. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.7
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: poolNumber
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.1
+      type: gauge
+      help: The number of pools (regardless of their current state) present on this
+        system. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.1
+    - name: poolIndex
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.1
+      type: gauge
+      help: PoolIndex. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.1
+      indexes:
+      - labelname: poolIndex
+        type: gauge
+    - name: poolID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.2
+      type: gauge
+      help: PoolID. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.2
+      indexes:
+      - labelname: poolIndex
+        type: gauge
+    - name: poolCapacity
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.3
+      type: counter
+      help: Pool capacity in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.3
+      indexes:
+      - labelname: poolIndex
+        type: gauge
+    - name: poolFreeSize
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.4
+      type: counter
+      help: Pool freesize in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.4
+      indexes:
+      - labelname: poolIndex
+        type: gauge
+    - name: poolStatus
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.5
+      type: gauge
+      help: Pool status. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.5
+      indexes:
+      - labelname: poolIndex
+        type: gauge
+      enum_values:
+        -3: error
+        -2: notReady
+        -1: warning
+        0: ready
+    - name: volumeNumber
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.1
+      type: gauge
+      help: The number of volumes (regardless of their current state) present on this
+        system. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.1
+    - name: volumeIndex
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.1
+      type: gauge
+      help: VolumeIndex. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.1
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: volumeID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.2
+      type: gauge
+      help: VolumeID. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.2
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: volumeCapacity
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.3
+      type: counter
+      help: Volume capacity in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.3
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: volumeFreeSize
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.4
+      type: counter
+      help: Volume freesize in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.4
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: volumeStatus
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.5
+      type: OctetString
+      help: Volume status - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.5
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: volumeSSDCache
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.6
+      type: gauge
+      help: If volume enable SSDCache acceleration. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.6
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+      enum_values:
+        0: "no"
+        1: "yes"
+    - name: volumeThin
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.7
+      type: gauge
+      help: If volume is thin type. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.7
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+      enum_values:
+        0: "no"
+        1: "yes"
+    - name: volumeName
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.8
+      type: OctetString
+      help: Volume alias name. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.8
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: diskPerformanceNumber
+      oid: 1.3.6.1.4.1.24681.1.4.1.11.5.6.1
+      type: gauge
+      help: The number of Devices (regardless of their current state) for monitor
+        perfrmance present on this system. - 1.3.6.1.4.1.24681.1.4.1.11.5.6.1
+    - name: diskPerformanceIndex
+      oid: 1.3.6.1.4.1.24681.1.4.1.11.5.6.2.1.1
+      type: gauge
+      help: DiskPerformanceIndex. - 1.3.6.1.4.1.24681.1.4.1.11.5.6.2.1.1
+      indexes:
+      - labelname: diskPerformanceIndex
+        type: gauge
+    - name: blvID
+      oid: 1.3.6.1.4.1.24681.1.4.1.11.5.6.2.1.2
+      type: gauge
+      help: BLVID. - 1.3.6.1.4.1.24681.1.4.1.11.5.6.2.1.2
+      indexes:
+      - labelname: diskPerformanceIndex
+        type: gauge
+    - name: iops
+      oid: 1.3.6.1.4.1.24681.1.4.1.11.5.6.2.1.3
+      type: gauge
+      help: IOPS. - 1.3.6.1.4.1.24681.1.4.1.11.5.6.2.1.3
+      indexes:
+      - labelname: diskPerformanceIndex
+        type: gauge
+    - name: latency
+      oid: 1.3.6.1.4.1.24681.1.4.1.11.5.6.2.1.4
+      type: gauge
+      help: Latency. - 1.3.6.1.4.1.24681.1.4.1.11.5.6.2.1.4
+      indexes:
+      - labelname: diskPerformanceIndex
+        type: gauge
+    max_repetitions: 25
+    retries: 3
+    timeout: 15s
+  qnaplong:
+    walk:
+    - 1.3.6.1.4.1.24681.1.2.17
+    - 1.3.6.1.4.1.24681.1.3.11
+    - 1.3.6.1.4.1.24681.1.3.17
+    - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5
+    - 1.3.6.1.4.1.24681.1.4.1.1.1.2
+    get:
+    - 1.3.6.1.4.1.24681.1.2.2.0
+    - 1.3.6.1.4.1.24681.1.3.12.0
+    - 1.3.6.1.4.1.24681.1.3.13.0
+    - 1.3.6.1.4.1.24681.1.3.2.0
+    - 1.3.6.1.4.1.55062.1.12.6.0
+    - 1.3.6.1.4.1.55062.1.12.7.0
+    metrics:
+    - name: sysVolumeIndex
+      oid: 1.3.6.1.4.1.24681.1.2.17.1.1
+      type: gauge
+      help: A unique value for each system volume - 1.3.6.1.4.1.24681.1.2.17.1.1
+      indexes:
+      - labelname: sysVolumeIndex
+        type: gauge
+    - name: sysVolumeDescr
+      oid: 1.3.6.1.4.1.24681.1.2.17.1.2
+      type: OctetString
+      help: A textual string containing information about the volume. - 1.3.6.1.4.1.24681.1.2.17.1.2
+      indexes:
+      - labelname: sysVolumeIndex
+        type: gauge
+    - name: sysVolumeFS
+      oid: 1.3.6.1.4.1.24681.1.2.17.1.3
+      type: OctetString
+      help: System Volume file system. - 1.3.6.1.4.1.24681.1.2.17.1.3
+      indexes:
+      - labelname: sysVolumeIndex
+        type: gauge
+    - name: sysVolumeTotalSize
+      oid: 1.3.6.1.4.1.24681.1.2.17.1.4
+      type: OctetString
+      help: System Volume total size. - 1.3.6.1.4.1.24681.1.2.17.1.4
+      indexes:
+      - labelname: sysVolumeIndex
+        type: gauge
+    - name: sysVolumeFreeSize
+      oid: 1.3.6.1.4.1.24681.1.2.17.1.5
+      type: OctetString
+      help: System Volume free size. - 1.3.6.1.4.1.24681.1.2.17.1.5
+      indexes:
+      - labelname: sysVolumeIndex
+        type: gauge
+    - name: sysVolumeStatus
+      oid: 1.3.6.1.4.1.24681.1.2.17.1.6
+      type: OctetString
+      help: System Volume status. - 1.3.6.1.4.1.24681.1.2.17.1.6
+      indexes:
+      - labelname: sysVolumeIndex
+        type: gauge
+    - name: systemTotalMem
+      oid: 1.3.6.1.4.1.24681.1.2.2
+      type: OctetString
+      help: System total memory - 1.3.6.1.4.1.24681.1.2.2
+    - name: hdIndexEX
+      oid: 1.3.6.1.4.1.24681.1.3.11.1.1
+      type: gauge
+      help: A unique value for each hard disk - 1.3.6.1.4.1.24681.1.3.11.1.1
+      indexes:
+      - labelname: hdIndex
+        type: gauge
+    - name: hdDescrEX
+      oid: 1.3.6.1.4.1.24681.1.3.11.1.2
+      type: OctetString
+      help: A textual string containing information about the interface - 1.3.6.1.4.1.24681.1.3.11.1.2
+      indexes:
+      - labelname: hdIndex
+        type: gauge
+    - name: hdTemperatureEX
+      oid: 1.3.6.1.4.1.24681.1.3.11.1.3
+      type: gauge
+      help: Hard disk temperature in centigrade. - 1.3.6.1.4.1.24681.1.3.11.1.3
+      indexes:
+      - labelname: hdIndex
+        type: gauge
+    - name: hdStatusEX
+      oid: 1.3.6.1.4.1.24681.1.3.11.1.4
+      type: gauge
+      help: HDD status - 1.3.6.1.4.1.24681.1.3.11.1.4
+      indexes:
+      - labelname: hdIndex
+        type: gauge
+      enum_values:
+        -9: rwError
+        -6: invalid
+        -5: noDisk
+        -4: unknown
+        0: ready
+    - name: hdModelEX
+      oid: 1.3.6.1.4.1.24681.1.3.11.1.5
+      type: OctetString
+      help: Hard disk model. - 1.3.6.1.4.1.24681.1.3.11.1.5
+      indexes:
+      - labelname: hdIndex
+        type: gauge
+    - name: hdCapacityEX
+      oid: 1.3.6.1.4.1.24681.1.3.11.1.6
+      type: counter
+      help: Hard disk capacity in byte. - 1.3.6.1.4.1.24681.1.3.11.1.6
+      indexes:
+      - labelname: hdIndex
+        type: gauge
+    - name: hdSmartInfoEX
+      oid: 1.3.6.1.4.1.24681.1.3.11.1.7
+      type: OctetString
+      help: Hard disk SMART information. - 1.3.6.1.4.1.24681.1.3.11.1.7
+      indexes:
+      - labelname: hdIndex
+        type: gauge
+    - name: modelNameEX
+      oid: 1.3.6.1.4.1.24681.1.3.12
+      type: OctetString
+      help: Model name - 1.3.6.1.4.1.24681.1.3.12
+    - name: hostNameEX
+      oid: 1.3.6.1.4.1.24681.1.3.13
+      type: OctetString
+      help: Model name - 1.3.6.1.4.1.24681.1.3.13
+    - name: sysVolumeIndexEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.1
+      type: gauge
+      help: A unique value for each system volume - 1.3.6.1.4.1.24681.1.3.17.1.1
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: sysVolumeDescrEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.2
+      type: OctetString
+      help: A textual string containing information about the volume. - 1.3.6.1.4.1.24681.1.3.17.1.2
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: sysVolumeFSEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.3
+      type: OctetString
+      help: System Volume file system. - 1.3.6.1.4.1.24681.1.3.17.1.3
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: sysVolumeTotalSizeEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.4
+      type: counter
+      help: System Volume total size in byte. - 1.3.6.1.4.1.24681.1.3.17.1.4
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: sysVolumeFreeSizeEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.5
+      type: counter
+      help: System Volume free size in byte. - 1.3.6.1.4.1.24681.1.3.17.1.5
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: sysVolumeStatusEX
+      oid: 1.3.6.1.4.1.24681.1.3.17.1.6
+      type: OctetString
+      help: System Volume status. - 1.3.6.1.4.1.24681.1.3.17.1.6
+      indexes:
+      - labelname: sysVolumeIndexEX
+        type: gauge
+    - name: systemTotalMemEX
+      oid: 1.3.6.1.4.1.24681.1.3.2
+      type: counter
+      help: System total memory in byte - 1.3.6.1.4.1.24681.1.3.2
+    - name: diskNumber
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.1
+      type: gauge
+      help: The number of disks (regardless of their current state) present on this
+        system. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.1
+    - name: diskIndex
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.1
+      type: gauge
+      help: DiskIndex. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.1
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.2
+      type: gauge
+      help: DiskID. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.2
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskEnclosureID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.3
+      type: gauge
+      help: disk EnclosureID. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.3
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskSummary
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.4
+      type: OctetString
+      help: DiskSummary - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.4
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskSmartInfo
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.5
+      type: gauge
+      help: DiskSmartInfo. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.5
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+      enum_values:
+        -1: error
+        0: good
+        1: warning
+        2: abnormal
+    - name: diskTemperture
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.6
+      type: gauge
+      help: DiskTemperture. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.6
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskGlobalSpare
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.7
+      type: gauge
+      help: DiskGlobalSpare. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.7
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+      enum_values:
+        0: "no"
+        1: "yes"
+    - name: diskModel
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.8
+      type: OctetString
+      help: DiskModel. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.8
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: diskCapacity
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.9
+      type: counter
+      help: DiskCapacity. - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5.2.1.9
+      indexes:
+      - labelname: diskIndex
+        type: gauge
+    - name: raidNumber
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.1
+      type: gauge
+      help: The number of RAIDs (regardless of their current state) present on this
+        system. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.1
+    - name: raidIndex
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.1
+      type: gauge
+      help: RAIDIndex. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.1
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: raidID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.2
+      type: gauge
+      help: RAIDID. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.2
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: raidCapacity
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.3
+      type: counter
+      help: RAID capacity in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.3
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: raidFreeSize
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.4
+      type: counter
+      help: RAID freesize in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.4
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: raidStatus
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.5
+      type: OctetString
+      help: RAID status. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.5
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: raidBitmap
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.6
+      type: gauge
+      help: RAID bitmap. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.6
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+      enum_values:
+        0: "no"
+        1: "yes"
+    - name: raidLevel
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.7
+      type: OctetString
+      help: RAID level. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.1.2.1.7
+      indexes:
+      - labelname: raidIndex
+        type: gauge
+    - name: poolNumber
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.1
+      type: gauge
+      help: The number of pools (regardless of their current state) present on this
+        system. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.1
+    - name: poolIndex
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.1
+      type: gauge
+      help: PoolIndex. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.1
+      indexes:
+      - labelname: poolIndex
+        type: gauge
+    - name: poolID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.2
+      type: gauge
+      help: PoolID. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.2
+      indexes:
+      - labelname: poolIndex
+        type: gauge
+    - name: poolCapacity
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.3
+      type: counter
+      help: Pool capacity in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.3
+      indexes:
+      - labelname: poolIndex
+        type: gauge
+    - name: poolFreeSize
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.4
+      type: counter
+      help: Pool freesize in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.4
+      indexes:
+      - labelname: poolIndex
+        type: gauge
+    - name: poolStatus
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.5
+      type: gauge
+      help: Pool status. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.2.2.1.5
+      indexes:
+      - labelname: poolIndex
+        type: gauge
+      enum_values:
+        -3: error
+        -2: notReady
+        -1: warning
+        0: ready
+    - name: volumeNumber
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.1
+      type: gauge
+      help: The number of volumes (regardless of their current state) present on this
+        system. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.1
+    - name: volumeIndex
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.1
+      type: gauge
+      help: VolumeIndex. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.1
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: volumeID
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.2
+      type: gauge
+      help: VolumeID. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.2
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: volumeCapacity
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.3
+      type: counter
+      help: Volume capacity in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.3
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: volumeFreeSize
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.4
+      type: counter
+      help: Volume freesize in byte. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.4
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: volumeStatus
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.5
+      type: OctetString
+      help: Volume status - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.5
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: volumeSSDCache
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.6
+      type: gauge
+      help: If volume enable SSDCache acceleration. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.6
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+      enum_values:
+        0: "no"
+        1: "yes"
+    - name: volumeThin
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.7
+      type: gauge
+      help: If volume is thin type. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.7
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+      enum_values:
+        0: "no"
+        1: "yes"
+    - name: volumeName
+      oid: 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.8
+      type: OctetString
+      help: Volume alias name. - 1.3.6.1.4.1.24681.1.4.1.1.1.2.3.2.1.8
+      indexes:
+      - labelname: volumeIndex
+        type: gauge
+    - name: firmwareVersion
+      oid: 1.3.6.1.4.1.55062.1.12.6
+      type: OctetString
+      help: Firmware Version - 1.3.6.1.4.1.55062.1.12.6
+    - name: firmwareUpgradeAvailable
+      oid: 1.3.6.1.4.1.55062.1.12.7
+      type: gauge
+      help: Firmware can upgrade or not - 1.3.6.1.4.1.55062.1.12.7
+    max_repetitions: 25
+    retries: 3
+    timeout: 30s

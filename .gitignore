@@ -1,2 +1,3 @@
 .vscode/mcp.json
 .github/copilot/mcp.json
+ansible/roles/grafana/templates/mibs/
