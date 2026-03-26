@@ -15,7 +15,6 @@ services:
       - {{ jellyfin_port }}:8096
       - {{ jellyfin_https_port }}:8920 #optional
       - {{ jellyfin_udp_port1 }}:7359/udp #optional
-      - {{ jellyfin_udp_port2 }}:1900/udp #optional
     devices:
       - /dev/dri:/dev/dri
     restart: unless-stopped

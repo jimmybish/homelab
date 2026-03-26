@@ -17,8 +17,8 @@
 - name: Deploy Plex
   ansible.builtin.import_playbook: deploy_plex.yaml
 
-- name: Deploy Jellyfin
-  ansible.builtin.import_playbook: deploy_jellyfin.yaml
+# - name: Deploy Jellyfin
+#   ansible.builtin.import_playbook: deploy_jellyfin.yaml
 
 - name: Deploy Jellyseerr
   ansible.builtin.import_playbook: deploy_jellyseerr.yaml
