@@ -30,6 +30,15 @@ Use these skills on-demand based on the task at hand:
 | `ansible-vault-secrets` | Encrypting secrets and adding vault-encrypted variables to group_vars |
 | `playbook-creation-testing` | Creating deploy playbooks, testing, master playbook integration, running/troubleshooting |
 
+## Running Playbooks
+
+There is no `ansible.cfg` — **always** pass `-i inventory.yaml` explicitly.
+
+```bash
+# Standard command pattern (run from ansible/ directory)
+ansible-playbook -i inventory.yaml <playbook>.yaml --vault-password-file ~/ansible_key
+```
+
 ## Workflow Guidelines
 
 - **New service deployment:** Start with `application-research`, then follow the role creation flow through scaffolding, compose template, tasks, handlers, proxy, DNS, homepage, vault, and playbook creation. Each skill covers its step.
