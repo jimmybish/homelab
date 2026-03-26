@@ -11,7 +11,7 @@
     state: restarted
   delegate_to: "{{ groups['homepage_host'][0] }}"
 
-- name: Restart Swag
+- name: Restart Swag Internal
   community.docker.docker_compose_v2:
     project_src: "{{ proxy_folder }}"
     services:

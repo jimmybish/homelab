@@ -185,7 +185,7 @@
     mode: '0644'
   delegate_to: "{{ groups['proxy_host'][0] }}"
   notify:
-    - Restart Swag
+    - Restart Swag Internal
   when: grafana_configure_proxy | default(true)
 
 # Check pfSense DNS Resolver Host Overrides
