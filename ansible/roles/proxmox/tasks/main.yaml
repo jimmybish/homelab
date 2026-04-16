@@ -1,0 +1,164 @@
+---
+- name: Get ZFS autotrim state
+  ansible.builtin.command:
+    cmd: "zpool get -H -o value autotrim {{ proxmox_zfs_pool }}"
+  register: proxmox_zfs_autotrim_state
+  changed_when: false
+  when: proxmox_zfs_pool is defined
+
+- name: Set ZFS autotrim
+  ansible.builtin.command:
+    cmd: "zpool set autotrim={{ proxmox_zfs_autotrim }} {{ proxmox_zfs_pool }}"
+  changed_when: true
+  when:
+    - proxmox_zfs_pool is defined
+    - proxmox_zfs_autotrim is defined
+    - proxmox_zfs_autotrim_state.stdout | default('') | trim != proxmox_zfs_autotrim
+
+# APT repository configuration (must come before any package installs)
+- name: Disable pve-enterprise repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/pve-enterprise.list
+    content: |
+      # deb https://enterprise.proxmox.com/debian/pve bookworm pve-enterprise
+    owner: root
+    group: root
+    mode: '0644'
+  register: pve_enterprise_repo
+
+- name: Enable pve-no-subscription repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/pve-no-subscription.list
+    content: |
+      deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription
+    owner: root
+    group: root
+    mode: '0644'
+  register: pve_nosub_repo
+
+- name: Update apt cache after repo changes
+  ansible.builtin.apt:
+    update_cache: true
+  when: pve_enterprise_repo.changed or pve_nosub_repo.changed
+
+# OS hardening and configuration (safe for Proxmox)
+- name: Ensure fail2ban is installed
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+
+- name: Copy jail.conf to jail.local for Proxmox customization
+  ansible.builtin.copy:
+    src: /etc/fail2ban/jail.conf
+    dest: /etc/fail2ban/jail.local
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0644'
+    force: false
+
+- name: Configure Proxmox jail in fail2ban
+  ansible.builtin.blockinfile:
+    path: /etc/fail2ban/jail.local
+    marker: "# {mark} PROXMOX CONFIGURATION"
+    block: |
+      [proxmox]
+      enabled = true
+      port = https,http,8006
+      filter = proxmox
+      backend = systemd
+      maxretry = 3
+      findtime = 2d
+      bantime = 1h
+    insertafter: EOF
+  notify: Restart fail2ban
+
+- name: Deploy Proxmox fail2ban filter
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/filter.d/proxmox.conf
+    content: |
+      [Definition]
+      failregex = pvedaemon\[.*authentication failure; rhost=<HOST> user=.* msg=.*
+      ignoreregex =
+      journalmatch = _SYSTEMD_UNIT=pvedaemon.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart fail2ban
+
+- name: Ensure fail2ban is started and enabled
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ timezone }}"
+
+- name: Configure locale
+  community.general.locale_gen:
+    name: "{{ locale_lang }}"
+    state: present
+
+- name: Set system locale
+  ansible.builtin.lineinfile:
+    path: /etc/default/locale
+    regexp: '^LANG='
+    line: "LANG={{ locale_lang }}"
+    create: true
+    mode: '0644'
+
+- name: Deploy subscription nag removal script
+  ansible.builtin.copy:
+    dest: /usr/local/bin/pve-remove-nag.sh
+    content: |
+      #!/bin/sh
+      WEB_JS=/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+      if [ -s "$WEB_JS" ] && ! grep -q NoMoreNagging "$WEB_JS"; then
+          sed -i -e "/data\.status/ s/!//" -e "/data\.status/ s/active/NoMoreNagging/" "$WEB_JS"
+      fi
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Configure apt to run nag removal after package installs
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/no-nag-script
+    content: |
+      DPkg::Post-Invoke { "/usr/local/bin/pve-remove-nag.sh"; };
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Remove subscription nag
+
+- name: Ensure corosync-qdevice is installed
+  ansible.builtin.apt:
+    name: corosync-qdevice
+    state: present
+
+- name: Remove ntp if present
+  ansible.builtin.apt:
+    name: ntp
+    state: absent
+    purge: true
+
+- name: Ensure chrony is installed
+  ansible.builtin.apt:
+    name: chrony
+    state: present
+
+- name: Deploy chrony configuration
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart chrony
+
+- name: Ensure chrony is started and enabled
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true

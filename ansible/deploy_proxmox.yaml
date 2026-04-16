@@ -1,0 +1,6 @@
+---
+- name: Configure Proxmox hosts
+  hosts: proxmox_hosts
+  become: true
+  roles:
+    - proxmox

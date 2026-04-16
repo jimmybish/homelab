@@ -1,0 +1,15 @@
+---
+- name: Restart chrony
+  ansible.builtin.service:
+    name: chrony
+    state: restarted
+
+- name: Restart fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: restarted
+
+- name: Remove subscription nag
+  ansible.builtin.command:
+    cmd: /usr/local/bin/pve-remove-nag.sh
+  changed_when: true

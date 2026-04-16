@@ -2,6 +2,9 @@
 - name: Initial OS Configuration
   ansible.builtin.import_playbook: os_setup.yaml
 
+- name: Configure Proxmox Hosts
+  ansible.builtin.import_playbook: deploy_proxmox.yaml
+
 - name: Deploy Proxy
   ansible.builtin.import_playbook: deploy_proxy.yaml
 
@@ -31,9 +34,3 @@
 
 - name: Deploy Paperless
   ansible.builtin.import_playbook: deploy_paperless.yaml
-
-- name: Install Prometheus Node Exporter
-  hosts: ubuntu:proxmox_hosts
-  become: true
-  roles:
-    - role: prometheus.prometheus.node_exporter
