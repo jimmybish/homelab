@@ -1,5 +1,5 @@
 ---
 - name: Restart Alloy
-  community.docker.docker_container:
+  ansible.builtin.systemd:
     name: alloy
-    restart: true
+    state: restarted

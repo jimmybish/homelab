@@ -37,6 +37,10 @@ services:
     container_name: prometheus
     restart: unless-stopped
     user: "{{ docker_user_puid }}:{{ docker_user_pgid }}"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-remote-write-receiver'
     ports:
       - '{{ grafana_prometheus_port }}:9090'
     volumes:

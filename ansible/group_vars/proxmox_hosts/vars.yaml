@@ -2,3 +2,6 @@
 ansible_user: root
 ansible_ssh_private_key_file: ~/.ssh/mgmt
 ansible_python_interpreter: /usr/bin/python3
+
+# Proxmox hosts don't run Docker
+alloy_docker_enabled: false
