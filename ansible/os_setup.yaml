@@ -12,12 +12,6 @@
   roles:
     - alloy
 
-- name: Deploy Node Exporter
-  hosts: ubuntu:debian:proxmox_hosts
-  become: true
-  roles:
-    - prometheus.prometheus.node_exporter
-
 - name: Install KDE Plasma Desktop and xrdp
   hosts: linux_desktop
   become: true

@@ -1,5 +1,6 @@
 // Grafana Alloy configuration - Managed by Ansible
 
+{% if alloy_docker_enabled | default(true) %}
 // ============================================================
 // Docker container log collection
 // ============================================================
@@ -24,6 +25,7 @@ loki.process "docker" {
   forward_to = [loki.write.default.receiver]
 }
 
+{% endif %}
 // ============================================================
 // System log collection (journald)
 // ============================================================
@@ -69,5 +71,43 @@ loki.process "journal" {
 loki.write "default" {
   endpoint {
     url = "{{ alloy_loki_url }}"
+  }
+}
+
+// ============================================================
+// Node exporter metrics (built-in)
+// ============================================================
+
+prometheus.exporter.unix "local" {
+}
+
+prometheus.scrape "node_exporter" {
+  targets         = prometheus.exporter.unix.local.targets
+  forward_to      = [prometheus.relabel.node_exporter.receiver]
+  job_name        = "node_exporter"
+  scrape_interval = "15s"
+}
+
+prometheus.relabel "node_exporter" {
+  forward_to = [prometheus.remote_write.default.receiver]
+
+  rule {
+    target_label = "job"
+    replacement  = "node_exporter"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ ansible_hostname }}.{{ internal_domain }}:9100"
+  }
+}
+
+// ============================================================
+// Prometheus remote write output
+// ============================================================
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = "{{ alloy_prometheus_remote_write_url }}"
   }
 }

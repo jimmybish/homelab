@@ -1,9 +1,12 @@
 ---
 # Alloy - Grafana log collection agent
 # Official Source: https://grafana.com/docs/alloy/latest/
-# Docker Hub: https://hub.docker.com/r/grafana/alloy
-# Last Updated: 2026-03-25
+# Install Docs: https://grafana.com/docs/alloy/latest/set-up/install/linux/
+# Last Updated: 2026-04-16
 
-alloy_version: "latest"
-alloy_folder: "{{ docker_storage_folder }}/alloy"
+alloy_config_dir: "/etc/alloy"
+alloy_config_file: "{{ alloy_config_dir }}/config.alloy"
+alloy_env_file: "/etc/default/alloy"
+alloy_custom_args: "--server.http.listen-addr=0.0.0.0:12345"
 alloy_loki_url: "http://{{ groups['grafana_host'][0] }}.{{ internal_domain }}:3100/loki/api/v1/push"
+alloy_prometheus_remote_write_url: "http://{{ groups['grafana_host'][0] }}.{{ internal_domain }}:9090/api/v1/write"
