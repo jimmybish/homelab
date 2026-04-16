@@ -28,8 +28,9 @@ Treat each agent as a subject matter expert. When a task involves their domain, 
 | `ansible_admin` | Ansible playbooks, roles, inventory, Docker deployments, automation | Writing/editing playbooks, creating roles, troubleshooting Ansible, managing containers |
 | `proxmox_admin` | Proxmox VE, VMs, LXC containers, cluster resources | Creating/managing VMs or containers, adjusting resources, Proxmox troubleshooting |
 | `grafana_admin` | Grafana, Prometheus, Loki, alerting, observability | Querying dashboards, exploring metrics/logs, checking alerts, managing incidents |
-| `home_assistant_admin` | Home Assistant, smart home devices, automations | Checking device state, calling services, creating automations, managing dashboards |
+| `home_assistant_admin` | Home Assistant, smart home devices, automations | Checking device state, calling services, creating automations, managing dashboards, **any SSH access to the HAOS VM** |
 
 - **Delegate** when the task is clearly within an agent's domain — let them handle it end-to-end
 - **Consult** when you need domain expertise to inform a broader task — ask the agent for advice, then continue
 - **Improve** when a task hits issues or requires workarounds — update the relevant `.github/agents/*.agent.md` or `.github/skills/*/SKILL.md` with the learning so future runs are smoother
+- **Never SSH into hosts directly** when an agent owns that host — the agent has the credentials and knows the correct access method. Delegate to the agent instead.

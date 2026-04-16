@@ -1,3 +1,10 @@
 .vscode/mcp.json
 .github/copilot/mcp.json
 ansible/roles/grafana/templates/mibs/
+
+# MCP server artifacts
+.playwright-mcp/
+.chrome-devtools-mcp/
+
+# Environment files
+.env
