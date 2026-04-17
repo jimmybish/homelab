@@ -45,6 +45,7 @@ Services run as Docker Compose stacks on VMs and LXC containers across the Proxm
 - Default OS: Ubuntu Server 22.04 for both VMs and LXCs.
 - LXCs built from [community scripts](https://community-scripts.github.io/ProxmoxVE/scripts?id=ubuntu). Jellyfin and Plex are privileged with [hardware acceleration](https://github.com/community-scripts/ProxmoxVE/blob/main/misc/hw-acceleration.sh).
 - VMs built from a cloud-init template.
+- Proxmox vGPUs configured via [this blog post](https://www.derekseaman.com/2024/07/proxmox-ve-8-2-windows-11-vgpu-vt-d-passthrough-with-intel-alder-lake.html).
 - Home Assistant runs the [official HA OS image](https://community-scripts.github.io/ProxmoxVE/scripts?id=haos-vm), not managed by Ansible.
 
 ### Proxy Structure
