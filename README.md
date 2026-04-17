@@ -26,7 +26,7 @@ MCP server configuration is in [.github/copilot/mcp.json](.github/copilot/mcp.js
   - [Jellyseerr](https://hub.docker.com/r/fallenbagel/jellyseerr), [Overseerr](https://hub.docker.com/r/linuxserver/overseerr)
 - **Arr Suite (media automation):**
   - [Sonarr](https://hub.docker.com/r/linuxserver/sonarr), [Radarr](https://hub.docker.com/r/linuxserver/radarr), [Prowlarr](https://hub.docker.com/r/linuxserver/prowlarr), [Lidarr](https://hub.docker.com/r/linuxserver/lidarr)
-  - [SABnzbd](https://hub.docker.com/r/linuxserver/sabnzbd), [qBittorrent](https://hub.docker.com/r/linuxserver/qbittorrent), [Huntarr](https://github.com/plexguide/huntarr)
+  - [SABnzbd](https://hub.docker.com/r/linuxserver/sabnzbd), [qBittorrent](https://hub.docker.com/r/linuxserver/qbittorrent)
 - **Productivity:** [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx), [n8n](https://n8n.io/)
 - **Monitoring:** [Grafana](https://grafana.com/), [Prometheus](https://prometheus.io/), [Loki](https://grafana.com/oss/loki/), [InfluxDB](https://www.influxdata.com/), [Alloy](https://grafana.com/oss/alloy/) (all hosts — collects logs via journald/Docker and metrics via built-in node exporter, pushed to Loki/Prometheus via remote write)
 - **Infrastructure:** [SWAG](https://docs.linuxserver.io/general/swag/) (internal & external reverse proxies)
