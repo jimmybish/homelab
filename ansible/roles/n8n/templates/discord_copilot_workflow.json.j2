@@ -164,7 +164,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[IMPORTANT: Keep your reply under 2000 characters. Be concise.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[IMPORTANT: Keep your reply under 1800 characters. Be concise.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
       },
       "id": "prepare-new-prompt-1",
       "name": "Prepare New Prompt",
@@ -184,7 +184,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    }\n    if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    }\n  } catch (e) {}\n}\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(no response)';\n\nreturn [{ json: { responseText, sessionId } }];"
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet lastBlock = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    } else if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    } else if (responseText) {\n      lastBlock = responseText;\n      responseText = '';\n    }\n  } catch (e) {}\n}\nresponseText = responseText || lastBlock;\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(no response)';\n\nreturn [{ json: { responseText, sessionId } }];"
       },
       "id": "parse-new-output-1",
       "name": "Parse New Output",
@@ -300,7 +300,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[IMPORTANT: Keep your reply under 2000 characters. Be concise.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $input.first().json.name;\nreturn [{ json: { safeContent, name } }];"
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[IMPORTANT: Keep your reply under 1800 characters. Be concise.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $input.first().json.name;\nreturn [{ json: { safeContent, name } }];"
       },
       "id": "prepare-resume-prompt-1",
       "name": "Prepare Resume Prompt",
@@ -320,7 +320,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    }\n    if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    }\n  } catch (e) {}\n}\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(no response)';\n\nreturn [{ json: { responseText, sessionId } }];"
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet lastBlock = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    } else if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    } else if (responseText) {\n      lastBlock = responseText;\n      responseText = '';\n    }\n  } catch (e) {}\n}\nresponseText = responseText || lastBlock;\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(no response)';\n\nreturn [{ json: { responseText, sessionId } }];"
       },
       "id": "parse-resume-output-1",
       "name": "Parse Resume Output",

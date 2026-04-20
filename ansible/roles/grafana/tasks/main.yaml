@@ -148,6 +148,47 @@
   notify:
     - Start Grafana
 
+- name: Ensure Grafana alerting provisioning directory exists
+  ansible.builtin.file:
+    path: "{{ grafana_folder }}/provisioning/alerting"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Deploy Grafana contact points provisioning config
+  ansible.builtin.template:
+    src: "templates/provisioning_contactpoints.yaml.j2"
+    dest: "{{ grafana_folder }}/provisioning/alerting/contactpoints.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Grafana
+
+- name: Deploy Grafana notification policies provisioning config
+  ansible.builtin.template:
+    src: "templates/provisioning_policies.yaml.j2"
+    dest: "{{ grafana_folder }}/provisioning/alerting/policies.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Grafana
+
+- name: Deploy Grafana alert rules provisioning config
+  ansible.builtin.template:
+    src: "templates/provisioning_alertrules.yaml.j2"
+    dest: "{{ grafana_folder }}/provisioning/alerting/alertrules.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Grafana
+
 - name: Deploy Grafana using Docker Compose
   ansible.builtin.template:
     src: "templates/docker_compose.yaml.j2"

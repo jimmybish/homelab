@@ -166,6 +166,41 @@ For expression-based values:
 - Uses `resource: "message"`, `operation: "send"` (NOT `resource: "channel"`, `operation: "sendMessage"`)
 - `guildId` and `channelId` require `resourceLocator` format (see above)
 
+## Discord Message Character Limit
+
+Discord enforces a **2000 character limit** per message. All workflows that post to Discord must:
+
+1. **Instruct Copilot** to stay under the limit by appending to the prompt:
+   ```
+   [IMPORTANT: Keep your reply under 1800 characters. Be concise.]
+   ```
+   Use 1800 (not 2000) so that the hard truncation at 1900 is a safety net, not the primary constraint.
+2. **Truncate output** in the response parser as a safety net:
+   ```javascript
+   if (responseText.length > 1900) {
+     responseText = responseText.substring(0, 1900) + '...';
+   }
+   ```
+   Use 1900 (not 2000) to leave headroom for any wrapper text or formatting.
+
+3. **Only keep the final message** — Copilot's `--output-format json` emits `assistant.message` events for every turn (intermediate "investigating..." messages AND the final response). Track message blocks and keep only the last one:
+   ```javascript
+   let responseText = '';
+   let lastBlock = '';
+   // ...
+   if (obj.type === 'assistant.message' && obj.data && obj.data.content) {
+     responseText += obj.data.content;
+   } else if (obj.type === 'result' && obj.sessionId) {
+     sessionId = obj.sessionId;
+   } else if (responseText) {
+     lastBlock = responseText;  // Save current block before resetting
+     responseText = '';
+   }
+   // After loop:
+   responseText = responseText || lastBlock;
+   ```
+   This handles tool events that occur after the final response (e.g., memory saves) without losing the response text.
+
 ## Community Node Installation
 
 Community nodes MUST be installed in `/home/node/.n8n/nodes/` (NOT `/home/node/.n8n/`):
@@ -245,6 +280,24 @@ Workflows are deployed via the reusable `deploy_workflow.yaml` include:
 ```
 
 Templates are rendered via `lookup('template', ...)` on the Ansible controller — NOT via `ansible.builtin.template` to a remote file (which would require `lookup('file')` from localhost and fail).
+
+## Workflow Activation via API
+
+Webhook-triggered workflows must be **active** to receive requests. The N8N API does NOT support setting `active` via PUT or PATCH (it's read-only). Use the dedicated endpoint:
+
+```yaml
+- name: Activate workflow
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/workflows/{{ workflow_id }}/activate"
+    method: POST
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+    validate_certs: false
+    status_code: [200]
+  delegate_to: localhost
+```
+
+To deactivate: `POST /api/v1/workflows/{id}/deactivate`
 
 ## N8N Docker Compose Environment
 
