@@ -1,0 +1,414 @@
+{
+  "name": "Discord Copilot Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "type": "message",
+        "pattern": "every"
+      },
+      "id": "discord-trigger-1",
+      "name": "Discord Trigger",
+      "type": "n8n-nodes-discord-trigger.discordTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "credentials": {
+        "discordBotTriggerApi": {
+          "id": "{{ discord_trigger_credential_id }}",
+          "name": "Discord Bot Trigger"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "filter-not-bot",
+              "leftValue": "={{ '{{' }} $json.authorIsBot {{ '}}' }}",
+              "rightValue": "false",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-bots-1",
+      "name": "Filter Bots",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-author",
+              "leftValue": "={{ '{{' }} $json.authorId {{ '}}' }}",
+              "rightValue": "{{ n8n_discord_author_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-author-1",
+      "name": "Check Author",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: \"Sorry, I'm not allowed to speak to others just yet. Only Jimmy can use me!\", message_reference: {message_id: $('Filter Bots').item.json.id}}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "reject-user-1",
+      "name": "Reject Unauthorized User",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 500]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "react",
+        "guildId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "{{ n8n_discord_server_id }}"
+        },
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}"
+        },
+        "messageId": "={{ '{{' }} $('Filter Bots').item.json.id {{ '}}' }}",
+        "emoji": "👀"
+      },
+      "id": "react-eyes-1",
+      "name": "React Eyes",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [860, 300],
+      "credentials": {
+        "discordBotApi": {
+          "id": "{{ discord_credential_id }}",
+          "name": "Discord Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-channel",
+              "leftValue": "={{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}",
+              "rightValue": "{{ n8n_discord_channel_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-new-thread-1",
+      "name": "Check If New Thread",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[IMPORTANT: Keep your reply under 2000 characters. Be concise.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+      },
+      "id": "prepare-new-prompt-1",
+      "name": "Prepare New Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 100]
+    },
+    {
+      "parameters": {
+        "command": "=ssh mgmt 'cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
+      },
+      "id": "exec-copilot-new-1",
+      "name": "Run Copilot New",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1580, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    }\n    if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    }\n  } catch (e) {}\n}\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(no response)';\n\nreturn [{ json: { responseText, sessionId } }];"
+      },
+      "id": "parse-new-output-1",
+      "name": "Parse New Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1820, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}/messages/{{ '{{' }} $('Filter Bots').item.json.id {{ '}}' }}/threads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({name: $json.sessionId, auto_archive_duration: 1440}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "create-thread-1",
+      "name": "Create Thread",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2060, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $json.id {{ '}}' }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $('Parse New Output').item.json.responseText}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "send-new-reply-1",
+      "name": "Send New Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2300, 100]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-thread-info-1",
+      "name": "Get Thread Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "validate-parent",
+              "leftValue": "={{ '{{' }} $json.parent_id {{ '}}' }}",
+              "rightValue": "{{ n8n_discord_channel_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "validate-thread-1",
+      "name": "Validate Thread",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1580, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[IMPORTANT: Keep your reply under 2000 characters. Be concise.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $input.first().json.name;\nreturn [{ json: { safeContent, name } }];"
+      },
+      "id": "prepare-resume-prompt-1",
+      "name": "Prepare Resume Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1820, 500]
+    },
+    {
+      "parameters": {
+        "command": "=ssh mgmt 'cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume={{ '{{' }} $json.name {{ '}}' }} -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
+      },
+      "id": "exec-copilot-resume-1",
+      "name": "Run Copilot Resume",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [2060, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    }\n    if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    }\n  } catch (e) {}\n}\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(no response)';\n\nreturn [{ json: { responseText, sessionId } }];"
+      },
+      "id": "parse-resume-output-1",
+      "name": "Parse Resume Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2300, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.responseText}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "send-resume-reply-1",
+      "name": "Send Resume Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2540, 500]
+    }
+  ],
+  "connections": {
+    "Discord Trigger": {
+      "main": [[{"node": "Filter Bots", "type": "main", "index": 0}]]
+    },
+    "Filter Bots": {
+      "main": [[{"node": "Check Author", "type": "main", "index": 0}]]
+    },
+    "Check Author": {
+      "main": [
+        [{"node": "React Eyes", "type": "main", "index": 0}],
+        [{"node": "Reject Unauthorized User", "type": "main", "index": 0}]
+      ]
+    },
+    "React Eyes": {
+      "main": [[{"node": "Check If New Thread", "type": "main", "index": 0}]]
+    },
+    "Check If New Thread": {
+      "main": [
+        [{"node": "Prepare New Prompt", "type": "main", "index": 0}],
+        [{"node": "Get Thread Info", "type": "main", "index": 0}]
+      ]
+    },
+    "Prepare New Prompt": {
+      "main": [[{"node": "Run Copilot New", "type": "main", "index": 0}]]
+    },
+    "Run Copilot New": {
+      "main": [[{"node": "Parse New Output", "type": "main", "index": 0}]]
+    },
+    "Parse New Output": {
+      "main": [[{"node": "Create Thread", "type": "main", "index": 0}]]
+    },
+    "Create Thread": {
+      "main": [[{"node": "Send New Reply", "type": "main", "index": 0}]]
+    },
+    "Get Thread Info": {
+      "main": [[{"node": "Validate Thread", "type": "main", "index": 0}]]
+    },
+    "Validate Thread": {
+      "main": [[{"node": "Prepare Resume Prompt", "type": "main", "index": 0}]]
+    },
+    "Prepare Resume Prompt": {
+      "main": [[{"node": "Run Copilot Resume", "type": "main", "index": 0}]]
+    },
+    "Run Copilot Resume": {
+      "main": [[{"node": "Parse Resume Output", "type": "main", "index": 0}]]
+    },
+    "Parse Resume Output": {
+      "main": [[{"node": "Send Resume Reply", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

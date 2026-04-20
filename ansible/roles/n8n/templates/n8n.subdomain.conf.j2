@@ -19,9 +19,5 @@ server {
         set $upstream_port {{ n8n_port }};
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
-        
-        # WebSocket support for n8n
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
     }
 }

@@ -1,0 +1,90 @@
+{
+  "name": "Copilot CLI Test",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-1",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "prompt-field",
+              "name": "prompt",
+              "value": "List 3 interesting facts about DNS. Keep it brief.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-prompt-1",
+      "name": "Set Prompt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "command": "=ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 mgmt '{{ n8n_copilot_path }} -p \"{{ '{{' }} $json.prompt {{ '}}' }}\" -s --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
+      },
+      "id": "exec-copilot-1",
+      "name": "Run Copilot via SSH",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "response-field",
+              "name": "response",
+              "value": "={{ '{{' }} $json.stdout {{ '}}' }}",
+              "type": "string"
+            },
+            {
+              "id": "exit-code-field",
+              "name": "exitCode",
+              "value": "={{ '{{' }} $json.exitCode {{ '}}' }}",
+              "type": "number"
+            },
+            {
+              "id": "error-field",
+              "name": "error",
+              "value": "={{ '{{' }} $json.stderr {{ '}}' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "parse-response-1",
+      "name": "Parse Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [860, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{"node": "Set Prompt", "type": "main", "index": 0}]]
+    },
+    "Set Prompt": {
+      "main": [[{"node": "Run Copilot via SSH", "type": "main", "index": 0}]]
+    },
+    "Run Copilot via SSH": {
+      "main": [[{"node": "Parse Response", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

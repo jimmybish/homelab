@@ -8,3 +8,8 @@ ansible/roles/grafana/templates/mibs/
 
 # Environment files
 .env
+
+# Node modules
+node_modules/
+package.json
+package-lock.json
