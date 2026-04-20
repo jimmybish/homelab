@@ -176,7 +176,7 @@ n8n_copilot_ssh_key: !vault |
           63636665666537373430643630633936346138316561643530623066363136383762323530343234
           64323638626365353437
 n8n_copilot_ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAub6oGoC8jyPvbRJYD/ny51yjcKXY0LQ73Ry0Fvs6IG n8n-copilot"
-n8n_copilot_mgmt_host: "192.168.0.4"
+n8n_copilot_mgmt_host: "{{ groups['mgmt_hosts'][0] }}.{{ internal_domain }}"
 n8n_copilot_mgmt_user: "jimmy"
 n8n_grafana_webhook_path: "grafana-alerts"
 grafana_webhook_secret: !vault |
