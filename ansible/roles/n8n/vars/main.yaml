@@ -20,3 +20,6 @@ n8n_folder: "{{ docker_storage_folder }}/n8n"
 n8n_configure_homepage: true    # ALWAYS true - n8n has web interface
 n8n_configure_proxy: true       # ALWAYS true - n8n has web interface
 n8n_configure_dns: true         # ALWAYS true - n8n has web interface
+
+# Copilot CLI path on mgmt host
+n8n_copilot_path: "/home/jimmy/.local/bin/copilot"

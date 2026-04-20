@@ -67,3 +67,19 @@ If a task hits issues, requires workarounds, or reveals missing knowledge, updat
 - Use `list_prometheus_metric_names` to discover available metrics before querying
 - For Loki, use `list_loki_label_names` to understand available labels first
 - Use relative time ranges (e.g., "now-1h") rather than absolute timestamps where possible
+
+### Fallback: Direct Prometheus HTTP (when Grafana MCP tools are unavailable)
+If the Grafana MCP toolset is not exposed in the session, query Prometheus directly:
+- Endpoint: `http://docker-1:9090` (Prometheus container's host port; the `grafana_host` in `ansible/inventory.yaml` is `docker-1` = `192.168.0.5`).
+- Instant query: `curl -s "$P/api/v1/query" --data-urlencode "query=<PROMQL>"`
+- Targets/scrape jobs configured: `prometheus`, `loki`, `node_exporter` (docker-1, docker-2, proxy, mgmt, jellyfin-lxc, proxmox-1, proxmox-2 — all `:9100`), `cadvisor` (docker-1/2, proxy `:8089`), `snmp_qnap` + `snmp_qnap_long` (target `fileserver`).
+- Useful host-health PromQL:
+  - Up: `up`
+  - CPU%: `100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`
+  - Mem%: `100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))`
+  - Root disk%: `100 - (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{mountpoint="/"} * 100)`
+  - Uptime (s): `time() - node_boot_time_seconds`
+
+### Known data caveats
+- **Proxmox root-fs metric is misleading**: `node_filesystem_*{mountpoint="/"}` on `proxmox-1` / `proxmox-2` reports the small Proxmox root sliver only (~0.3–0.4% used). Real storage lives on ZFS pools and is not reflected in node_exporter root-fs metrics. For Proxmox capacity, use the InfluxDB-Proxmox datasource or query non-root mountpoints.
+- **QNAP `fileserver` SNMP** scrape (`snmp_qnap` / `snmp_qnap_long`) was previously failing but is now healthy (`up=1`, ~300 samples per scrape). If it regresses, verify `grafana_snmp_targets` and SNMP v3 auth before treating as a true outage.

@@ -1,0 +1,37 @@
+---
+- name: "Render {{ workflow.name }} workflow JSON"
+  ansible.builtin.set_fact:
+    _workflow_json: "{{ lookup('template', workflow.template) }}"
+
+- name: "Find existing {{ workflow.name }} workflow"
+  ansible.builtin.set_fact:
+    _workflow_id: "{{ (n8n_workflows.json.data | selectattr('name', 'equalto', workflow.name) | list | first).id | default('') }}"
+  ignore_errors: true
+
+- name: "Create {{ workflow.name }} workflow"
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/workflows"
+    method: POST
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body: "{{ _workflow_json }}"
+    body_format: json
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when: _workflow_id | default('') == ''
+
+- name: "Update {{ workflow.name }} workflow"
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/workflows/{{ _workflow_id }}"
+    method: PUT
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body: "{{ _workflow_json }}"
+    body_format: json
+    validate_certs: false
+    status_code: [200]
+  delegate_to: localhost
+  when: _workflow_id | default('') != ''

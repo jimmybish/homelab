@@ -113,6 +113,13 @@
     proto: tcp
   when: ansible_os_family == "Debian"
 
+- name: Allow SNMP Exporter port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ grafana_snmp_exporter_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
 - name: Deploy Prometheus config
   ansible.builtin.template:
     src: "templates/prometheus.yml.j2"

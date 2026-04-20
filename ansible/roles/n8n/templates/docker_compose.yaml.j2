@@ -16,9 +16,12 @@ services:
       - N8N_RUNNERS_ENABLED=true
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - N8N_GIT_NODE_DISABLE_BARE_REPOS=true
+      - NODES_EXCLUDE=[]
+      - N8N_PROXY_HOPS=1
     volumes:
       - n8n_data:/home/node/.n8n
       - {{ n8n_folder }}/local-files:/files
+      - {{ n8n_folder }}/ssh:/home/node/.ssh:ro
     # Uses default Docker bridge network - no explicit network needed for single container
 
 volumes:

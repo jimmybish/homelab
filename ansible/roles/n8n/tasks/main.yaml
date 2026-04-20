@@ -26,6 +26,45 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
+- name: Setup n8n SSH directory
+  ansible.builtin.file:
+    path: "{{ n8n_folder }}/ssh"
+    state: directory
+    mode: '0700'
+    owner: "1000"
+    group: "1000"
+
+- name: Deploy Copilot SSH private key
+  ansible.builtin.copy:
+    content: "{{ n8n_copilot_ssh_key }}\n"
+    dest: "{{ n8n_folder }}/ssh/id_ed25519"
+    mode: '0600'
+    owner: "1000"
+    group: "1000"
+
+- name: Deploy Copilot SSH public key
+  ansible.builtin.copy:
+    content: "{{ n8n_copilot_ssh_pubkey }}\n"
+    dest: "{{ n8n_folder }}/ssh/id_ed25519.pub"
+    mode: '0644'
+    owner: "1000"
+    group: "1000"
+
+- name: Deploy SSH config for mgmt host
+  ansible.builtin.copy:
+    content: |
+      Host mgmt
+        HostName {{ n8n_copilot_mgmt_host }}
+        User {{ n8n_copilot_mgmt_user }}
+        IdentityFile ~/.ssh/id_ed25519
+        StrictHostKeyChecking no
+        UserKnownHostsFile /dev/null
+        LogLevel ERROR
+    dest: "{{ n8n_folder }}/ssh/config"
+    mode: '0644'
+    owner: "1000"
+    group: "1000"
+
 - name: Allow n8n port through UFW
   community.general.ufw:
     rule: allow
@@ -49,6 +88,20 @@
     project_src: "{{ n8n_folder }}"
     state: present
     remove_orphans: true
+
+# Install community nodes
+- name: Install n8n-nodes-discord-trigger community node
+  community.docker.docker_container_exec:
+    container: n8n
+    command: npm install n8n-nodes-discord-trigger --prefix /home/node/.n8n/nodes
+  register: discord_node_install
+  changed_when: "'added' in discord_node_install.stdout"
+
+- name: Restart n8n if community node was installed
+  community.docker.docker_compose_v2:
+    project_src: "{{ n8n_folder }}"
+    state: restarted
+  when: discord_node_install.changed
 
 # Check if n8n port is open and listening
 - name: Check if n8n port is open and listening
@@ -183,3 +236,140 @@
   tags:
     - homepage
     - homepage_config
+
+# Credential & Workflow Deployment via N8N API
+- name: List existing N8N credentials
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials"
+    method: GET
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: n8n_credentials
+  delegate_to: localhost
+
+- name: Find existing Discord Bot credential
+  ansible.builtin.set_fact:
+    discord_credential_id: "{{ (n8n_credentials.json.data | selectattr('name', 'equalto', 'Discord Bot') | list | first).id | default('') }}"
+  ignore_errors: true
+
+- name: Create Discord Bot credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials"
+    method: POST
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body:
+      name: "Discord Bot"
+      type: "discordBotApi"
+      data:
+        botToken: "{{ n8n_discord_bot_token }}"
+    body_format: json
+    validate_certs: false
+    status_code: [200, 201]
+  register: discord_credential_created
+  delegate_to: localhost
+  when: discord_credential_id | default('') == ''
+
+- name: Set Discord credential ID from creation
+  ansible.builtin.set_fact:
+    discord_credential_id: "{{ discord_credential_created.json.id }}"
+  when: discord_credential_created is not skipped
+
+- name: Update Discord Bot credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials/{{ discord_credential_id }}"
+    method: PATCH
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body:
+      name: "Discord Bot"
+      type: "discordBotApi"
+      data:
+        botToken: "{{ n8n_discord_bot_token }}"
+    body_format: json
+    validate_certs: false
+    status_code: [200]
+  delegate_to: localhost
+  when: discord_credential_id | default('') != '' and discord_credential_created is skipped
+
+- name: Find existing Discord Bot Trigger credential
+  ansible.builtin.set_fact:
+    discord_trigger_credential_id: "{{ (n8n_credentials.json.data | selectattr('name', 'equalto', 'Discord Bot Trigger') | list | first).id | default('') }}"
+  ignore_errors: true
+
+- name: Create Discord Bot Trigger credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials"
+    method: POST
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body:
+      name: "Discord Bot Trigger"
+      type: "discordBotTriggerApi"
+      data:
+        clientId: "{{ n8n_discord_client_id }}"
+        token: "{{ n8n_discord_bot_token }}"
+        apiKey: "{{ n8n_api_key }}"
+        baseUrl: "{{ internal_n8n_url }}/api/v1"
+        allowedHttpRequestDomains: "all"
+    body_format: json
+    validate_certs: false
+    status_code: [200, 201]
+  register: discord_trigger_credential_created
+  delegate_to: localhost
+  when: discord_trigger_credential_id | default('') == ''
+
+- name: Set Discord Trigger credential ID from creation
+  ansible.builtin.set_fact:
+    discord_trigger_credential_id: "{{ discord_trigger_credential_created.json.id }}"
+  when: discord_trigger_credential_created is not skipped
+
+- name: Update Discord Bot Trigger credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials/{{ discord_trigger_credential_id }}"
+    method: PATCH
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body:
+      name: "Discord Bot Trigger"
+      type: "discordBotTriggerApi"
+      data:
+        clientId: "{{ n8n_discord_client_id }}"
+        token: "{{ n8n_discord_bot_token }}"
+        apiKey: "{{ n8n_api_key }}"
+        baseUrl: "{{ internal_n8n_url }}/api/v1"
+        allowedHttpRequestDomains: "all"
+    body_format: json
+    validate_certs: false
+    status_code: [200]
+  delegate_to: localhost
+  when: discord_trigger_credential_id | default('') != '' and discord_trigger_credential_created is skipped
+
+# Deploy workflows
+- name: List existing N8N workflows
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/workflows"
+    method: GET
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: n8n_workflows
+  delegate_to: localhost
+
+- name: Deploy N8N workflows
+  ansible.builtin.include_tasks:
+    file: deploy_workflow.yaml
+  loop:
+    - name: "Copilot CLI Test"
+      template: "templates/copilot_workflow.json.j2"
+    - name: "Discord Copilot Bot"
+      template: "templates/discord_copilot_workflow.json.j2"
+  loop_control:
+    loop_var: workflow
