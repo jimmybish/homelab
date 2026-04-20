@@ -1,0 +1,280 @@
+{
+  "name": "Grafana Alert Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "{{ n8n_grafana_webhook_path }}",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger-1",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "grafana-alerts",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "{{ webhook_auth_credential_id }}",
+          "name": "Grafana Webhook Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "noData",
+        "options": {}
+      },
+      "id": "respond-ok-1",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $('Webhook Trigger').item.json.body;\nconst alerts = body.alerts || [];\nconst items = [];\n\nfor (const alert of alerts) {\n  items.push({\n    json: {\n      status: alert.status || 'unknown',\n      alertname: (alert.labels || {}).alertname || 'Unknown Alert',\n      instance: (alert.labels || {}).instance || 'unknown',\n      severity: (alert.labels || {}).severity || 'unknown',\n      summary: (alert.annotations || {}).summary || '',\n      description: (alert.annotations || {}).description || '',\n      startsAt: alert.startsAt || '',\n      endsAt: alert.endsAt || '',\n      generatorURL: alert.generatorURL || '',\n      values: JSON.stringify(alert.values || {})\n    }\n  });\n}\n\nif (items.length === 0) {\n  items.push({ json: { status: 'empty', alertname: 'No alerts in payload' } });\n}\n\nreturn items;"
+      },
+      "id": "split-alerts-1",
+      "name": "Split Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-firing",
+              "leftValue": "={{ '{{' }} $json.status {{ '}}' }}",
+              "rightValue": "firing",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "route-status-1",
+      "name": "Route by Status",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $input.first().json;\nconst msg = [\n  `🚨 **ALERT FIRING**: ${alert.alertname}`,\n  `**Host**: ${alert.instance}`,\n  `**Severity**: ${alert.severity}`,\n  `**Summary**: ${alert.summary}`,\n  `**Since**: ${alert.startsAt}`\n].join('\\n');\n\nreturn [{ json: { message: msg, ...alert } }];"
+      },
+      "id": "format-firing-1",
+      "name": "Format Firing Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_channel_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.message}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "post-firing-discord-1",
+      "name": "Post Firing Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $('Format Firing Message').item.json;\nconst prompt = [\n  'A Grafana alert has fired. Investigate this issue and report your findings.',\n  '',\n  `Alert: ${alert.alertname}`,\n  `Host: ${alert.instance}`,\n  `Severity: ${alert.severity}`,\n  `Summary: ${alert.summary}`,\n  `Description: ${alert.description}`,\n  `Firing since: ${alert.startsAt}`,\n  `Values: ${alert.values}`,\n  '',\n  'INSTRUCTIONS:',\n  '1. Investigate the root cause of this alert.',\n  '2. Report your findings and what should be done to rectify the issue.',\n  '3. DO NOT make any changes — only report and recommend.',\n  '4. End by asking the user to confirm before you proceed with any fixes.',\n  '',\n  '[IMPORTANT: Keep your reply under 1800 characters. Be concise.]'\n].join('\\n');\n\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+      },
+      "id": "prepare-copilot-prompt-1",
+      "name": "Prepare Copilot Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1580, 200]
+    },
+    {
+      "parameters": {
+        "command": "=ssh mgmt 'cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
+      },
+      "id": "exec-copilot-1",
+      "name": "Run Copilot Investigation",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1820, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet lastBlock = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    } else if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    } else if (responseText) {\n      lastBlock = responseText;\n      responseText = '';\n    }\n  } catch (e) {}\n}\nresponseText = responseText || lastBlock;\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(Copilot investigation returned no output)';\nif (!sessionId) sessionId = require('crypto').randomUUID();\n\nreturn [{ json: { responseText, sessionId } }];"
+      },
+      "id": "parse-copilot-output-1",
+      "name": "Parse Copilot Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2060, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ n8n_discord_channel_id }}/messages/{{ '{{' }} $('Post Firing Alert').item.json.id {{ '}}' }}/threads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({name: $json.sessionId, auto_archive_duration: 1440}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "create-thread-1",
+      "name": "Create Thread",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2300, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $json.id {{ '}}' }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $('Parse Copilot Output').item.json.responseText}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "post-copilot-findings-1",
+      "name": "Post Copilot Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2540, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $input.first().json;\nconst msg = [\n  `✅ **RESOLVED**: ${alert.alertname}`,\n  `**Host**: ${alert.instance}`,\n  `**Resolved at**: ${alert.endsAt}`\n].join('\\n');\n\nreturn [{ json: { message: msg } }];"
+      },
+      "id": "format-resolved-1",
+      "name": "Format Resolved Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_channel_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.message}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "post-resolved-discord-1",
+      "name": "Post Resolved Notice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 500]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{"node": "Respond OK", "type": "main", "index": 0}]]
+    },
+    "Respond OK": {
+      "main": [[{"node": "Split Alerts", "type": "main", "index": 0}]]
+    },
+    "Split Alerts": {
+      "main": [[{"node": "Route by Status", "type": "main", "index": 0}]]
+    },
+    "Route by Status": {
+      "main": [
+        [{"node": "Format Firing Message", "type": "main", "index": 0}],
+        [{"node": "Format Resolved Message", "type": "main", "index": 0}]
+      ]
+    },
+    "Format Firing Message": {
+      "main": [[{"node": "Post Firing Alert", "type": "main", "index": 0}]]
+    },
+    "Post Firing Alert": {
+      "main": [[{"node": "Prepare Copilot Prompt", "type": "main", "index": 0}]]
+    },
+    "Prepare Copilot Prompt": {
+      "main": [[{"node": "Run Copilot Investigation", "type": "main", "index": 0}]]
+    },
+    "Run Copilot Investigation": {
+      "main": [[{"node": "Parse Copilot Output", "type": "main", "index": 0}]]
+    },
+    "Parse Copilot Output": {
+      "main": [[{"node": "Create Thread", "type": "main", "index": 0}]]
+    },
+    "Create Thread": {
+      "main": [[{"node": "Post Copilot Findings", "type": "main", "index": 0}]]
+    },
+    "Format Resolved Message": {
+      "main": [[{"node": "Post Resolved Notice", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

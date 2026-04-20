@@ -101,7 +101,7 @@
   community.docker.docker_compose_v2:
     project_src: "{{ n8n_folder }}"
     state: restarted
-  when: discord_node_install.changed
+  when: discord_node_install.changed  # noqa: no-handler
 
 # Check if n8n port is open and listening
 - name: Check if n8n port is open and listening
@@ -252,7 +252,7 @@
 - name: Find existing Discord Bot credential
   ansible.builtin.set_fact:
     discord_credential_id: "{{ (n8n_credentials.json.data | selectattr('name', 'equalto', 'Discord Bot') | list | first).id | default('') }}"
-  ignore_errors: true
+  failed_when: false
 
 - name: Create Discord Bot credential
   ansible.builtin.uri:
@@ -299,7 +299,7 @@
 - name: Find existing Discord Bot Trigger credential
   ansible.builtin.set_fact:
     discord_trigger_credential_id: "{{ (n8n_credentials.json.data | selectattr('name', 'equalto', 'Discord Bot Trigger') | list | first).id | default('') }}"
-  ignore_errors: true
+  failed_when: false
 
 - name: Create Discord Bot Trigger credential
   ansible.builtin.uri:
@@ -351,6 +351,56 @@
   delegate_to: localhost
   when: discord_trigger_credential_id | default('') != '' and discord_trigger_credential_created is skipped
 
+# Webhook Auth Credential (for Grafana webhook authentication)
+- name: Find existing Grafana Webhook Auth credential
+  ansible.builtin.set_fact:
+    webhook_auth_credential_id: "{{ (n8n_credentials.json.data | selectattr('name', 'equalto', 'Grafana Webhook Auth') | list | first).id | default('') }}"
+  failed_when: false
+
+- name: Create Grafana Webhook Auth credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials"
+    method: POST
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body:
+      name: "Grafana Webhook Auth"
+      type: "httpHeaderAuth"
+      data:
+        name: "Authorization"
+        value: "Bearer {{ grafana_webhook_secret }}"
+    body_format: json
+    validate_certs: false
+    status_code: [200, 201]
+  register: webhook_auth_credential_created
+  delegate_to: localhost
+  when: webhook_auth_credential_id | default('') == ''
+
+- name: Set Webhook Auth credential ID from creation
+  ansible.builtin.set_fact:
+    webhook_auth_credential_id: "{{ webhook_auth_credential_created.json.id }}"
+  when: webhook_auth_credential_created is not skipped
+
+- name: Update Grafana Webhook Auth credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials/{{ webhook_auth_credential_id }}"
+    method: PATCH
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body:
+      name: "Grafana Webhook Auth"
+      type: "httpHeaderAuth"
+      data:
+        name: "Authorization"
+        value: "Bearer {{ grafana_webhook_secret }}"
+    body_format: json
+    validate_certs: false
+    status_code: [200]
+  delegate_to: localhost
+  when: webhook_auth_credential_id | default('') != '' and webhook_auth_credential_created is skipped
+
 # Deploy workflows
 - name: List existing N8N workflows
   ansible.builtin.uri:
@@ -371,5 +421,8 @@
       template: "templates/copilot_workflow.json.j2"
     - name: "Discord Copilot Bot"
       template: "templates/discord_copilot_workflow.json.j2"
+    - name: "Grafana Alert Handler"
+      template: "templates/grafana_alerts_workflow.json.j2"
+      active: true
   loop_control:
     loop_var: workflow

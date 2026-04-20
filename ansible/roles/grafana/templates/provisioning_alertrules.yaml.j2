@@ -1,0 +1,361 @@
+apiVersion: 1
+
+groups:
+  # Host Down - fires when any scrape target is unreachable
+  - orgId: 1
+    name: host_down
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: host-down-1
+        title: Host Down
+        condition: C
+        for: 2m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "Host {% raw %}{{ $labels.instance }}{% endraw %} is down"
+          description: "The target {% raw %}{{ $labels.instance }}{% endraw %} (job: {% raw %}{{ $labels.job }}{% endraw %}) has been unreachable for more than 2 minutes."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: {{ grafana_prometheus_uid }}
+            model:
+              refId: A
+              expr: "up == 0"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0.5
+
+  # Container Down - fires when a container stops reporting metrics
+  - orgId: 1
+    name: container_down
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: container-down-1
+        title: Container Down
+        condition: C
+        for: 2m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "Container {% raw %}{{ $labels.name }}{% endraw %} is not running on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "The Docker container {% raw %}{{ $labels.name }}{% endraw %} on {% raw %}{{ $labels.instance }}{% endraw %} has been down for more than 2 minutes."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: {{ grafana_prometheus_uid }}
+            model:
+              refId: A
+              expr: "time() - container_last_seen{name!=\"\"}"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 60
+
+  # Disk Space Low - fires when filesystem available space drops below threshold
+  - orgId: 1
+    name: disk_space_low
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: disk-space-low-1
+        title: Disk Space Low
+        condition: C
+        for: 5m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "Disk space low on {% raw %}{{ $labels.instance }}{% endraw %} ({% raw %}{{ $labels.mountpoint }}{% endraw %})"
+          description: "Filesystem {% raw %}{{ $labels.mountpoint }}{% endraw %} on {% raw %}{{ $labels.instance }}{% endraw %} has less than {{ grafana_alert_disk_threshold }}% free space."
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: {{ grafana_prometheus_uid }}
+            model:
+              refId: A
+              expr: "(node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\",mountpoint!~\"/boot.*\"} / node_filesystem_size_bytes) * 100"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: lt
+                    params:
+                      - {{ grafana_alert_disk_threshold }}
+
+  # QNAP Health - fires on high temperature, fan failure, or volume degradation
+  - orgId: 1
+    name: qnap_health
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: qnap-temp-high-1
+        title: QNAP Temperature High
+        condition: C
+        for: 2m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "QNAP system temperature is above {{ grafana_alert_qnap_temp_threshold }}C on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "QNAP NAS {% raw %}{{ $labels.instance }}{% endraw %} system temperature has exceeded {{ grafana_alert_qnap_temp_threshold }}C for more than 2 minutes."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: {{ grafana_prometheus_uid }}
+            model:
+              refId: A
+              expr: "systemTemperature"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - {{ grafana_alert_qnap_temp_threshold }}
+
+      - uid: qnap-fan-fail-1
+        title: QNAP Fan Failure
+        condition: C
+        for: 2m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "QNAP fan stopped on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "A fan on QNAP NAS {% raw %}{{ $labels.instance }}{% endraw %} is reporting 0 RPM. This may indicate a hardware failure."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: {{ grafana_prometheus_uid }}
+            model:
+              refId: A
+              expr: "sysFanSpeed"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: lt
+                    params:
+                      - 1
+
+      - uid: qnap-volume-degrade-1
+        title: QNAP Volume Degraded
+        condition: C
+        for: 0s
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "QNAP volume degraded on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "A RAID volume on QNAP NAS {% raw %}{{ $labels.instance }}{% endraw %} is in a degraded state. Immediate attention required."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: {{ grafana_prometheus_uid }}
+            model:
+              refId: A
+              expr: "raidStatus"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0
+
+  # Loki Error Patterns - fires when error log rate spikes
+  - orgId: 1
+    name: loki_error_patterns
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: loki-errors-1
+        title: High Error Rate in Logs
+        condition: C
+        for: 5m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "High error rate detected in logs for {% raw %}{{ $labels.host }}{% endraw %} / {% raw %}{{ $labels.container_name }}{% endraw %}"
+          description: "More than {{ grafana_alert_loki_error_threshold }} error/fatal/panic log lines detected in 5 minutes from {% raw %}{{ $labels.host }}{% endraw %} ({% raw %}{{ $labels.container_name }}{% endraw %})."
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: {{ grafana_loki_uid }}
+            model:
+              refId: A
+              expr: "sum by (host, container_name) (count_over_time({source=\"docker\"} |~ `(?i)(error|fatal|panic)` [5m]))"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - {{ grafana_alert_loki_error_threshold }}
