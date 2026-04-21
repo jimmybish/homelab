@@ -1,20 +1,20 @@
 {
-  "name": "Discord Copilot Bot",
+  "name": "Discord Plexibot",
   "nodes": [
     {
       "parameters": {
         "type": "message",
         "pattern": "every"
       },
-      "id": "discord-trigger-1",
+      "id": "discord-trigger-plexibot",
       "name": "Discord Trigger",
       "type": "n8n-nodes-discord-trigger.discordTrigger",
       "typeVersion": 1,
       "position": [200, 300],
       "credentials": {
         "discordBotTriggerApi": {
-          "id": "{{ discord_trigger_credential_id }}",
-          "name": "Discord Bot Trigger"
+          "id": "{{ plexibot_discord_trigger_credential_id }}",
+          "name": "Plexibot Discord Bot Trigger"
         }
       }
     },
@@ -28,7 +28,7 @@
           },
           "conditions": [
             {
-              "id": "filter-not-bot",
+              "id": "filter-not-bot-plexibot",
               "leftValue": "={{ '{{' }} $json.authorIsBot {{ '}}' }}",
               "rightValue": "false",
               "operator": {
@@ -41,7 +41,7 @@
         },
         "options": {}
       },
-      "id": "filter-bots-1",
+      "id": "filter-bots-plexibot",
       "name": "Filter Bots",
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2,
@@ -57,7 +57,7 @@
           },
           "conditions": [
             {
-              "id": "check-author",
+              "id": "check-author-plexibot",
               "leftValue": "={{ '{{' }} $json.authorId {{ '}}' }}",
               "rightValue": "{{ n8n_discord_author_id }}",
               "operator": {
@@ -70,7 +70,7 @@
         },
         "options": {}
       },
-      "id": "check-author-1",
+      "id": "check-author-plexibot",
       "name": "Check Author",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -85,7 +85,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bot {{ n8n_discord_bot_token }}"
+              "value": "Bot {{ n8n_plexibot_discord_bot_token }}"
             },
             {
               "name": "Content-Type",
@@ -98,7 +98,7 @@
         "jsonBody": "={{ '{{' }} JSON.stringify({content: \"Sorry, I'm not allowed to speak to others just yet. Only Jimmy can use me!\", message_reference: {message_id: $('Filter Bots').item.json.id}}) {{ '}}' }}",
         "options": {}
       },
-      "id": "reject-user-1",
+      "id": "reject-user-plexibot",
       "name": "Reject Unauthorized User",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -106,9 +106,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst channelId = $('Filter Bots').item.json.channelId;\nconst mainChannels = ['{{ n8n_discord_alerts_channel_id }}', '{{ n8n_discord_plex_channel_id }}'];\nconst botId = '{{ n8n_discord_client_id }}';\n\n// Thread replies: always allow\nif (!mainChannels.includes(channelId)) {\n  return [$input.first()];\n}\n\n// New messages in main channel: require @mention\nif (content.includes('<@' + botId + '>')) {\n  return [$input.first()];\n}\n\nreturn [];"
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst channelId = $('Filter Bots').item.json.channelId;\nconst mainChannels = ['{{ n8n_discord_plex_channel_id }}', '{{ n8n_discord_alerts_channel_id }}'];\nconst botId = '{{ n8n_plexibot_discord_client_id }}';\n\n// Thread replies: always allow\nif (!mainChannels.includes(channelId)) {\n  return [$input.first()];\n}\n\n// New messages in main channel: require @mention\nif (content.includes('<@' + botId + '>')) {\n  return [$input.first()];\n}\n\nreturn [];"
       },
-      "id": "check-mention-1",
+      "id": "check-mention-plexibot",
       "name": "Check Mention or Thread",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -131,15 +131,15 @@
         "messageId": "={{ '{{' }} $('Filter Bots').item.json.id {{ '}}' }}",
         "emoji": "👀"
       },
-      "id": "react-eyes-1",
+      "id": "react-eyes-plexibot",
       "name": "React Eyes",
       "type": "n8n-nodes-base.discord",
       "typeVersion": 2,
       "position": [860, 300],
       "credentials": {
         "discordBotApi": {
-          "id": "{{ discord_credential_id }}",
-          "name": "Discord Bot"
+          "id": "{{ plexibot_discord_credential_id }}",
+          "name": "Plexibot Discord Bot"
         }
       }
     },
@@ -153,18 +153,18 @@
           },
           "conditions": [
             {
-              "id": "check-alerts-channel",
+              "id": "check-plex-channel",
               "leftValue": "={{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}",
-              "rightValue": "{{ n8n_discord_alerts_channel_id }}",
+              "rightValue": "{{ n8n_discord_plex_channel_id }}",
               "operator": {
                 "type": "string",
                 "operation": "equals"
               }
             },
             {
-              "id": "check-plex-channel",
+              "id": "check-alerts-channel",
               "leftValue": "={{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}",
-              "rightValue": "{{ n8n_discord_plex_channel_id }}",
+              "rightValue": "{{ n8n_discord_alerts_channel_id }}",
               "operator": {
                 "type": "string",
                 "operation": "equals"
@@ -175,7 +175,7 @@
         },
         "options": {}
       },
-      "id": "check-new-thread-1",
+      "id": "check-new-thread-plexibot",
       "name": "Check If New Thread",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -185,7 +185,7 @@
       "parameters": {
         "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
       },
-      "id": "prepare-new-prompt-1",
+      "id": "prepare-new-prompt-plexibot",
       "name": "Prepare New Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -193,9 +193,9 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent plexibot --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
       },
-      "id": "exec-copilot-new-1",
+      "id": "exec-copilot-new-plexibot",
       "name": "Run Copilot New",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
@@ -205,7 +205,7 @@
       "parameters": {
         "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet lastBlock = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    } else if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    } else if (responseText) {\n      lastBlock = responseText;\n      responseText = '';\n    }\n  } catch (e) {}\n}\nresponseText = responseText || lastBlock;\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(no response)';\n\nreturn [{ json: { responseText, sessionId } }];"
       },
-      "id": "parse-new-output-1",
+      "id": "parse-new-output-plexibot",
       "name": "Parse New Output",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -220,7 +220,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bot {{ n8n_discord_bot_token }}"
+              "value": "Bot {{ n8n_plexibot_discord_bot_token }}"
             },
             {
               "name": "Content-Type",
@@ -233,7 +233,7 @@
         "jsonBody": "={{ '{{' }} JSON.stringify({name: $json.sessionId, auto_archive_duration: 1440}) {{ '}}' }}",
         "options": {}
       },
-      "id": "create-thread-1",
+      "id": "create-thread-plexibot",
       "name": "Create Thread",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -248,7 +248,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bot {{ n8n_discord_bot_token }}"
+              "value": "Bot {{ n8n_plexibot_discord_bot_token }}"
             },
             {
               "name": "Content-Type",
@@ -261,7 +261,7 @@
         "jsonBody": "={{ '{{' }} JSON.stringify({content: $('Parse New Output').item.json.responseText}) {{ '}}' }}",
         "options": {}
       },
-      "id": "send-new-reply-1",
+      "id": "send-new-reply-plexibot",
       "name": "Send New Reply",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -276,13 +276,13 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bot {{ n8n_discord_bot_token }}"
+              "value": "Bot {{ n8n_plexibot_discord_bot_token }}"
             }
           ]
         },
         "options": {}
       },
-      "id": "get-thread-info-1",
+      "id": "get-thread-info-plexibot",
       "name": "Get Thread Info",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -298,18 +298,18 @@
           },
           "conditions": [
             {
-              "id": "validate-parent-alerts",
+              "id": "validate-parent-plex",
               "leftValue": "={{ '{{' }} $json.parent_id {{ '}}' }}",
-              "rightValue": "{{ n8n_discord_alerts_channel_id }}",
+              "rightValue": "{{ n8n_discord_plex_channel_id }}",
               "operator": {
                 "type": "string",
                 "operation": "equals"
               }
             },
             {
-              "id": "validate-parent-plex",
+              "id": "validate-parent-alerts",
               "leftValue": "={{ '{{' }} $json.parent_id {{ '}}' }}",
-              "rightValue": "{{ n8n_discord_plex_channel_id }}",
+              "rightValue": "{{ n8n_discord_alerts_channel_id }}",
               "operator": {
                 "type": "string",
                 "operation": "equals"
@@ -320,7 +320,7 @@
         },
         "options": {}
       },
-      "id": "validate-thread-1",
+      "id": "validate-thread-plexibot",
       "name": "Validate Thread",
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2,
@@ -330,7 +330,7 @@
       "parameters": {
         "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $input.first().json.name;\nreturn [{ json: { safeContent, name } }];"
       },
-      "id": "prepare-resume-prompt-1",
+      "id": "prepare-resume-prompt-plexibot",
       "name": "Prepare Resume Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -338,9 +338,9 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume={{ '{{' }} $json.name {{ '}}' }} -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent plexibot --resume={{ '{{' }} $json.name {{ '}}' }} -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
       },
-      "id": "exec-copilot-resume-1",
+      "id": "exec-copilot-resume-plexibot",
       "name": "Run Copilot Resume",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
@@ -350,7 +350,7 @@
       "parameters": {
         "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet lastBlock = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    } else if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    } else if (responseText) {\n      lastBlock = responseText;\n      responseText = '';\n    }\n  } catch (e) {}\n}\nresponseText = responseText || lastBlock;\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(no response)';\n\nreturn [{ json: { responseText, sessionId } }];"
       },
-      "id": "parse-resume-output-1",
+      "id": "parse-resume-output-plexibot",
       "name": "Parse Resume Output",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -365,7 +365,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bot {{ n8n_discord_bot_token }}"
+              "value": "Bot {{ n8n_plexibot_discord_bot_token }}"
             },
             {
               "name": "Content-Type",
@@ -378,7 +378,7 @@
         "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.responseText}) {{ '}}' }}",
         "options": {}
       },
-      "id": "send-resume-reply-1",
+      "id": "send-resume-reply-plexibot",
       "name": "Send Resume Reply",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
