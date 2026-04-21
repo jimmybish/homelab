@@ -107,21 +107,21 @@ groups:
                     params:
                       - 60
 
-  # Disk Space Low - fires when filesystem available space drops below threshold
+  # Disk Space Low (local) - fires when a local filesystem (zfs/ext4/xfs/btrfs/...) drops below threshold
   - orgId: 1
-    name: disk_space_low
+    name: disk_space_low_local
     folder: Infrastructure
     interval: 1m
     rules:
-      - uid: disk-space-low-1
-        title: Disk Space Low
+      - uid: disk-space-low-local-1
+        title: Disk Space Low (Local)
         condition: C
         for: 5m
         noDataState: "OK"
         execErrState: "OK"
         annotations:
           summary: "Disk space low on {% raw %}{{ $labels.instance }}{% endraw %} ({% raw %}{{ $labels.mountpoint }}{% endraw %})"
-          description: "Filesystem {% raw %}{{ $labels.mountpoint }}{% endraw %} on {% raw %}{{ $labels.instance }}{% endraw %} has less than {{ grafana_alert_disk_threshold }}% free space."
+          description: "Filesystem {% raw %}{{ $labels.mountpoint }}{% endraw %} on {% raw %}{{ $labels.instance }}{% endraw %} has less than {{ grafana_alert_disk_threshold_local }}% free space."
         labels:
           severity: warning
         data:
@@ -132,7 +132,7 @@ groups:
             datasourceUid: {{ grafana_prometheus_uid }}
             model:
               refId: A
-              expr: "(node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\",mountpoint!~\"/boot.*\"} / node_filesystem_size_bytes) * 100"
+              expr: "(node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs|nfs|nfs4|fuse.*|cifs|smbfs|autofs|devtmpfs|ramfs\",mountpoint!~\"/boot.*\"} / node_filesystem_size_bytes) * 100"
               intervalMs: 1000
               maxDataPoints: 43200
           - refId: B
@@ -158,7 +158,60 @@ groups:
                 - evaluator:
                     type: lt
                     params:
-                      - {{ grafana_alert_disk_threshold }}
+                      - {{ grafana_alert_disk_threshold_local }}
+
+  # Disk Space Low (QNAP) - fires when a QNAP SNMP volume drops below threshold
+  - orgId: 1
+    name: disk_space_low_qnap
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: disk-space-low-qnap-1
+        title: Disk Space Low (QNAP)
+        condition: C
+        for: 5m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "QNAP volume low on {% raw %}{{ $labels.instance }}{% endraw %} (volume index {% raw %}{{ $labels.sysVolumeIndexEX }}{% endraw %})"
+          description: "QNAP volume index {% raw %}{{ $labels.sysVolumeIndexEX }}{% endraw %} on {% raw %}{{ $labels.instance }}{% endraw %} has less than {{ grafana_alert_disk_threshold_qnap }}% free space."
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: {{ grafana_prometheus_uid }}
+            model:
+              refId: A
+              expr: "(sysVolumeFreeSizeEX / sysVolumeTotalSizeEX) * 100"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: lt
+                    params:
+                      - {{ grafana_alert_disk_threshold_qnap }}
 
   # QNAP Health - fires on high temperature, fan failure, or volume degradation
   - orgId: 1
@@ -263,7 +316,7 @@ groups:
       - uid: qnap-volume-degrade-1
         title: QNAP Volume Degraded
         condition: C
-        for: 0s
+        for: 5m
         noDataState: "OK"
         execErrState: "OK"
         annotations:
@@ -279,7 +332,11 @@ groups:
             datasourceUid: {{ grafana_prometheus_uid }}
             model:
               refId: A
-              expr: "raidStatus"
+              # snmp_exporter exposes QNAP raidStatus as numeric=1 always; the actual
+              # status is encoded in a same-named label as hex-ASCII. Healthy = "Ready"
+              # (0x5265616479). Alert only when label is NOT Ready. When healthy the
+              # series doesn't exist -> reduce returns NoData -> noDataState=OK resolves.
+              expr: "raidStatus{raidStatus!=\"0x5265616479\"}"
               intervalMs: 1000
               maxDataPoints: 43200
           - refId: B

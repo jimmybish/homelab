@@ -164,7 +164,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[IMPORTANT: Keep your reply under 1800 characters. Be concise.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
       },
       "id": "prepare-new-prompt-1",
       "name": "Prepare New Prompt",
@@ -174,7 +174,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
       },
       "id": "exec-copilot-new-1",
       "name": "Run Copilot New",
@@ -300,7 +300,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[IMPORTANT: Keep your reply under 1800 characters. Be concise.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $input.first().json.name;\nreturn [{ json: { safeContent, name } }];"
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $input.first().json.name;\nreturn [{ json: { safeContent, name } }];"
       },
       "id": "prepare-resume-prompt-1",
       "name": "Prepare Resume Prompt",
@@ -310,7 +310,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume={{ '{{' }} $json.name {{ '}}' }} -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume={{ '{{' }} $json.name {{ '}}' }} -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
       },
       "id": "exec-copilot-resume-1",
       "name": "Run Copilot Resume",
