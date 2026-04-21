@@ -1,0 +1,347 @@
+---
+# 1. Docker Prerequisites
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+# 2. Directory Setup (multi-container stack)
+- name: Setup tracearr parent directory
+  ansible.builtin.file:
+    path: "{{ tracearr_parent_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup tracearr service directory
+  ansible.builtin.file:
+    path: "{{ tracearr_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup tracearr backups directory
+  ansible.builtin.file:
+    path: "{{ tracearr_folder }}/backups"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup tracearr database directory
+  ansible.builtin.file:
+    path: "{{ tracearr_database_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "1000"
+    group: "1000"
+
+- name: Setup tracearr redis directory
+  ansible.builtin.file:
+    path: "{{ tracearr_redis_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "999"
+    group: "999"
+
+# 3. Firewall Configuration
+- name: Allow tracearr port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ tracearr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+# 4. Deploy Configuration Files & Run Compose
+- name: Deploy tracearr using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ tracearr_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start tracearr
+
+- name: Run tracearr docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ tracearr_folder }}"
+    state: present
+    remove_orphans: true
+
+# 5. Health Check
+- name: Check if tracearr port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert tracearr port is listening
+  ansible.builtin.assert:
+    that:
+      - tracearr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Tracearr port {{ tracearr_port }} is not open and listening!"
+    success_msg: "Tracearr port {{ tracearr_port }} is open and listening."
+
+# 6. Proxy Configuration
+- name: Configure nginx proxy for tracearr
+  when: tracearr_configure_proxy | default(true)
+  block:
+    - name: Get tracearr host IP for proxy
+      ansible.builtin.set_fact:
+        tracearr_proxy_ip: "{{ ansible_default_ipv4.address }}"
+
+    - name: Deploy tracearr nginx proxy config
+      ansible.builtin.template:
+        src: "templates/tracearr.subdomain.conf.j2"
+        dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/tracearr.subdomain.conf"
+        mode: '0664'
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      notify: Restart Swag Internal
+
+# 7. DNS Configuration
+- name: Get DNS resolver host overrides from pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_overrides"
+    method: GET
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: pfsense_dns_overrides
+  delegate_to: localhost
+  when: tracearr_configure_dns | default(true)
+
+- name: Find deployment host override entry in pfSense
+  ansible.builtin.set_fact:
+    deployment_host_override: >-
+      {{ pfsense_dns_overrides.json.data
+         | selectattr('host', 'equalto', inventory_hostname.split('.')[0])
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | first
+         | default({}) }}
+  when:
+    - tracearr_configure_dns | default(true)
+    - pfsense_dns_overrides.json.data is defined
+
+- name: Create host override for deployment target if missing
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      host: "{{ inventory_hostname.split('.')[0] }}"
+      domain: "{{ internal_domain }}"
+      ip: ["{{ ansible_default_ipv4.address }}"]
+      descr: "{{ inventory_hostname.split('.')[0] | title }} host"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  register: host_override_creation
+  when:
+    - tracearr_configure_dns | default(true)
+    - deployment_host_override | length == 0
+
+- name: Apply DNS resolver changes after host override creation
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when:
+    - tracearr_configure_dns | default(true)
+    - host_override_creation is succeeded
+
+- name: Refresh DNS resolver host overrides after creation
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_overrides"
+    method: GET
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: pfsense_dns_overrides
+  delegate_to: localhost
+  when:
+    - tracearr_configure_dns | default(true)
+    - host_override_creation is succeeded
+
+- name: Re-find deployment host override entry in pfSense
+  ansible.builtin.set_fact:
+    deployment_host_override: >-
+      {{ pfsense_dns_overrides.json.data
+         | selectattr('host', 'equalto', inventory_hostname.split('.')[0])
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | first
+         | default({}) }}
+  when:
+    - tracearr_configure_dns | default(true)
+    - host_override_creation is succeeded
+
+- name: Find proxy host override entry in pfSense
+  ansible.builtin.set_fact:
+    proxy_host_override: >-
+      {{ pfsense_dns_overrides.json.data
+         | selectattr('host', 'equalto', 'proxy')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | first
+         | default({}) }}
+  when:
+    - tracearr_configure_dns | default(true)
+    - tracearr_is_proxied | default(true)
+    - pfsense_dns_overrides.json.data is defined
+
+- name: Set parent host override for tracearr alias
+  ansible.builtin.set_fact:
+    tracearr_parent_override: "{{ proxy_host_override if (tracearr_is_proxied | default(true)) else deployment_host_override }}"
+  when:
+    - tracearr_configure_dns | default(true)
+
+- name: Find all existing aliases for tracearr across all host overrides
+  ansible.builtin.set_fact:
+    tracearr_all_existing_aliases: >-
+      {{ pfsense_dns_overrides.json.data
+         | selectattr('aliases', 'defined')
+         | map(attribute='aliases')
+         | flatten
+         | selectattr('host', 'equalto', 'tracearr')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list }}
+  when:
+    - tracearr_configure_dns | default(true)
+    - pfsense_dns_overrides.json.data is defined
+
+- name: Identify aliases to delete (not under correct parent)
+  ansible.builtin.set_fact:
+    tracearr_aliases_to_delete: >-
+      {{ tracearr_all_existing_aliases
+         | rejectattr('parent_id', 'equalto', tracearr_parent_override.id | default(0))
+         | list }}
+  when:
+    - tracearr_configure_dns | default(true)
+    - tracearr_all_existing_aliases is defined
+
+- name: Delete incorrect tracearr DNS aliases
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: DELETE
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ item.parent_id }}"
+      id: "{{ item.id }}"
+      apply: false
+    validate_certs: false
+    status_code: [200, 204]
+  delegate_to: localhost
+  loop: "{{ tracearr_aliases_to_delete }}"
+  register: tracearr_delete_results
+  when:
+    - tracearr_configure_dns | default(true)
+    - tracearr_aliases_to_delete is defined
+    - tracearr_aliases_to_delete | length > 0
+
+- name: Apply DNS resolver changes after deletion
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when:
+    - tracearr_configure_dns | default(true)
+    - tracearr_delete_results is changed
+
+- name: Check if tracearr alias exists under parent host override
+  ansible.builtin.set_fact:
+    tracearr_alias_exists: >-
+      {{ tracearr_parent_override.aliases | default([])
+         | selectattr('host', 'equalto', 'tracearr')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | length > 0 }}
+  when:
+    - tracearr_configure_dns | default(true)
+    - tracearr_parent_override is defined
+    - tracearr_parent_override | length > 0
+
+- name: Display tracearr DNS alias status
+  ansible.builtin.debug:
+    msg: >-
+      {% if tracearr_parent_override | length == 0 %}
+      Warning: Parent host override not found in pfSense DNS
+      {% elif tracearr_alias_exists %}
+      tracearr DNS alias exists under {{ tracearr_parent_override.host }}.{{ internal_domain }}
+      {% else %}
+      tracearr DNS alias missing - will be created under {{ tracearr_parent_override.host }}.{{ internal_domain }}
+      {% endif %}
+  when: tracearr_configure_dns | default(true)
+
+- name: Create tracearr DNS alias under parent host override
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ tracearr_parent_override.id }}"
+      host: "tracearr"
+      domain: "{{ internal_domain }}"
+      descr: "Tracearr media server monitoring"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  register: tracearr_alias_result
+  when:
+    - tracearr_configure_dns | default(true)
+    - tracearr_parent_override | length > 0
+    - not tracearr_alias_exists
+
+- name: Apply DNS resolver changes in pfSense
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when:
+    - tracearr_configure_dns | default(true)
+    - (tracearr_alias_result is succeeded or host_override_creation is succeeded)
+
+# 8. Homepage Integration
+- name: Add Tracearr service to Homepage Media section
+  ansible.builtin.blockinfile:
+    path: "{{ homepage_folder }}/config/services.yaml"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - tracearr service"
+    block: "{{ lookup('template', 'homepage_service.yaml.j2') }}"
+    insertafter: "^- Media:"
+    mode: '0644'
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+  notify: Restart Homepage
+  when: tracearr_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config

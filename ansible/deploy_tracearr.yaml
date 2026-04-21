@@ -1,0 +1,6 @@
+---
+- name: Install Tracearr
+  hosts: tracearr_host
+  become: true
+  roles:
+    - tracearr

@@ -59,9 +59,12 @@ ansible-playbook -i inventory.yaml deploy_<service>.yaml --vault-password-file ~
    ```
 
 3. **Test web interface (if applicable):**
-   - Access `https://<service>.{{ internal_domain }}` in browser
-   - Verify page loads correctly
-   - Check for any errors in browser console
+   - Verify the response body contains the service name or expected content — **not** the SWAG default page
+   - A 200 status code alone is insufficient (SWAG returns 200 with its own page when the upstream is unreachable)
+   ```bash
+   curl -sk https://<service>.{{ internal_domain }}/ | head -20
+   ```
+   - Check for the service name, `<title>` tag, or other identifying content in the output
 
 4. **Verify DNS resolution:**
    ```bash

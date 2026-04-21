@@ -1,0 +1,38 @@
+---
+# Research Notes - Tracearr
+# Official Source: https://github.com/connorgallopo/Tracearr
+# Docker Image: ghcr.io/connorgallopo/tracearr (GHCR)
+# Example Compose: https://github.com/connorgallopo/Tracearr/blob/main/docker/examples/docker-compose.pg18.yml
+# NGINX Proxy Config: None available (custom config created)
+# Homepage Widget: None available (service only, no widget)
+# Last Updated: 2026-04-21
+#
+# Default Configuration:
+# - Image: ghcr.io/connorgallopo/tracearr:latest
+# - Default Port: 3000
+# - Protocol: http
+# - Stack: App + TimescaleDB (PostgreSQL 18) + Redis
+# - Dependencies: TimescaleDB, Redis
+# - Web Interface: yes
+# - Real-time: Socket.io (WebSocket)
+# - Plex/Jellyfin connections: configured via web UI after deployment
+
+# Version information
+tracearr_version: "latest"
+tracearr_timescaledb_version: "pg18.1-ts2.25.0"
+tracearr_redis_version: "8-alpine"
+
+# External port (3000 is used by Homepage on docker-2)
+tracearr_port: 3001
+
+# Volume paths - Multi-container stack pattern
+tracearr_parent_folder: "{{ docker_storage_folder }}/tracearr-stack"
+tracearr_folder: "{{ tracearr_parent_folder }}/tracearr"
+tracearr_database_folder: "{{ tracearr_parent_folder }}/database"
+tracearr_redis_folder: "{{ tracearr_parent_folder }}/redis"
+
+# Feature flags
+tracearr_configure_dns: true
+tracearr_is_proxied: true
+tracearr_configure_proxy: true
+tracearr_configure_homepage: true
