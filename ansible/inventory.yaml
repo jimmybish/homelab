@@ -135,6 +135,11 @@ maintainerr_host:
   hosts:
     docker-2:
 
+# Tracearr
+tracearr_host:
+  hosts:
+    docker-2:
+
 # JellyPlex-Watched
 jellyplex_watched_host:
   hosts:

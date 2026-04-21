@@ -48,7 +48,7 @@ server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
 
-    server_name <service>.*;
+    server_name <service>.{{ internal_domain }};
 
     include /config/nginx/ssl.conf;
 

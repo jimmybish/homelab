@@ -1,0 +1,70 @@
+services:
+  tracearr:
+    image: ghcr.io/connorgallopo/tracearr:{{ tracearr_version }}
+    container_name: tracearr
+    restart: unless-stopped
+    ports:
+      - "{{ tracearr_port }}:3000"  # Internal port is always 3000
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - TZ={{ timezone }}
+      - DATABASE_URL=postgres://tracearr:{{ tracearr_db_password }}@tracearr-db:5432/tracearr
+      - REDIS_URL=redis://tracearr-redis:6379
+      - JWT_SECRET={{ tracearr_jwt_secret }}
+      - COOKIE_SECRET={{ tracearr_cookie_secret }}
+      - CORS_ORIGIN={{ internal_tracearr_url }}
+      - LOG_LEVEL=info
+    depends_on:
+      tracearr-db:
+        condition: service_healthy
+      tracearr-redis:
+        condition: service_healthy
+    volumes:
+      - {{ tracearr_folder }}/backups:/data/backup
+    networks:
+      - tracearr_net
+
+  tracearr-db:
+    image: timescale/timescaledb-ha:{{ tracearr_timescaledb_version }}
+    container_name: tracearr-db
+    restart: unless-stopped
+    shm_size: 512mb
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    command: postgres -c timescaledb.license=timescale -c timescaledb.max_tuples_decompressed_per_dml_transaction=0 -c max_locks_per_transaction=4096 -c timescaledb.telemetry_level=off
+    environment:
+      - POSTGRES_USER=tracearr
+      - POSTGRES_PASSWORD={{ tracearr_db_password }}
+      - POSTGRES_DB=tracearr
+    volumes:
+      - {{ tracearr_database_folder }}:/home/postgres/pgdata/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracearr"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tracearr_net
+
+  tracearr-redis:
+    image: redis:{{ tracearr_redis_version }}
+    container_name: tracearr-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - {{ tracearr_redis_folder }}:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tracearr_net
+
+networks:
+  tracearr_net:
+    driver: bridge
