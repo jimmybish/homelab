@@ -112,7 +112,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const alert = $('Format Firing Message').item.json;\nconst prompt = [\n  'A Grafana alert has fired. Investigate this issue and report your findings.',\n  '',\n  `Alert: ${alert.alertname}`,\n  `Host: ${alert.instance}`,\n  `Severity: ${alert.severity}`,\n  `Summary: ${alert.summary}`,\n  `Description: ${alert.description}`,\n  `Firing since: ${alert.startsAt}`,\n  `Values: ${alert.values}`,\n  '',\n  'INSTRUCTIONS:',\n  '1. Investigate the root cause of this alert.',\n  '2. Report your findings and what should be done to rectify the issue.',\n  '3. DO NOT make any changes — only report and recommend.',\n  '4. End by asking the user to confirm before you proceed with any fixes.',\n  '',\n  '[IMPORTANT: Keep your reply under 1800 characters. Be concise.]'\n].join('\\n');\n\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+        "jsCode": "const alert = $('Format Firing Message').item.json;\nconst prompt = [\n  'A Grafana alert has fired. Investigate this issue and report your findings.',\n  '',\n  `Alert: ${alert.alertname}`,\n  `Host: ${alert.instance}`,\n  `Severity: ${alert.severity}`,\n  `Summary: ${alert.summary}`,\n  `Description: ${alert.description}`,\n  `Firing since: ${alert.startsAt}`,\n  `Values: ${alert.values}`,\n  '',\n  'INSTRUCTIONS:',\n  '1. Investigate the root cause of this alert.',\n  '2. Report your findings and what should be done to rectify the issue.',\n  '3. DO NOT make any changes — only report and recommend.',\n  '4. End by asking the user to confirm before you proceed with any fixes.',\n  '',\n  '[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]'\n].join('\\n');\n\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
       },
       "id": "prepare-copilot-prompt-1",
       "name": "Prepare Copilot Prompt",
@@ -122,7 +122,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
       },
       "id": "exec-copilot-1",
       "name": "Run Copilot Investigation",

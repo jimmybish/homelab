@@ -108,5 +108,17 @@ If the Grafana MCP toolset is not exposed in the session, query Prometheus direc
 - Verification approach: 24h `query_range` with `step=300` against the new expr — peak should sit well below `grafana_alert_loki_error_threshold` (currently 10). Pre-fix peak was unbounded (always firing). Post-fix peak observed: 7 (real Grafana provisioning startup failures, worth alerting on).
 - Docker logs on docker-1/2 are **logfmt**, not JSON (`| json` returns 0 matches; `| logfmt` parses correctly). Stream label `level` only exists on `job=systemd-journal` streams, never on `source=docker` — must parse.
 
+### Deleting file-provisioned alert rules (409 Conflict)
+- Grafana refuses to delete rules whose `provenance_type.provenance = 'file'` even when the API/MCP call sets `X-Disable-Provenance: true` (`disable_provenance: true`). That header lets you *edit* a provisioned rule but does not bypass deletion.
+- When a provisioning template is removed/renamed, the rule is orphaned in the DB and keeps firing. To clean up:
+  1. Clear the provenance row directly in Grafana's sqlite DB on `docker-1`:
+     ```
+     ssh docker-1 'sudo sqlite3 /etc/docker-storage/grafana-stack/grafana/grafana.db \
+       "DELETE FROM provenance_type WHERE record_key='\''<UID>'\'' AND record_type='\''alertRule'\'';"'
+     ```
+     (The `grafana` container image has no `sqlite3` binary, so run sqlite on the host.)
+  2. Then call the normal MCP `alerting_manage_rules` `delete` — it will succeed.
+- Verify with `get` returning 404. DB path is `/etc/docker-storage/grafana-stack/grafana/grafana.db`; provenance table schema: `(record_key TEXT, record_type TEXT, provenance TEXT, org_id INTEGER)`.
+
 ### Alert rule caveat: `noDataState` on negative-presence queries
 - Rules in `ansible/roles/grafana/templates/provisioning_alertrules.yaml.j2` such as `Host Down` (`up == 0`), `Container Down`, etc. are negative-presence queries — they return an **empty vector when healthy**. If `noDataState: Alerting` is set on these, Grafana fires synthetic NoData alerts with **no labels**, producing annotations like `Host [no value] is down` and `Values: {}`. For these queries `noDataState` should be `OK` (or `NoData`), not `Alerting`. When you see `[no value]` in a fired alert, suspect this misconfiguration first.

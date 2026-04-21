@@ -58,7 +58,8 @@ grafana_prometheus_uid: "PBFA97CFB590B2093"
 grafana_loki_uid: "P8E80F9AEF21F6940"
 
 # Alerting - thresholds
-grafana_alert_disk_threshold: 15          # Alert when filesystem has < 15% free
+grafana_alert_disk_threshold_local: 20    # Alert when local FS has <20% free (>80% used)
+grafana_alert_disk_threshold_qnap: 5      # Alert when QNAP volume has <5% free (>95% used)
 grafana_alert_qnap_temp_threshold: 55     # Alert when QNAP temp > 55°C
 grafana_alert_loki_error_threshold: 10    # Alert when > 10 errors in 5m window
 
