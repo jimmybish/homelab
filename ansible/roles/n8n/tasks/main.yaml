@@ -424,5 +424,11 @@
     - name: "Grafana Alert Handler"
       template: "templates/grafana_alerts_workflow.json.j2"
       active: true
+    - name: "Copilot Still Thinking"
+      template: "templates/copilot_still_thinking_workflow.json.j2"
+      active: true
+    - name: "Close Stale Discord Threads"
+      template: "templates/close_stale_threads_workflow.json.j2"
+      active: true
   loop_control:
     loop_var: workflow

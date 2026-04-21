@@ -1,0 +1,96 @@
+{
+  "name": "Close Stale Discord Threads",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "id": "schedule-daily-1",
+      "name": "Daily Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://discord.com/api/v10/guilds/{{ n8n_discord_server_id }}/threads/active",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-threads-1",
+      "name": "Get Active Threads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const threads = $input.first().json.threads || [];\nconst targetChannel = '1494661096466940015';\nconst now = Date.now();\nconst twentyFourHours = 24 * 60 * 60 * 1000;\n\nconst stale = [];\nfor (const t of threads) {\n  if (t.parent_id !== targetChannel) continue;\n\n  // last_message_id is a Discord snowflake — extract timestamp\n  let lastActivity;\n  if (t.last_message_id) {\n    const snowflake = BigInt(t.last_message_id);\n    lastActivity = Number(snowflake >> 22n) + 1420070400000;\n  } else {\n    // fallback to thread creation timestamp\n    const snowflake = BigInt(t.id);\n    lastActivity = Number(snowflake >> 22n) + 1420070400000;\n  }\n\n  if (now - lastActivity > twentyFourHours) {\n    stale.push({ json: { threadId: t.id, threadName: t.name, lastActivity: new Date(lastActivity).toISOString() } });\n  }\n}\n\nreturn stale.length > 0 ? stale : [];"
+      },
+      "id": "find-stale-1",
+      "name": "Find Stale Threads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $json.threadId {{ '}}' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"archived\": true, \"locked\": false}",
+        "options": {}
+      },
+      "id": "archive-thread-1",
+      "name": "Archive Thread",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "Daily Check": {
+      "main": [[{"node": "Get Active Threads", "type": "main", "index": 0}]]
+    },
+    "Get Active Threads": {
+      "main": [[{"node": "Find Stale Threads", "type": "main", "index": 0}]]
+    },
+    "Find Stale Threads": {
+      "main": [[{"node": "Archive Thread", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
