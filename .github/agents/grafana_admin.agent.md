@@ -94,9 +94,19 @@ If the Grafana MCP toolset is not exposed in the session, query Prometheus direc
 - Consequence: any LogQL aggregation `by (container_name)` on `{source="docker"}` collapses to a single null-labelled series, and alerts like `loki-errors-1` (`High Error Rate in Logs`) annotate `container=[no value]`. Only `job="systemd-journal"` streams (e.g. HA add-ons from `homeassistant-vm`) carry `container_name`.
 - Fix: insert a `discovery.relabel "docker"` block mapping `__meta_docker_container_name` → `container_name` and feed its output as `loki.source.docker.targets`.
 
-### Alert rule caveat: `loki-errors-1` self-feedback / false matches
-- The rule expr `{source="docker"} |~ `(?i)(error|fatal|panic)`` matches the literal substring "error" anywhere in a line. This catches benign Grafana/Loki internals such as `App runner exited without error`, `caller=metrics.go … query="…(?i)(error|fatal|panic)…"` (Loki logging its own query of itself), and `ngalert.sender.router … Sending alerts` lines emitted *because* the rule fires — producing a self-sustaining feedback loop once it trips.
-- When investigating, filter sampled lines with e.g. `!= "caller=metrics.go" != "App runner exited without error" != "ngalert.sender.router" != "logger=tsdb.loki"` to find the real cause. Long-term, switch the rule to parsed `level="error"|"fatal"` (logfmt/json) instead of a free-text regex.
+### Alert rule caveat: `loki-errors-1` self-feedback / false matches (FIXED 2026-04-20)
+- Original rule expr `{source="docker"} |~ `(?i)(error|fatal|panic)`` matched the literal substring "error" anywhere in a line. This caught benign Grafana/Loki internals (`App runner exited without error`, `caller=metrics.go … query="…(?i)(error|fatal|panic)…"` — Loki logging its own query — and `ngalert.sender.router … Sending alerts` lines emitted *because* the rule fires) producing a self-sustaining feedback loop once it tripped.
+- Fixed in `provisioning_alertrules.yaml.j2` (uid `loki-errors-1`) to:
+  ```
+  sum by (host, container_name) (count_over_time({source="docker"}
+    != "caller=scheduler_processor.go" != "caller=retry.go" != "caller=metrics.go"
+    != "caller=engine.go" != "caller=ingester.go"
+    != "App runner exited without error"
+    !~ "logger=(ngalert|provisioning|infra\.usagestats)"
+    | logfmt | level=~"(?i)error|fatal|panic" != "context canceled" [5m]))
+  ```
+- Verification approach: 24h `query_range` with `step=300` against the new expr — peak should sit well below `grafana_alert_loki_error_threshold` (currently 10). Pre-fix peak was unbounded (always firing). Post-fix peak observed: 7 (real Grafana provisioning startup failures, worth alerting on).
+- Docker logs on docker-1/2 are **logfmt**, not JSON (`| json` returns 0 matches; `| logfmt` parses correctly). Stream label `level` only exists on `job=systemd-journal` streams, never on `source=docker` — must parse.
 
 ### Alert rule caveat: `noDataState` on negative-presence queries
 - Rules in `ansible/roles/grafana/templates/provisioning_alertrules.yaml.j2` such as `Host Down` (`up == 0`), `Container Down`, etc. are negative-presence queries — they return an **empty vector when healthy**. If `noDataState: Alerting` is set on these, Grafana fires synthetic NoData alerts with **no labels**, producing annotations like `Host [no value] is down` and `Values: {}`. For these queries `noDataState` should be `OK` (or `NoData`), not `Alerting`. When you see `[no value]` in a fired alert, suspect this misconfiguration first.

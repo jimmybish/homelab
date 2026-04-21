@@ -1,3 +1,8 @@
+---
+name: homeassistant-dashboards
+description: 'Use when: creating or editing Home Assistant Lovelace dashboards, choosing card types, structuring views, applying CSS styling, or using HACS custom cards. Covers dashboard layout patterns, built-in and custom cards, actions, and modern best practices.'
+---
+
 # Dashboard Guide
 
 Patterns and decisions for designing Home Assistant Lovelace dashboards.
