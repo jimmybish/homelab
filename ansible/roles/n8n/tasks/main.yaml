@@ -351,6 +351,110 @@
   delegate_to: localhost
   when: discord_trigger_credential_id | default('') != '' and discord_trigger_credential_created is skipped
 
+# Plexibot Discord Bot Credential
+- name: Find existing Plexibot Discord Bot credential
+  ansible.builtin.set_fact:
+    plexibot_discord_credential_id: "{{ (n8n_credentials.json.data | selectattr('name', 'equalto', 'Plexibot Discord Bot') | list | first).id | default('') }}"
+  failed_when: false
+
+- name: Create Plexibot Discord Bot credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials"
+    method: POST
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body:
+      name: "Plexibot Discord Bot"
+      type: "discordBotApi"
+      data:
+        botToken: "{{ n8n_plexibot_discord_bot_token }}"
+    body_format: json
+    validate_certs: false
+    status_code: [200, 201]
+  register: plexibot_discord_credential_created
+  delegate_to: localhost
+  when: plexibot_discord_credential_id | default('') == ''
+
+- name: Set Plexibot Discord credential ID from creation
+  ansible.builtin.set_fact:
+    plexibot_discord_credential_id: "{{ plexibot_discord_credential_created.json.id }}"
+  when: plexibot_discord_credential_created is not skipped
+
+- name: Update Plexibot Discord Bot credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials/{{ plexibot_discord_credential_id }}"
+    method: PATCH
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body:
+      name: "Plexibot Discord Bot"
+      type: "discordBotApi"
+      data:
+        botToken: "{{ n8n_plexibot_discord_bot_token }}"
+    body_format: json
+    validate_certs: false
+    status_code: [200]
+  delegate_to: localhost
+  when: plexibot_discord_credential_id | default('') != '' and plexibot_discord_credential_created is skipped
+
+# Plexibot Discord Bot Trigger Credential
+- name: Find existing Plexibot Discord Bot Trigger credential
+  ansible.builtin.set_fact:
+    plexibot_discord_trigger_credential_id: "{{ (n8n_credentials.json.data | selectattr('name', 'equalto', 'Plexibot Discord Bot Trigger') | list | first).id | default('') }}"
+  failed_when: false
+
+- name: Create Plexibot Discord Bot Trigger credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials"
+    method: POST
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body:
+      name: "Plexibot Discord Bot Trigger"
+      type: "discordBotTriggerApi"
+      data:
+        clientId: "{{ n8n_plexibot_discord_client_id }}"
+        token: "{{ n8n_plexibot_discord_bot_token }}"
+        apiKey: "{{ n8n_api_key }}"
+        baseUrl: "{{ internal_n8n_url }}/api/v1"
+        allowedHttpRequestDomains: "all"
+    body_format: json
+    validate_certs: false
+    status_code: [200, 201]
+  register: plexibot_discord_trigger_credential_created
+  delegate_to: localhost
+  when: plexibot_discord_trigger_credential_id | default('') == ''
+
+- name: Set Plexibot Discord Trigger credential ID from creation
+  ansible.builtin.set_fact:
+    plexibot_discord_trigger_credential_id: "{{ plexibot_discord_trigger_credential_created.json.id }}"
+  when: plexibot_discord_trigger_credential_created is not skipped
+
+- name: Update Plexibot Discord Bot Trigger credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials/{{ plexibot_discord_trigger_credential_id }}"
+    method: PATCH
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body:
+      name: "Plexibot Discord Bot Trigger"
+      type: "discordBotTriggerApi"
+      data:
+        clientId: "{{ n8n_plexibot_discord_client_id }}"
+        token: "{{ n8n_plexibot_discord_bot_token }}"
+        apiKey: "{{ n8n_api_key }}"
+        baseUrl: "{{ internal_n8n_url }}/api/v1"
+        allowedHttpRequestDomains: "all"
+    body_format: json
+    validate_certs: false
+    status_code: [200]
+  delegate_to: localhost
+  when: plexibot_discord_trigger_credential_id | default('') != '' and plexibot_discord_trigger_credential_created is skipped
+
 # Webhook Auth Credential (for Grafana webhook authentication)
 - name: Find existing Grafana Webhook Auth credential
   ansible.builtin.set_fact:
@@ -421,6 +525,9 @@
       template: "templates/copilot_workflow.json.j2"
     - name: "Discord Copilot Bot"
       template: "templates/discord_copilot_workflow.json.j2"
+    - name: "Discord Plexibot"
+      template: "templates/discord_plexibot_workflow.json.j2"
+      active: true
     - name: "Grafana Alert Handler"
       template: "templates/grafana_alerts_workflow.json.j2"
       active: true

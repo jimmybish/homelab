@@ -85,7 +85,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_channel_id }}/messages",
+        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_alerts_channel_id }}/messages",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -143,7 +143,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://discord.com/api/v10/channels/{{ n8n_discord_channel_id }}/messages/{{ '{{' }} $('Post Firing Alert').item.json.id {{ '}}' }}/threads",
+        "url": "=https://discord.com/api/v10/channels/{{ n8n_discord_alerts_channel_id }}/messages/{{ '{{' }} $('Post Firing Alert').item.json.id {{ '}}' }}/threads",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -209,7 +209,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_channel_id }}/messages",
+        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_alerts_channel_id }}/messages",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
