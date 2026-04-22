@@ -46,10 +46,10 @@ docker_vm_hosts:
     proxy:
 
 # All Debian hosts
-#debian:
-#  vars:
-#    ansible_python_interpreter: /usr/bin/python3.11
-#  hosts:
+# debian:
+#   vars:
+#     ansible_python_interpreter: /usr/bin/python3.11
+#   hosts:
 #    debian-downloader:
 
 # Plex Media Server
@@ -114,7 +114,7 @@ sabnzbd_host:
 qbittorrent_host:
   hosts:
     docker-1:
-    
+
 # Grafana
 grafana_host:
   hosts:

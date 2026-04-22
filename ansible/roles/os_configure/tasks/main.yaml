@@ -33,7 +33,7 @@
 - name: Allow Node Exporter port through UFW
   community.general.ufw:
     rule: allow
-    port: 9100
+    port: "{{ os_configure_node_exporter_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 

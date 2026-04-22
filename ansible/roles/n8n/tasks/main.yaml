@@ -402,7 +402,9 @@
 # Plexibot Discord Bot Trigger Credential
 - name: Find existing Plexibot Discord Bot Trigger credential
   ansible.builtin.set_fact:
-    plexibot_discord_trigger_credential_id: "{{ (n8n_credentials.json.data | selectattr('name', 'equalto', 'Plexibot Discord Bot Trigger') | list | first).id | default('') }}"
+    plexibot_discord_trigger_credential_id: >-
+      {{ (n8n_credentials.json.data | selectattr('name', 'equalto', 'Plexibot Discord Bot Trigger')
+      | list | first).id | default('') }}
   failed_when: false
 
 - name: Create Plexibot Discord Bot Trigger credential

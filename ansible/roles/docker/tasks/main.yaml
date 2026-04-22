@@ -100,7 +100,7 @@
 - name: Allow cAdvisor port through UFW
   community.general.ufw:
     rule: allow
-    port: 8089
+    port: "{{ docker_cadvisor_port }}"
     proto: tcp
   when:
     - ansible_os_family == "Debian"
@@ -113,7 +113,7 @@
     state: started
     restart_policy: unless-stopped
     ports:
-      - "8089:8080"
+      - "{{ docker_cadvisor_port }}:8080"
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro

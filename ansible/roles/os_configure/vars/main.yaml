@@ -1,3 +1,4 @@
 ---
 # Variables for OS configuration role
 # Note: ntp_server and locale_lang are now defined in group_vars/all/vars.yaml
+os_configure_node_exporter_port: 9100
