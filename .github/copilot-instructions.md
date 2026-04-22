@@ -20,6 +20,10 @@ This is a homelab infrastructure-as-code repository managed with Ansible. It dep
 - Use skills from `.github/skills/` when performing tasks that match their descriptions
 - **When creating a new service role**, follow `ansible/docs/new-service-runbook.md` step-by-step — read it at the start and use it as the task list throughout. Do not skip phases or reorder steps.
 
+## Change Logging
+
+After any task that modifies files, runs commands on remote hosts, or changes configuration, **always** use the `change-logging` skill to record the change. This is mandatory — never skip it when changes have been made. Read the skill for the full format and file location conventions.
+
 ## Agent Delegation
 
 Treat each agent as a subject matter expert. When a task involves their domain, delegate the work to them or consult them for advice before proceeding.

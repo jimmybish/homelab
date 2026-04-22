@@ -29,6 +29,7 @@ Use these skills on-demand based on the task at hand:
 | `homepage-dashboard-integration` | Adding services to the Homepage dashboard with correct templates and tags |
 | `ansible-vault-secrets` | Encrypting secrets and adding vault-encrypted variables to group_vars |
 | `playbook-creation-testing` | Creating deploy playbooks, testing, master playbook integration, running/troubleshooting |
+| `change-logging` | **ALWAYS** — after any task that modifies files, runs remote commands, or changes configuration |
 
 ## Running Playbooks
 

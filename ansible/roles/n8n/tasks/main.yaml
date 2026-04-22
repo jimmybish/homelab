@@ -539,5 +539,8 @@
     - name: "Close Stale Discord Threads"
       template: "templates/close_stale_threads_workflow.json.j2"
       active: true
+    - name: "Create Weekly Changelog Folder"
+      template: "templates/create_weekly_changelog_workflow.json.j2"
+      active: true
   loop_control:
     loop_var: workflow

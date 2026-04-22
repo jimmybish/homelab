@@ -13,3 +13,6 @@ ansible/roles/grafana/templates/mibs/
 node_modules/
 package.json
 package-lock.json
+
+# Changelogs (local-only, not committed)
+changelogs/

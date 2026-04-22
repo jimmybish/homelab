@@ -122,3 +122,7 @@ If the Grafana MCP toolset is not exposed in the session, query Prometheus direc
 
 ### Alert rule caveat: `noDataState` on negative-presence queries
 - Rules in `ansible/roles/grafana/templates/provisioning_alertrules.yaml.j2` such as `Host Down` (`up == 0`), `Container Down`, etc. are negative-presence queries — they return an **empty vector when healthy**. If `noDataState: Alerting` is set on these, Grafana fires synthetic NoData alerts with **no labels**, producing annotations like `Host [no value] is down` and `Values: {}`. For these queries `noDataState` should be `OK` (or `NoData`), not `Alerting`. When you see `[no value]` in a fired alert, suspect this misconfiguration first.
+
+## Change Logging
+
+After any task that modifies files, runs commands on remote hosts, or changes configuration, **always** use the `change-logging` skill to record the change. This is mandatory — never skip it when changes have been made.
