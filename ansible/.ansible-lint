@@ -1,1 +1,3 @@
 profile: null
+warn_list:
+  - role-name

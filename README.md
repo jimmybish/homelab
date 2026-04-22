@@ -9,14 +9,30 @@ I use GitHub Copilot with custom agents and reusable skills to manage the homela
 
 **Agents** have domain-specific knowledge and tool access, defined in [.github/agents](.github/agents):
 
-- **ansible_admin** — Deploys and manages services via Ansible. Follows a [role creation guide](ansible/docs/ANSIBLE_ROLE_CREATION_GUIDE.md) for consistency: researches official docs, uses LinuxServer.io images where available, and wires up reverse proxies, Homepage entries, and health checks automatically.
+- **ansible_admin** — Deploys and manages services via Ansible. Follows a [new service runbook](ansible/docs/new-service-runbook.md) for consistency: researches official docs, uses LinuxServer.io images where available, and wires up reverse proxies, Homepage entries, and health checks automatically.
 - **grafana_admin** — Queries dashboards, explores Prometheus/Loki metrics, checks alerts, and manages incidents via MCP.
 - **home_assistant_admin** — Manages Home Assistant entities, automations, scenes, and dashboards via MCP.
-- **proxmox_admin** — Manages VMs, LXC containers, and cluster resources via MCP.
+- **proxmox_admin** — Manages VMs, LXC containers, and cluster resources via SSH.
+- **plexibot** — Plex ecosystem specialist (Plex, Tautulli, Arr stack, Tracearr, Loki logs). Sandboxed — cannot delegate to other agents. Also available as a Discord bot via n8n.
 
-**Skills** are step-by-step instructions in [.github/skills](.github/skills) that Copilot loads on demand when a task matches their domain. They encode repeatable patterns — like scaffolding an Ansible role, templating a Docker Compose file, or wiring up a SWAG proxy config — so each deployment follows the same conventions without re-explaining the process. Current skills cover: application research, role scaffolding, Docker deployment tasks, Compose templating, vault secrets, Homepage integration, NGINX/SWAG proxy configs, pfSense DNS management, UFW firewall rules, service health checks, and playbook creation/testing.
+**Skills** are step-by-step instructions in [.github/skills](.github/skills) that Copilot loads on demand when a task matches their domain. They encode repeatable patterns — like scaffolding an Ansible role, templating a Docker Compose file, or wiring up a SWAG proxy config — so each deployment follows the same conventions without re-explaining the process. Current skills cover: application research, role scaffolding, Docker deployment tasks, Compose templating, vault secrets, Homepage integration, NGINX/SWAG proxy configs, pfSense DNS management, UFW firewall rules, service health checks, playbook creation/testing, n8n workflow deployment, and chat room communication formatting.
 
-MCP server configuration is in [.github/copilot/mcp.json](.github/copilot/mcp.json).
+**MCP Servers** provide tool access to external services:
+
+- [Context7](https://context7.com/) — Up-to-date library and framework documentation lookup
+- [Grafana MCP](https://github.com/grafana/mcp-grafana) — Dashboards, Prometheus/Loki queries, alerting, incidents, and on-call management
+- [Home Assistant MCP](https://www.home-assistant.io/integrations/mcp_server/) — Smart home entity state, service calls, and automations
+- [Playwright MCP](https://github.com/microsoft/playwright-mcp) — Browser automation for UI testing and validation
+- [Chrome DevTools MCP](https://github.com/nicholasgriffintn/chrome-devtools-mcp) — Browser inspection and debugging
+
+### Discord Integration
+
+Two Discord bots interface with the homelab via [n8n](https://n8n.io/) workflows:
+
+- **VirtuaJimmy** — General-purpose Copilot bot. Responds to @mentions in any channel it's in, creates threaded conversations with session persistence, and automatically investigates Grafana alerts.
+- **Plexibot** — Plex-focused bot using the `--agent plexibot` flag. Responds to @mentions, scoped to Plex/Arr/Tracearr/log queries only.
+
+Both bots use mention-based routing — each only responds when @mentioned directly, and thread replies continue within the same Copilot session. Supporting workflows handle "still thinking" status updates and stale thread cleanup across both channels.
 
 ### Deployed Services
 - Docker
@@ -24,6 +40,7 @@ MCP server configuration is in [.github/copilot/mcp.json](.github/copilot/mcp.js
 - **Media:**
   - [Jellyfin](https://hub.docker.com/r/linuxserver/jellyfin), [Plex](https://hub.docker.com/r/linuxserver/plex), [Tautulli](https://tautulli.com/)
   - [Jellyseerr](https://hub.docker.com/r/fallenbagel/jellyseerr), [Overseerr](https://hub.docker.com/r/linuxserver/overseerr)
+  - [Maintainerr](https://github.com/jorenn92/maintainerr), [JellyPlex-Watched](https://github.com/luigi311/JellyPlex-Watched), [Tracearr](https://github.com/connorgallopo/tracearr)
 - **Arr Suite (media automation):**
   - [Sonarr](https://hub.docker.com/r/linuxserver/sonarr), [Radarr](https://hub.docker.com/r/linuxserver/radarr), [Prowlarr](https://hub.docker.com/r/linuxserver/prowlarr), [Lidarr](https://hub.docker.com/r/linuxserver/lidarr)
   - [SABnzbd](https://hub.docker.com/r/linuxserver/sabnzbd), [qBittorrent](https://hub.docker.com/r/linuxserver/qbittorrent)
