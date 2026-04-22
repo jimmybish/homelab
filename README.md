@@ -15,7 +15,15 @@ I use GitHub Copilot with custom agents and reusable skills to manage the homela
 - **proxmox_admin** — Manages VMs, LXC containers, and cluster resources via SSH.
 - **plexibot** — Plex ecosystem specialist (Plex, Tautulli, Arr stack, Tracearr, Loki logs). Sandboxed — cannot delegate to other agents. Also available as a Discord bot via n8n.
 
-**Skills** are step-by-step instructions in [.github/skills](.github/skills) that Copilot loads on demand when a task matches their domain. They encode repeatable patterns — like scaffolding an Ansible role, templating a Docker Compose file, or wiring up a SWAG proxy config — so each deployment follows the same conventions without re-explaining the process. Current skills cover: application research, role scaffolding, Docker deployment tasks, Compose templating, vault secrets, Homepage integration, NGINX/SWAG proxy configs, pfSense DNS management, UFW firewall rules, service health checks, playbook creation/testing, n8n workflow deployment, and chat room communication formatting.
+**Skills** are step-by-step instructions in [.github/skills](.github/skills) that Copilot loads on demand when a task matches their domain. They encode repeatable patterns — like scaffolding an Ansible role, templating a Docker Compose file, or wiring up a SWAG proxy config — so each deployment follows the same conventions without re-explaining the process. Current skills cover: application research, role scaffolding, Docker deployment tasks, Compose templating, vault secrets, Homepage integration, NGINX/SWAG proxy configs, pfSense DNS management, UFW firewall rules, service health checks, playbook creation/testing, n8n workflow deployment, change logging, and chat room communication formatting.
+
+### Change Logging
+
+All agents are required to log every change they make using the `change-logging` skill. Logs are written to the `changelogs/` directory (gitignored) in a CAB-style change ticket format covering: summary, files changed with before/after values, commands run on remote hosts, and a rollback plan.
+
+- **File location:** `changelogs/week-YYYY-MM-DD/log_YYMMDD.md` (week folder = most recent Sunday, log file = today's date)
+- **Automation:** An n8n workflow creates the weekly folder every Sunday at midnight
+- **Scope:** All agents — not just infrastructure ones
 
 **MCP Servers** provide tool access to external services:
 

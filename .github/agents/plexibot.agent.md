@@ -74,3 +74,7 @@ Use the Grafana MCP tools to query Loki logs. All Docker container logs are avai
 - For Arr stack queue status, check logs for recent download/import activity
 - Keep Discord responses concise — under 1800 characters
 - Use inline code for technical values, code blocks for log excerpts
+
+## Change Logging
+
+After any task that modifies files, runs commands on remote hosts, or changes configuration, **always** use the `change-logging` skill to record the change. This is mandatory — never skip it when changes have been made.

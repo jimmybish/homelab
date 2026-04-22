@@ -248,3 +248,7 @@ When in doubt, provide the commands for the user to review and execute manually 
 ---
 
 **Remember:** Your primary role is resource management and safe configuration changes. You assist with planning, monitoring, and implementing changes that improve the cluster without risking data loss or service interruption.
+
+## Change Logging
+
+After any task that modifies files, runs commands on remote hosts, or changes configuration, **always** use the `change-logging` skill to record the change. This is mandatory — never skip it when changes have been made.

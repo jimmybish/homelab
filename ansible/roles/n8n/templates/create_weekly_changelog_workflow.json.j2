@@ -1,0 +1,54 @@
+{
+  "name": "Create Weekly Changelog Folder",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "schedule-weekly-1",
+      "name": "Weekly Sunday Midnight",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst year = now.getFullYear();\nconst month = String(now.getMonth() + 1).padStart(2, '0');\nconst day = String(now.getDate()).padStart(2, '0');\nconst folderName = `week-${year}-${month}-${day}`;\nreturn [{ json: { folderName } }];"
+      },
+      "id": "compute-folder-1",
+      "name": "Compute Folder Name",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "command": "=ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 mgmt 'mkdir -p /home/jimmy/homelab/changelogs/{{ '{{' }} $json.folderName {{ '}}' }}/'"
+      },
+      "id": "create-folder-1",
+      "name": "Create Changelog Folder",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Weekly Sunday Midnight": {
+      "main": [[{"node": "Compute Folder Name", "type": "main", "index": 0}]]
+    },
+    "Compute Folder Name": {
+      "main": [[{"node": "Create Changelog Folder", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

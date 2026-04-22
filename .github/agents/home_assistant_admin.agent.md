@@ -102,3 +102,7 @@ Always prefer the official docs over guessing syntax or parameters.
 - For service calls, verify the entity exists and the service is valid before calling
 - When troubleshooting, use the `troubleshoot_device` prompt and check entity history
 - Do NOT delete automations, scenes, or scripts without explicit user confirmation
+
+## Change Logging
+
+After any task that modifies files, runs commands on remote hosts, or changes configuration, **always** use the `change-logging` skill to record the change. This is mandatory — never skip it when changes have been made.
