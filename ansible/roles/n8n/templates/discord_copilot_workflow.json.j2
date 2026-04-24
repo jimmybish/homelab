@@ -1,5 +1,5 @@
 {
-  "name": "Discord Copilot Bot",
+  "name": "Discord VirtuaJimmy",
   "nodes": [
     {
       "parameters": {
@@ -78,6 +78,35 @@
     },
     {
       "parameters": {
+        "resource": "message",
+        "operation": "react",
+        "guildId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "{{ n8n_discord_server_id }}"
+        },
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}"
+        },
+        "messageId": "={{ '{{' }} $('Filter Bots').item.json.id {{ '}}' }}",
+        "emoji": "👀"
+      },
+      "id": "react-eyes-reject-1",
+      "name": "React Eyes Reject",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [750, 500],
+      "credentials": {
+        "discordBotApi": {
+          "id": "{{ discord_credential_id }}",
+          "name": "Discord Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}/messages",
         "sendHeaders": true,
@@ -102,11 +131,11 @@
       "name": "Reject Unauthorized User",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [860, 500]
+      "position": [970, 500]
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst channelId = $('Filter Bots').item.json.channelId;\nconst mainChannels = ['{{ n8n_discord_alerts_channel_id }}', '{{ n8n_discord_plex_channel_id }}'];\nconst botId = '{{ n8n_discord_client_id }}';\n\n// Thread replies: always allow\nif (!mainChannels.includes(channelId)) {\n  return [$input.first()];\n}\n\n// New messages in main channel: require @mention\nif (content.includes('<@' + botId + '>')) {\n  return [$input.first()];\n}\n\nreturn [];"
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst channelId = $('Filter Bots').item.json.channelId;\nconst mainChannels = ['{{ n8n_discord_alerts_channel_id }}', '{{ n8n_discord_plex_channel_id }}'];\nconst botId = '{{ n8n_discord_client_id }}';\nconst item = $input.first();\n\nif (!mainChannels.includes(channelId)) {\n  // Thread reply — check if this bot was explicitly @mentioned (cross-bot handoff)\n  item.json.mentionedInThread = content.includes('<@' + botId + '>');\n  return [item];\n}\n\n// New messages in main channel: require @mention\nif (content.includes('<@' + botId + '>')) {\n  item.json.mentionedInThread = false;\n  return [item];\n}\n\nreturn [];"
       },
       "id": "check-mention-1",
       "name": "Check Mention or Thread",
@@ -230,7 +259,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ '{{' }} JSON.stringify({name: $json.sessionId, auto_archive_duration: 1440}) {{ '}}' }}",
+        "jsonBody": "={{ '{{' }} JSON.stringify({name: 'virtuajimmy-' + $json.sessionId, auto_archive_duration: 1440}) {{ '}}' }}",
         "options": {}
       },
       "id": "create-thread-1",
@@ -298,37 +327,136 @@
           },
           "conditions": [
             {
-              "id": "validate-parent-alerts",
-              "leftValue": "={{ '{{' }} $json.parent_id {{ '}}' }}",
-              "rightValue": "{{ n8n_discord_alerts_channel_id }}",
+              "id": "validate-prefix-copilot",
+              "leftValue": "={{ '{{' }} $json.name {{ '}}' }}",
+              "rightValue": "virtuajimmy-",
               "operator": {
                 "type": "string",
-                "operation": "equals"
-              }
-            },
-            {
-              "id": "validate-parent-plex",
-              "leftValue": "={{ '{{' }} $json.parent_id {{ '}}' }}",
-              "rightValue": "{{ n8n_discord_plex_channel_id }}",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
+                "operation": "startsWith"
               }
             }
           ],
-          "combinator": "or"
+          "combinator": "and"
         },
         "options": {}
       },
       "id": "validate-thread-1",
       "name": "Validate Thread",
-      "type": "n8n-nodes-base.filter",
+      "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [1580, 500]
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $input.first().json.name;\nreturn [{ json: { safeContent, name } }];"
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-handoff-mention",
+              "leftValue": "={{ '{{' }} $('Check Mention or Thread').item.json.mentionedInThread {{ '}}' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-handoff-1",
+      "name": "Check Handoff",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1820, 700]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}/messages?limit=50",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-thread-history-1",
+      "name": "Fetch Thread History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2060, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "const messages = $('Fetch Thread History').all().map(i => i.json);\nconst sorted = messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));\nconst transcript = sorted.map(m => (m.author?.bot ? m.author.username : m.author?.username || 'unknown') + ': ' + (m.content || '(empty)')).join('\\n');\nconst userContent = $('Filter Bots').item.json.content || '';\nconst prompt = '[Thread history for context:]\\n' + transcript + '\\n\\n[New message from user:]\\n' + userContent + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+      },
+      "id": "prepare-handoff-prompt-1",
+      "name": "Prepare Handoff Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2300, 700]
+    },
+    {
+      "parameters": {
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
+      },
+      "id": "exec-copilot-handoff-1",
+      "name": "Run Copilot Handoff",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [2540, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet lastBlock = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    } else if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    } else if (responseText) {\n      lastBlock = responseText;\n      responseText = '';\n    }\n  } catch (e) {}\n}\nresponseText = responseText || lastBlock;\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(no response)';\n\nreturn [{ json: { responseText, sessionId } }];"
+      },
+      "id": "parse-handoff-output-1",
+      "name": "Parse Handoff Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2780, 700]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.responseText}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "send-handoff-reply-1",
+      "name": "Send Handoff Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3020, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $('Get Thread Info').item.json.name.replace(/^virtuajimmy-/, '');\nreturn [{ json: { safeContent, name } }];"
       },
       "id": "prepare-resume-prompt-1",
       "name": "Prepare Resume Prompt",
@@ -395,8 +523,11 @@
     "Check Author": {
       "main": [
         [{"node": "Check Mention or Thread", "type": "main", "index": 0}],
-        [{"node": "Reject Unauthorized User", "type": "main", "index": 0}]
+        [{"node": "React Eyes Reject", "type": "main", "index": 0}]
       ]
+    },
+    "React Eyes Reject": {
+      "main": [[{"node": "Reject Unauthorized User", "type": "main", "index": 0}]]
     },
     "Check Mention or Thread": {
       "main": [[{"node": "React Eyes", "type": "main", "index": 0}]]
@@ -426,7 +557,25 @@
       "main": [[{"node": "Validate Thread", "type": "main", "index": 0}]]
     },
     "Validate Thread": {
-      "main": [[{"node": "Prepare Resume Prompt", "type": "main", "index": 0}]]
+      "main": [
+        [{"node": "Prepare Resume Prompt", "type": "main", "index": 0}],
+        [{"node": "Check Handoff", "type": "main", "index": 0}]
+      ]
+    },
+    "Check Handoff": {
+      "main": [[{"node": "Fetch Thread History", "type": "main", "index": 0}]]
+    },
+    "Fetch Thread History": {
+      "main": [[{"node": "Prepare Handoff Prompt", "type": "main", "index": 0}]]
+    },
+    "Prepare Handoff Prompt": {
+      "main": [[{"node": "Run Copilot Handoff", "type": "main", "index": 0}]]
+    },
+    "Run Copilot Handoff": {
+      "main": [[{"node": "Parse Handoff Output", "type": "main", "index": 0}]]
+    },
+    "Parse Handoff Output": {
+      "main": [[{"node": "Send Handoff Reply", "type": "main", "index": 0}]]
     },
     "Prepare Resume Prompt": {
       "main": [[{"node": "Run Copilot Resume", "type": "main", "index": 0}]]

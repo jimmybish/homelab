@@ -49,99 +49,13 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
-          "conditions": [
-            {
-              "id": "check-author-plexibot",
-              "leftValue": "={{ '{{' }} $json.authorId {{ '}}' }}",
-              "rightValue": "{{ n8n_discord_author_id }}",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "check-author-plexibot",
-      "name": "Check Author",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [640, 300]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}/messages",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "Bot {{ n8n_plexibot_discord_bot_token }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ '{{' }} JSON.stringify({content: \"Sorry, I'm not allowed to speak to others just yet. Only Jimmy can use me!\", message_reference: {message_id: $('Filter Bots').item.json.id}}) {{ '}}' }}",
-        "options": {}
-      },
-      "id": "reject-user-plexibot",
-      "name": "Reject Unauthorized User",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [860, 500]
-    },
-    {
-      "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst channelId = $('Filter Bots').item.json.channelId;\nconst mainChannels = ['{{ n8n_discord_plex_channel_id }}', '{{ n8n_discord_alerts_channel_id }}'];\nconst botId = '{{ n8n_plexibot_discord_client_id }}';\n\n// Thread replies: always allow\nif (!mainChannels.includes(channelId)) {\n  return [$input.first()];\n}\n\n// New messages in main channel: require @mention\nif (content.includes('<@' + botId + '>')) {\n  return [$input.first()];\n}\n\nreturn [];"
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst channelId = $('Filter Bots').item.json.channelId;\nconst mainChannels = ['{{ n8n_discord_plex_channel_id }}'];\nconst botId = '{{ n8n_plexibot_discord_client_id }}';\nconst otherBotId = '{{ n8n_discord_client_id }}';\n\n// Thread replies: allow unless @mentioning the other bot (let VirtuaJimmy handle those)\nif (!mainChannels.includes(channelId)) {\n  if (content.includes('<@' + otherBotId + '>')) return [];\n  return [$input.first()];\n}\n\n// New messages in main channel: require @mention\nif (content.includes('<@' + botId + '>')) {\n  return [$input.first()];\n}\n\nreturn [];"
       },
       "id": "check-mention-plexibot",
       "name": "Check Mention or Thread",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [750, 300]
-    },
-    {
-      "parameters": {
-        "resource": "message",
-        "operation": "react",
-        "guildId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "{{ n8n_discord_server_id }}"
-        },
-        "channelId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "={{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}"
-        },
-        "messageId": "={{ '{{' }} $('Filter Bots').item.json.id {{ '}}' }}",
-        "emoji": "👀"
-      },
-      "id": "react-eyes-plexibot",
-      "name": "React Eyes",
-      "type": "n8n-nodes-base.discord",
-      "typeVersion": 2,
-      "position": [860, 300],
-      "credentials": {
-        "discordBotApi": {
-          "id": "{{ plexibot_discord_credential_id }}",
-          "name": "Plexibot Discord Bot"
-        }
-      }
     },
     {
       "parameters": {
@@ -160,15 +74,6 @@
                 "type": "string",
                 "operation": "equals"
               }
-            },
-            {
-              "id": "check-alerts-channel",
-              "leftValue": "={{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}",
-              "rightValue": "{{ n8n_discord_alerts_channel_id }}",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
             }
           ],
           "combinator": "or"
@@ -180,6 +85,64 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "react",
+        "guildId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "{{ n8n_discord_server_id }}"
+        },
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}"
+        },
+        "messageId": "={{ '{{' }} $('Filter Bots').item.json.id {{ '}}' }}",
+        "emoji": "👀"
+      },
+      "id": "react-eyes-new-plexibot",
+      "name": "React Eyes New",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [1340, 0],
+      "credentials": {
+        "discordBotApi": {
+          "id": "{{ plexibot_discord_credential_id }}",
+          "name": "Plexibot Discord Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "react",
+        "guildId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "{{ n8n_discord_server_id }}"
+        },
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}"
+        },
+        "messageId": "={{ '{{' }} $('Filter Bots').item.json.id {{ '}}' }}",
+        "emoji": "👀"
+      },
+      "id": "react-eyes-resume-plexibot",
+      "name": "React Eyes Resume",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [1820, 400],
+      "credentials": {
+        "discordBotApi": {
+          "id": "{{ plexibot_discord_credential_id }}",
+          "name": "Plexibot Discord Bot"
+        }
+      }
     },
     {
       "parameters": {
@@ -230,7 +193,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ '{{' }} JSON.stringify({name: $json.sessionId, auto_archive_duration: 1440}) {{ '}}' }}",
+        "jsonBody": "={{ '{{' }} JSON.stringify({name: 'plexibot-' + $json.sessionId, auto_archive_duration: 1440}) {{ '}}' }}",
         "options": {}
       },
       "id": "create-thread-plexibot",
@@ -307,16 +270,16 @@
               }
             },
             {
-              "id": "validate-parent-alerts",
-              "leftValue": "={{ '{{' }} $json.parent_id {{ '}}' }}",
-              "rightValue": "{{ n8n_discord_alerts_channel_id }}",
+              "id": "validate-prefix-plexibot",
+              "leftValue": "={{ '{{' }} $json.name {{ '}}' }}",
+              "rightValue": "plexibot-",
               "operator": {
                 "type": "string",
-                "operation": "equals"
+                "operation": "startsWith"
               }
             }
           ],
-          "combinator": "or"
+          "combinator": "and"
         },
         "options": {}
       },
@@ -328,7 +291,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $input.first().json.name;\nreturn [{ json: { safeContent, name } }];"
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $('Get Thread Info').item.json.name.replace(/^plexibot-/, '');\nreturn [{ json: { safeContent, name } }];"
       },
       "id": "prepare-resume-prompt-plexibot",
       "name": "Prepare Resume Prompt",
@@ -390,25 +353,19 @@
       "main": [[{"node": "Filter Bots", "type": "main", "index": 0}]]
     },
     "Filter Bots": {
-      "main": [[{"node": "Check Author", "type": "main", "index": 0}]]
-    },
-    "Check Author": {
-      "main": [
-        [{"node": "Check Mention or Thread", "type": "main", "index": 0}],
-        [{"node": "Reject Unauthorized User", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "Check Mention or Thread", "type": "main", "index": 0}]]
     },
     "Check Mention or Thread": {
-      "main": [[{"node": "React Eyes", "type": "main", "index": 0}]]
-    },
-    "React Eyes": {
       "main": [[{"node": "Check If New Thread", "type": "main", "index": 0}]]
     },
     "Check If New Thread": {
       "main": [
-        [{"node": "Prepare New Prompt", "type": "main", "index": 0}],
+        [{"node": "React Eyes New", "type": "main", "index": 0}],
         [{"node": "Get Thread Info", "type": "main", "index": 0}]
       ]
+    },
+    "React Eyes New": {
+      "main": [[{"node": "Prepare New Prompt", "type": "main", "index": 0}]]
     },
     "Prepare New Prompt": {
       "main": [[{"node": "Run Copilot New", "type": "main", "index": 0}]]
@@ -426,6 +383,9 @@
       "main": [[{"node": "Validate Thread", "type": "main", "index": 0}]]
     },
     "Validate Thread": {
+      "main": [[{"node": "React Eyes Resume", "type": "main", "index": 0}]]
+    },
+    "React Eyes Resume": {
       "main": [[{"node": "Prepare Resume Prompt", "type": "main", "index": 0}]]
     },
     "Prepare Resume Prompt": {

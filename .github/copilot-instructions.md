@@ -24,6 +24,10 @@ This is a homelab infrastructure-as-code repository managed with Ansible. It dep
 
 After any task that modifies files, runs commands on remote hosts, or changes configuration, **always** use the `change-logging` skill to record the change. This is mandatory — never skip it when changes have been made. Read the skill for the full format and file location conventions.
 
+## Alert Response
+
+When reacting to a Grafana alert or troubleshooting a service outage, **check `ansible/docs/known-issues.md` first**. It contains quick-fix runbooks for recurring problems. If the alert matches a known issue, follow the documented fix before investigating further.
+
 ## Agent Delegation
 
 Treat each agent as a subject matter expert. When a task involves their domain, delegate the work to them or consult them for advice before proceeding.

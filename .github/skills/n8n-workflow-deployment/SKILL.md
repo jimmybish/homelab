@@ -95,6 +95,22 @@ For expression-based values:
 }
 ```
 
+### Code Node — Preserving pairedItem
+
+When a Code node returns items that downstream nodes reference via `$('NodeName').item.json`, the item must preserve `pairedItem` tracking. **Never** construct new items with `{ json: { ...spread } }` — this breaks the lineage and all `$('PreviousNode').item.json` references silently return undefined.
+
+**Wrong:**
+```javascript
+return [{ json: { ...$input.first().json, newField: value } }];
+```
+
+**Right:**
+```javascript
+const item = $input.first();
+item.json.newField = value;
+return [item];
+```
+
 ### Set Node (Edit Fields) — v3.4
 
 ```json
@@ -159,6 +175,8 @@ For expression-based values:
 - The `pattern` parameter defaults to `"start"` which requires a `value`. Set `"pattern": "every"` to trigger on all messages
 - `guildIds` and `channelIds` are `multiOptions` loaded dynamically — they cause validation errors when set via API. Leave them empty and use a Filter node instead
 - Output fields use **camelCase**: `channelId`, `guildId`, `authorId`, `authorName`, `content` (NOT snake_case)
+- **IPC shared state:** All `discordTrigger` nodes share a single IPC server process. Deactivating or reactivating one workflow's trigger disconnects and reconnects the IPC server, which orphans other triggers. When deploying multiple workflows with Discord triggers, **deactivate all first, deploy all, then reactivate all together**. Never cycle them individually.
+- **Stale triggers after PUT:** Updating an active workflow via `PUT /api/v1/workflows/{id}` does NOT restart the trigger node. The trigger keeps running with the old configuration. Always deactivate before updating and reactivate after.
 
 **Discord Send (built-in):**
 - Type: `n8n-nodes-base.discord`, typeVersion: 2

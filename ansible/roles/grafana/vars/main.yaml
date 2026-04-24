@@ -62,6 +62,7 @@ grafana_alert_disk_threshold_local: 20    # Alert when local FS has <20% free (>
 grafana_alert_disk_threshold_qnap: 5      # Alert when QNAP volume has <5% free (>95% used)
 grafana_alert_qnap_temp_threshold: 55     # Alert when QNAP temp > 55°C
 grafana_alert_loki_error_threshold: 10    # Alert when > 10 errors in 5m window
+grafana_alert_n8n_trigger_loop_threshold: 6  # Alert when > 6 trigger removals in 5m window
 
 # Feature flags (ALL true - grafana has web interface)
 grafana_configure_homepage: true
