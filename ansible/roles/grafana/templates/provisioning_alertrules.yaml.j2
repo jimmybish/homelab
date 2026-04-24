@@ -422,3 +422,57 @@ groups:
                     type: gt
                     params:
                       - {{ grafana_alert_loki_error_threshold }}
+
+  # N8N Discord Trigger Loop - fires when the Discord bot trigger nodes are cycling
+  # through repeated disconnect/reconnect loops, indicating stale IPC state
+  - orgId: 1
+    name: n8n_discord_trigger_loop
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: n8n-discord-trigger-loop-1
+        title: N8N Discord Trigger Reconnect Loop
+        condition: C
+        for: 5m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "N8N Discord trigger nodes are in a reconnect loop on {% raw %}{{ $labels.host }}{% endraw %}"
+          description: "More than {{ grafana_alert_n8n_trigger_loop_threshold }} 'removing trigger node' events detected in 5 minutes from the N8N container on {% raw %}{{ $labels.host }}{% endraw %}. This indicates the Discord bot IPC connection is cycling and workflows may not be firing."
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: {{ grafana_loki_uid }}
+            model:
+              refId: A
+              expr: "sum by (host) (count_over_time({container_name=\"n8n\"} |= \"removing trigger node\" [5m]))"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - {{ grafana_alert_n8n_trigger_loop_threshold }}

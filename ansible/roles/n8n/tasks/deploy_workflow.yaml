@@ -28,6 +28,20 @@
     _workflow_id: "{{ _workflow_created.json.id }}"
   when: _workflow_created is not skipped and _workflow_created is succeeded
 
+- name: Deactivate workflow before update  # {{ workflow.name }}
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/workflows/{{ _workflow_id }}/deactivate"
+    method: POST
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+    validate_certs: false
+    status_code: [200]
+  delegate_to: localhost
+  when:
+    - _workflow_id | default('') != ''
+    - _workflow_created is skipped
+    - workflow.active | default(false)
+
 - name: Update workflow  # {{ workflow.name }}
   ansible.builtin.uri:
     url: "{{ internal_n8n_url }}/api/v1/workflows/{{ _workflow_id }}"
@@ -41,16 +55,3 @@
     status_code: [200]
   delegate_to: localhost
   when: _workflow_id | default('') != '' and _workflow_created is skipped
-
-- name: Activate workflow  # {{ workflow.name }}
-  ansible.builtin.uri:
-    url: "{{ internal_n8n_url }}/api/v1/workflows/{{ _workflow_id }}/activate"
-    method: POST
-    headers:
-      X-N8N-API-KEY: "{{ n8n_api_key }}"
-    validate_certs: false
-    status_code: [200]
-  delegate_to: localhost
-  when:
-    - workflow.active | default(false)
-    - _workflow_id | default('') != ''

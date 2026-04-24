@@ -525,8 +525,9 @@
   loop:
     - name: "Copilot CLI Test"
       template: "templates/copilot_workflow.json.j2"
-    - name: "Discord Copilot Bot"
+    - name: "Discord VirtuaJimmy"
       template: "templates/discord_copilot_workflow.json.j2"
+      active: true
     - name: "Discord Plexibot"
       template: "templates/discord_plexibot_workflow.json.j2"
       active: true
@@ -544,3 +545,33 @@
       active: true
   loop_control:
     loop_var: workflow
+
+# Activate workflows — done as a batch after all deploys so Discord trigger
+# IPC connections are established together (cycling one orphans the other)
+- name: Refresh workflow list after deploy
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/workflows"
+    method: GET
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: n8n_workflows_post
+  delegate_to: localhost
+
+- name: Activate workflows
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/workflows/{{ (n8n_workflows_post.json.data | selectattr('name', 'equalto', item) | first).id }}/activate"
+    method: POST
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+    validate_certs: false
+    status_code: [200]
+  delegate_to: localhost
+  loop:
+    - "Discord VirtuaJimmy"
+    - "Discord Plexibot"
+    - "Grafana Alert Handler"
+    - "Copilot Still Thinking"
+    - "Close Stale Discord Threads"
+    - "Create Weekly Changelog Folder"
