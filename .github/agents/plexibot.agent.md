@@ -59,30 +59,42 @@ Use the `discord-plex-user-mapping` skill when a Discord user registers their Pl
 
 ## Loki Log Queries
 
-Use the Grafana MCP tools to query Loki logs. All Docker container logs are available under `{source="docker"}`.
+Use the Grafana MCP tools to query Loki logs. The Loki datasource UID is `P8E80F9AEF21F6940`.
+
+### Label Reality Check
+Available labels: `container_name`, `filename`, `host`, `hostname`, `job`, `level`, `source`, `syslog_identifier`, `transport`, `unit`.
+
+- `source` values: `docker`, `file`, `journal`
+- `container_name` IS available for most containers (e.g. `plex`, `sonarr`, `radarr`, `prowlarr`, `sabnzbd`, `tracearr`, `jellyfin`, `jellyseerr`, etc.)
+- **Plex logs are scraped from the log file**, so they appear under `{container_name="plex", source="file"}` — NOT `source="docker"`. Querying `{source="docker", host="jellyfin-lxc"}` returns nothing.
+- Arr stack containers on docker-2 generally appear under `{container_name="<service>"}` with `source="docker"`.
 
 ### Useful LogQL Patterns
 
 ```logql
-# All logs from a specific host (Plex/Tautulli host)
-{source="docker", host="jellyfin-lxc"}
-
-# All logs from the Arr stack host
-{source="docker", host="docker-2"}
-
-# Search for errors across Plex ecosystem
-{source="docker", host=~"jellyfin-lxc|docker-2"} |~ "(?i)(error|fatal|panic)" !~ "(?i)(no error|without error|error_count=0)"
+# Plex Media Server logs (file-based)
+{container_name="plex"}
 
 # Plex transcoding issues
-{source="docker", host="jellyfin-lxc"} |~ "(?i)(transcode|transcod)"
+{container_name="plex"} |~ "(?i)(transcode|transcod)"
+
+# Specific Arr service
+{container_name="sonarr"}
+{container_name="radarr"}
+{container_name="prowlarr"}
+{container_name="sabnzbd"}
+
+# Errors across the Plex ecosystem
+{container_name=~"plex|sonarr|radarr|prowlarr|sabnzbd|tracearr"} |~ "(?i)(error|fatal|panic)" !~ "(?i)(no error|without error|error_count=0)"
 
 # Download activity (Arr stack)
-{source="docker", host="docker-2"} |~ "(?i)(download|import|grab)"
+{container_name=~"sonarr|radarr|sabnzbd|qbittorrent"} |~ "(?i)(download|import|grab)"
 ```
 
-### Known Loki Caveats
-- Docker logs on docker-1/docker-2 do **not** have a `container_name` label — only `host` and `source=docker` are available. You cannot filter by individual container name.
-- To narrow results, use `|~` line filters with service-specific keywords (e.g., Sonarr logs mention "Sonarr", Radarr logs mention "Radarr").
+### Tips
+- Prefer `container_name` over `host` — it's more precise.
+- If a query returns nothing, run `list_loki_label_values` for `container_name` to confirm the exact name.
+- Always check `query_loki_stats` first before pulling logs to gauge volume.
 
 ## Best Practices
 

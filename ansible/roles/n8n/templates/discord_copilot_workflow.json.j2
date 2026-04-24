@@ -74,7 +74,7 @@
       "name": "Check Author",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [640, 300]
+      "position": [820, 300]
     },
     {
       "parameters": {
@@ -141,7 +141,7 @@
       "name": "Check Mention or Thread",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [750, 300]
+      "position": [640, 300]
     },
     {
       "parameters": {
@@ -164,7 +164,7 @@
       "name": "React Eyes",
       "type": "n8n-nodes-base.discord",
       "typeVersion": 2,
-      "position": [860, 300],
+      "position": [1220, 100],
       "credentials": {
         "discordBotApi": {
           "id": "{{ discord_credential_id }}",
@@ -511,6 +511,64 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [2540, 500]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "react",
+        "guildId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "{{ n8n_discord_server_id }}"
+        },
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}"
+        },
+        "messageId": "={{ '{{' }} $('Filter Bots').item.json.id {{ '}}' }}",
+        "emoji": "👀"
+      },
+      "id": "react-eyes-resume-1",
+      "name": "React Eyes Resume",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [1700, 500],
+      "credentials": {
+        "discordBotApi": {
+          "id": "{{ discord_credential_id }}",
+          "name": "Discord Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "react",
+        "guildId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "{{ n8n_discord_server_id }}"
+        },
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ '{{' }} $('Filter Bots').item.json.channelId {{ '}}' }}"
+        },
+        "messageId": "={{ '{{' }} $('Filter Bots').item.json.id {{ '}}' }}",
+        "emoji": "👀"
+      },
+      "id": "react-eyes-handoff-1",
+      "name": "React Eyes Handoff",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [1940, 700],
+      "credentials": {
+        "discordBotApi": {
+          "id": "{{ discord_credential_id }}",
+          "name": "Discord Bot"
+        }
+      }
     }
   ],
   "connections": {
@@ -518,28 +576,28 @@
       "main": [[{"node": "Filter Bots", "type": "main", "index": 0}]]
     },
     "Filter Bots": {
+      "main": [[{"node": "Check Mention or Thread", "type": "main", "index": 0}]]
+    },
+    "Check Mention or Thread": {
       "main": [[{"node": "Check Author", "type": "main", "index": 0}]]
     },
     "Check Author": {
       "main": [
-        [{"node": "Check Mention or Thread", "type": "main", "index": 0}],
+        [{"node": "Check If New Thread", "type": "main", "index": 0}],
         [{"node": "React Eyes Reject", "type": "main", "index": 0}]
       ]
     },
     "React Eyes Reject": {
       "main": [[{"node": "Reject Unauthorized User", "type": "main", "index": 0}]]
     },
-    "Check Mention or Thread": {
-      "main": [[{"node": "React Eyes", "type": "main", "index": 0}]]
-    },
-    "React Eyes": {
-      "main": [[{"node": "Check If New Thread", "type": "main", "index": 0}]]
-    },
     "Check If New Thread": {
       "main": [
-        [{"node": "Prepare New Prompt", "type": "main", "index": 0}],
+        [{"node": "React Eyes", "type": "main", "index": 0}],
         [{"node": "Get Thread Info", "type": "main", "index": 0}]
       ]
+    },
+    "React Eyes": {
+      "main": [[{"node": "Prepare New Prompt", "type": "main", "index": 0}]]
     },
     "Prepare New Prompt": {
       "main": [[{"node": "Run Copilot New", "type": "main", "index": 0}]]
@@ -558,11 +616,17 @@
     },
     "Validate Thread": {
       "main": [
-        [{"node": "Prepare Resume Prompt", "type": "main", "index": 0}],
+        [{"node": "React Eyes Resume", "type": "main", "index": 0}],
         [{"node": "Check Handoff", "type": "main", "index": 0}]
       ]
     },
+    "React Eyes Resume": {
+      "main": [[{"node": "Prepare Resume Prompt", "type": "main", "index": 0}]]
+    },
     "Check Handoff": {
+      "main": [[{"node": "React Eyes Handoff", "type": "main", "index": 0}]]
+    },
+    "React Eyes Handoff": {
       "main": [[{"node": "Fetch Thread History", "type": "main", "index": 0}]]
     },
     "Fetch Thread History": {
