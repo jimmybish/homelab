@@ -16,3 +16,6 @@ package-lock.json
 
 # Changelogs (local-only, not committed)
 changelogs/
+
+# User mapping data (contains Discord user IDs)
+.github/skills/discord-plex-user-mapping/user_map.csv

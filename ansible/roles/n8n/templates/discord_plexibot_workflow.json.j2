@@ -146,7 +146,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+        "jsCode": "const item = $('Filter Bots').item.json;\nconst content = item.content || '';\nconst authorName = item.authorName || item.authorUsername || 'unknown';\nconst authorId = item.authorId || 'unknown';\nconst prompt = content + '\\n\\n[Discord user: ' + authorName + ', Discord user ID: ' + authorId + ']\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
       },
       "id": "prepare-new-prompt-plexibot",
       "name": "Prepare New Prompt",
@@ -291,7 +291,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $('Get Thread Info').item.json.name.replace(/^plexibot-/, '');\nreturn [{ json: { safeContent, name } }];"
+        "jsCode": "const item = $('Filter Bots').item.json;\nconst content = item.content || '';\nconst authorName = item.authorName || item.authorUsername || 'unknown';\nconst authorId = item.authorId || 'unknown';\nconst prompt = content + '\\n\\n[Discord user: ' + authorName + ', Discord user ID: ' + authorId + ']\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst name = $('Get Thread Info').item.json.name.replace(/^plexibot-/, '');\nreturn [{ json: { safeContent, name } }];"
       },
       "id": "prepare-resume-prompt-plexibot",
       "name": "Prepare Resume Prompt",
