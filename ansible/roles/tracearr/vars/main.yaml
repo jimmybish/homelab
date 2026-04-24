@@ -4,7 +4,7 @@
 # Docker Image: ghcr.io/connorgallopo/tracearr (GHCR)
 # Example Compose: https://github.com/connorgallopo/Tracearr/blob/main/docker/examples/docker-compose.pg18.yml
 # NGINX Proxy Config: None available (custom config created)
-# Homepage Widget: None available (service only, no widget)
+# Homepage Widget: https://gethomepage.dev/widgets/services/tracearr/
 # Last Updated: 2026-04-21
 #
 # Default Configuration:

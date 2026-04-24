@@ -26,22 +26,6 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
-- name: Setup Tautulli directory
-  ansible.builtin.file:
-    path: "{{ plex_tautulli_folder }}"
-    state: directory
-    mode: '0755'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-
-- name: Allow Tautulli port through UFW
-  community.general.ufw:
-    rule: allow
-    port: "{{ plex_tautulli_port }}"
-    proto: tcp
-  when: ansible_os_family == "Debian"
-
-# Plex host networking required ports
 - name: Allow Plex main TCP port through UFW
   community.general.ufw:
     rule: allow
@@ -162,23 +146,10 @@
         # - 32412 in (ansible_facts.udp_listen | map(attribute='port') | list)
         # - 32413 in (ansible_facts.udp_listen | map(attribute='port') | list)
         # - 32414 in (ansible_facts.udp_listen | map(attribute='port') | list)
-      - plex_tautulli_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "One or more Plex ports are not open and listening!"
     success_msg: "All Plex ports are open and listening."
 
-# Proxy Configuration
-- name: Deploy Tautulli proxy configuration
-  ansible.builtin.template:
-    src: tautulli.subdomain.conf.j2
-    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/tautulli.subdomain.conf"
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-    mode: '0644'
-  delegate_to: "{{ groups['proxy_host'][0] }}"
-  notify: Restart Swag Internal
-  when: plex_configure_proxy | bool
-
-# DNS Configuration - Standardized workflow for both Plex and Tautulli
+# DNS Configuration - Standardized workflow for Plex
 # Step 1: Get current DNS overrides from pfSense
 - name: Get DNS resolver host overrides from pfSense
   ansible.builtin.uri:
@@ -268,7 +239,7 @@
     - plex_configure_dns | default(true)
     - host_override_creation is succeeded
 
-# Step 4: Find proxy host override (for proxied services like Tautulli)
+# Step 4: Find proxy host override (needed if plex_is_proxied is ever enabled)
 - name: Find proxy host override entry in pfSense
   ansible.builtin.set_fact:
     proxy_host_override: >-
@@ -281,148 +252,6 @@
   when:
     - plex_configure_dns | default(true)
     - pfsense_dns_overrides.json.data is defined
-
-# === Tautulli DNS Configuration ===
-# Step 5: Determine parent host override for Tautulli based on is_proxied variable
-- name: Set parent host override for Tautulli alias
-  ansible.builtin.set_fact:
-    tautulli_parent_override: "{{ proxy_host_override if (plex_tautulli_is_proxied | default(true)) else deployment_host_override }}"
-  when:
-    - plex_tautulli_configure_dns | default(true)
-    - plex_configure_dns | default(true)
-
-# Step 5.5: Find and delete any existing aliases in incorrect locations
-- name: Find all existing aliases for tautulli across all host overrides
-  ansible.builtin.set_fact:
-    tautulli_all_existing_aliases: >-
-      {{ pfsense_dns_overrides.json.data
-         | selectattr('aliases', 'defined')
-         | map(attribute='aliases')
-         | flatten
-         | selectattr('host', 'equalto', 'tautulli')
-         | selectattr('domain', 'equalto', internal_domain)
-         | list }}
-  when:
-    - plex_tautulli_configure_dns | default(true)
-    - plex_configure_dns | default(true)
-    - pfsense_dns_overrides.json.data is defined
-
-- name: Identify tautulli aliases to delete (not under correct parent)
-  ansible.builtin.set_fact:
-    tautulli_aliases_to_delete: >-
-      {{ tautulli_all_existing_aliases
-         | rejectattr('parent_id', 'equalto', tautulli_parent_override.id | default(0))
-         | list }}
-  when:
-    - plex_tautulli_configure_dns | default(true)
-    - plex_configure_dns | default(true)
-    - tautulli_all_existing_aliases is defined
-
-- name: Delete incorrect tautulli DNS aliases
-  ansible.builtin.uri:
-    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
-    method: DELETE
-    headers:
-      X-API-Key: "{{ pfsense_api_key }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      parent_id: "{{ item.parent_id }}"
-      id: "{{ item.id }}"
-      apply: false
-    validate_certs: false
-    status_code: [200, 204]
-  delegate_to: localhost
-  loop: "{{ tautulli_aliases_to_delete }}"
-  register: tautulli_delete_results
-  when:
-    - plex_tautulli_configure_dns | default(true)
-    - plex_configure_dns | default(true)
-    - tautulli_aliases_to_delete is defined
-    - tautulli_aliases_to_delete | length > 0
-
-- name: Apply DNS resolver changes after tautulli alias deletion
-  ansible.builtin.uri:
-    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
-    method: POST
-    headers:
-      X-API-Key: "{{ pfsense_api_key }}"
-    validate_certs: false
-    status_code: [200, 201]
-  delegate_to: localhost
-  when:
-    - plex_tautulli_configure_dns | default(true)
-    - plex_configure_dns | default(true)
-    - tautulli_delete_results is changed
-
-# Step 6: Check if Tautulli alias already exists
-- name: Check if tautulli alias exists under parent host override
-  ansible.builtin.set_fact:
-    tautulli_alias_exists: >-
-      {{ tautulli_parent_override.aliases | default([])
-         | selectattr('host', 'equalto', 'tautulli')
-         | selectattr('domain', 'equalto', internal_domain)
-         | list
-         | length > 0 }}
-  when:
-    - plex_tautulli_configure_dns | default(true)
-    - plex_configure_dns | default(true)
-    - tautulli_parent_override is defined
-    - tautulli_parent_override | length > 0
-
-# Step 7: Display Tautulli DNS configuration status
-- name: Display tautulli DNS alias status
-  ansible.builtin.debug:
-    msg: >-
-      {% if tautulli_parent_override | length == 0 %}
-      Warning: Parent host override not found in pfSense DNS for tautulli
-      {% elif tautulli_alias_exists %}
-      tautulli DNS alias exists under {{ tautulli_parent_override.host }}.{{ internal_domain }}
-      {% else %}
-      tautulli DNS alias missing - will be created under {{ tautulli_parent_override.host }}.{{ internal_domain }}
-      {% endif %}
-  when:
-    - plex_tautulli_configure_dns | default(true)
-    - plex_configure_dns | default(true)
-
-# Step 8: Create Tautulli alias under parent host override
-- name: Create tautulli DNS alias under parent host override
-  ansible.builtin.uri:
-    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
-    method: POST
-    headers:
-      X-API-Key: "{{ pfsense_api_key }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      parent_id: "{{ tautulli_parent_override.id }}"
-      host: "tautulli"
-      domain: "{{ internal_domain }}"
-      descr: "Tautulli (Plex monitoring)"
-    validate_certs: false
-    status_code: [200, 201]
-  delegate_to: localhost
-  register: tautulli_alias_result
-  when:
-    - plex_tautulli_configure_dns | default(true)
-    - plex_configure_dns | default(true)
-    - tautulli_parent_override | length > 0
-    - not tautulli_alias_exists
-
-# Step 9: Apply DNS changes for Tautulli
-- name: Apply DNS resolver changes in pfSense for tautulli
-  ansible.builtin.uri:
-    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
-    method: POST
-    headers:
-      X-API-Key: "{{ pfsense_api_key }}"
-    validate_certs: false
-    status_code: [200, 201]
-  delegate_to: localhost
-  when:
-    - plex_tautulli_configure_dns | default(true)
-    - plex_configure_dns | default(true)
-    - tautulli_alias_result is succeeded
 
 # === Plex DNS Configuration ===
 # Step 5: Determine parent host override for Plex (non-proxied service)

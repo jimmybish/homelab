@@ -2,29 +2,21 @@
 # Research Notes - Plex Media Server Stack
 # Official Source: https://www.plex.tv/
 # Docker Hub: https://hub.docker.com/r/linuxserver/plex - Default port: 32400
-# Tautulli: https://hub.docker.com/r/tautulli/tautulli - Default port: 8181
 # NGINX Proxy Configs: https://github.com/linuxserver/reverse-proxy-confs
-#   - tautulli.subdomain.conf.sample available
-# Last Updated: 2025-10-14
+# Last Updated: 2026-04-24
 
 # Version information
 plex_version: "latest"
-plex_tautulli_version: "latest"
 
 # External ports for each service
 plex_port: 32400  # Plex main web interface (uses host networking)
-plex_tautulli_port: 8181
 
-# Volume paths - Multi-container stack pattern
+# Volume paths
 plex_parent_folder: "{{ docker_storage_folder }}/plex-stack"
 plex_folder: "{{ plex_parent_folder }}/plex"
-plex_tautulli_folder: "{{ plex_parent_folder }}/tautulli"
 
-# Feature flags (ALL true - all services have web interfaces)
+# Feature flags
 plex_configure_dns: true
 plex_is_proxied: false  # Plex accessed directly on port 32400, not through reverse proxy
 plex_configure_proxy: true
 plex_configure_homepage: true
-
-plex_tautulli_configure_dns: true
-plex_tautulli_is_proxied: true  # Tautulli IS proxied through NGINX

@@ -1,5 +1,5 @@
 ---
-- name: Install Plex and Tautulli
+- name: Deploy Plex
   hosts: plex_host
   become: true
   roles:
