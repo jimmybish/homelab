@@ -38,6 +38,35 @@ loki.process "docker" {
 }
 
 {% endif %}
+
+{% if alloy_plex_logs_enabled | default(false) %}
+// ============================================================
+// Plex Media Server file-based log collection
+// ============================================================
+
+local.file_match "plex_logs" {
+  path_targets = [
+    {__path__ = "{{ alloy_plex_logs_path }}"},
+  ]
+}
+
+loki.source.file "plex" {
+  targets    = local.file_match.plex_logs.targets
+  forward_to = [loki.process.plex.receiver]
+}
+
+loki.process "plex" {
+  stage.static_labels {
+    values = {
+      host           = "{{ ansible_hostname }}",
+      source         = "file",
+      container_name = "plex",
+    }
+  }
+  forward_to = [loki.write.default.receiver]
+}
+
+{% endif %}
 // ============================================================
 // System log collection (journald)
 // ============================================================

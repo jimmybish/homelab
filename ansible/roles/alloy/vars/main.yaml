@@ -10,3 +10,6 @@ alloy_env_file: "/etc/default/alloy"
 alloy_custom_args: "--server.http.listen-addr=0.0.0.0:12345"
 alloy_loki_url: "http://{{ groups['grafana_host'][0] }}.{{ internal_domain }}:3100/loki/api/v1/push"
 alloy_prometheus_remote_write_url: "http://{{ groups['grafana_host'][0] }}.{{ internal_domain }}:9090/api/v1/write"
+
+# Plex file-based log collection (enable via group_vars/plex_host — template defaults to false)
+alloy_plex_logs_path: "{{ docker_storage_folder }}/plex-stack/plex/Library/Application Support/Plex Media Server/Logs/Plex Media Server.log"
