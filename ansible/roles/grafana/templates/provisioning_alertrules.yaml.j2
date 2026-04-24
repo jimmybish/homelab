@@ -364,6 +364,59 @@ groups:
                     params:
                       - 0
 
+  # SNMP Data Stale - fires when QNAP SNMP scrapes have been failing for too long
+  - orgId: 1
+    name: snmp_data_stale
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: snmp-data-stale-1
+        title: SNMP Data Stale
+        condition: C
+        for: {{ grafana_alert_snmp_stale_minutes }}m
+        noDataState: "Alerting"
+        execErrState: "OK"
+        annotations:
+          summary: "No SNMP data from {% raw %}{{ $labels.instance }}{% endraw %} for {{ grafana_alert_snmp_stale_minutes }}+ minutes"
+          description: "The SNMP scrape target {% raw %}{{ $labels.instance }}{% endraw %} (job: {% raw %}{{ $labels.job }}{% endraw %}) has been unreachable for more than {{ grafana_alert_snmp_stale_minutes }} minutes. The SNMP service on the device may need to be restarted."
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: {{ grafana_prometheus_uid }}
+            model:
+              refId: A
+              expr: "up{job=~\"snmp_qnap.*\"} == 0"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0.5
+
   # Loki Error Patterns - fires when error log rate spikes
   - orgId: 1
     name: loki_error_patterns
