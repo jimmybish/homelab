@@ -1,0 +1,6 @@
+---
+- name: Install MCP Tracearr
+  hosts: mcp_tracearr_host
+  become: true
+  roles:
+    - mcp_tracearr

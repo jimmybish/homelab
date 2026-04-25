@@ -37,3 +37,6 @@
 
 - name: Deploy Tracearr
   ansible.builtin.import_playbook: deploy_tracearr.yaml
+
+- name: Deploy MCP Tracearr
+  ansible.builtin.import_playbook: deploy_mcp_tracearr.yaml

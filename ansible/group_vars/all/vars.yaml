@@ -228,6 +228,7 @@ internal_qbittorrent_url: "https://qbittorrent.{{ internal_domain }}"
 internal_maintainerr_url: "https://maintainerr.{{ internal_domain }}"
 internal_sovol_url: "http://{{ (lookup('ansible.builtin.inventory_hostnames', 'sovol_sv08').split(','))[0] }}/"
 internal_tracearr_url: "https://tracearr.{{ internal_domain }}"
+internal_mcp_tracearr_url: "http://docker-2:8850"
 
 # pfSense credentials
 pfsense_api_key: !vault |

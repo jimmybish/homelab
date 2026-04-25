@@ -140,6 +140,11 @@ tracearr_host:
   hosts:
     docker-2:
 
+# MCP Tracearr
+mcp_tracearr_host:
+  hosts:
+    docker-2:
+
 # JellyPlex-Watched
 jellyplex_watched_host:
   hosts:
