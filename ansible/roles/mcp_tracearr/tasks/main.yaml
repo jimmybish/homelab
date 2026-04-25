@@ -1,0 +1,85 @@
+---
+# 1. Docker Prerequisites
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+# 2. Directory Setup
+- name: Setup mcp-tracearr service directory
+  ansible.builtin.file:
+    path: "{{ mcp_tracearr_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup mcp-tracearr build context directory
+  ansible.builtin.file:
+    path: "{{ mcp_tracearr_folder }}/build"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+# 3. Firewall
+- name: Allow mcp-tracearr port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ mcp_tracearr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+# 4. Sync build context and deploy
+- name: Copy MCP server source to build context
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ mcp_tracearr_folder }}/build/{{ item | basename }}"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  loop:
+    - "{{ playbook_dir }}/../mcp-server-tracearr/server.py"
+    - "{{ playbook_dir }}/../mcp-server-tracearr/requirements.txt"
+    - "{{ playbook_dir }}/../mcp-server-tracearr/Dockerfile"
+  notify:
+    - Start mcp_tracearr
+
+- name: Deploy mcp-tracearr docker-compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ mcp_tracearr_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start mcp_tracearr
+
+- name: Build and run mcp-tracearr
+  community.docker.docker_compose_v2:
+    project_src: "{{ mcp_tracearr_folder }}"
+    state: present
+    build: always
+    remove_orphans: true
+
+# 5. Health Check
+- name: Wait for mcp-tracearr to start
+  ansible.builtin.pause:
+    seconds: 5
+
+- name: Check if mcp-tracearr port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert mcp-tracearr port is listening
+  ansible.builtin.assert:
+    that:
+      - mcp_tracearr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "mcp-tracearr port {{ mcp_tracearr_port }} is not open and listening!"
+    success_msg: "mcp-tracearr port {{ mcp_tracearr_port }} is open and listening."

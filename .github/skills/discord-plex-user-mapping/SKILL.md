@@ -83,7 +83,7 @@ sed -i 's/^.*|284751038901649408|.*$/jimmybish|284751038901649408|new_plex_name/
 When a Discord user asks "am I watching anything?" or "what am I streaming?":
 
 1. Look up their Plex username from `user_map.csv` using their Discord user ID
-2. Run the Tracearr streams script: `/home/jimmy/homelab/.github/skills/tracearr-stream-queries/tracearr-streams.sh --json`
+2. Call the `get_streams` MCP tool to get active sessions
 3. Filter the JSON `data[]` array for entries where `username` matches their Plex username
 4. Report back what they're watching (or "nothing right now")
 

@@ -19,6 +19,7 @@ This is a homelab infrastructure-as-code repository managed with Ansible. It dep
 - Use Context7 to look up documentation when unsure about module parameters, APIs, or syntax
 - Use skills from `.github/skills/` when performing tasks that match their descriptions
 - **When creating a new service role**, follow `ansible/docs/new-service-runbook.md` step-by-step — read it at the start and use it as the task list throughout. Do not skip phases or reorder steps.
+- **When creating a new MCP server**, follow the `mcp-server-creation` skill end-to-end. MCP servers wrap service APIs as tools for Copilot agents — source lives in `mcp-server-<name>/` at repo root, deployed via Ansible roles under `ansible/roles/mcp_<name>/`.
 
 ## Change Logging
 

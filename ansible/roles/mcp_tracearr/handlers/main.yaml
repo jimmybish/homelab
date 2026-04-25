@@ -1,0 +1,7 @@
+---
+- name: Start mcp_tracearr
+  community.docker.docker_compose_v2:
+    project_src: "{{ mcp_tracearr_folder }}"
+    state: restarted
+    remove_orphans: true
+    build: always

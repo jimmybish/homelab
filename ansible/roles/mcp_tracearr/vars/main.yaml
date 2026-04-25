@@ -1,0 +1,23 @@
+---
+# Research Notes - MCP Tracearr
+# Custom Python MCP server wrapping Tracearr Public API
+# Source: https://github.com/connorgallopo/Tracearr (apps/server/src/routes/public.ts)
+# Last Updated: 2026-04-25
+
+# Version — built from local source, no external image
+mcp_tracearr_version: "latest"
+
+# Port mapping
+mcp_tracearr_port: 8850
+
+# Tracearr API connection (same host, direct access)
+mcp_tracearr_api_base_url: "http://localhost:3001"
+
+# Volume paths — stateless service, just needs a folder for compose + build context
+mcp_tracearr_folder: "{{ docker_storage_folder }}/mcp-tracearr"
+
+# Feature flags — no web UI, no proxy, no homepage
+mcp_tracearr_configure_dns: false
+mcp_tracearr_is_proxied: false
+mcp_tracearr_configure_proxy: false
+mcp_tracearr_configure_homepage: false
