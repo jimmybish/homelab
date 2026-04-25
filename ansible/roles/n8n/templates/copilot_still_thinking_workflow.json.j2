@@ -51,7 +51,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const psOutput = $('Check Running Copilot').first().json.stdout || '';\nconst threads = $('Get Active Threads').first().json.threads || [];\nconst botChannels = ['{{ n8n_discord_alerts_channel_id }}', '{{ n8n_discord_plex_channel_id }}'];\n\n// Extract session IDs from --resume=<ID>\nconst lines = psOutput.split('\\n').filter(l => l.trim());\nconst sessionIds = [];\nfor (const line of lines) {\n  const match = line.match(/--resume=([\\w-]+)/);\n  if (match) {\n    sessionIds.push(match[1]);\n  }\n}\n\nif (sessionIds.length === 0) {\n  return [];\n}\n\n// Match session IDs to Discord threads by name\nconst results = [];\nfor (const sid of sessionIds) {\n  const thread = threads.find(t => t.name === sid && botChannels.includes(t.parent_id));\n  if (thread) {\n    results.push({ json: { sessionId: sid, threadId: thread.id } });\n  }\n}\n\nreturn results;"
+        "jsCode": "const psOutput = $('Check Running Copilot').first().json.stdout || '';\nconst threads = $('Get Active Threads').first().json.threads || [];\nconst botChannels = ['{{ n8n_discord_alerts_channel_id }}', '{{ n8n_discord_plex_channel_id }}'];\nconst vjToken = '{{ n8n_discord_bot_token }}';\nconst plexibotToken = '{{ n8n_plexibot_discord_bot_token }}';\n\n// Extract session IDs from --resume=<ID>\nconst lines = psOutput.split('\\n').filter(l => l.trim());\nconst sessionIds = [];\nfor (const line of lines) {\n  const match = line.match(/--resume=([\\w-]+)/);\n  if (match) {\n    sessionIds.push(match[1]);\n  }\n}\n\nif (sessionIds.length === 0) {\n  return [];\n}\n\n// Match session IDs to Discord threads. Threads are named\n// `virtuajimmy-<sessionId>` or `plexibot-<sessionId>`; ps shows the bare sessionId.\n// Tag each match with the bot token that owns the thread so the post comes from the right bot.\nconst results = [];\nfor (const sid of sessionIds) {\n  const thread = threads.find(t =>\n    botChannels.includes(t.parent_id) &&\n    (t.name === sid || t.name === 'virtuajimmy-' + sid || t.name === 'plexibot-' + sid)\n  );\n  if (!thread) continue;\n  const token = thread.name.startsWith('plexibot-') ? plexibotToken : vjToken;\n  results.push({ json: { sessionId: sid, threadId: thread.id, threadName: thread.name, botToken: token } });\n}\n\nreturn results;"
       },
       "id": "match-sessions-1",
       "name": "Match Sessions to Threads",
@@ -68,7 +68,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bot {{ n8n_discord_bot_token }}"
+              "value": "=Bot {{ '{{' }} $json.botToken {{ '}}' }}"
             },
             {
               "name": "Content-Type",

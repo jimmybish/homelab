@@ -71,10 +71,39 @@
         "options": {}
       },
       "id": "check-author-1",
-      "name": "Check Author",
+      "name": "Check Author New",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [820, 300]
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-author-resume",
+              "leftValue": "={{ '{{' }} $('Filter Bots').item.json.authorId {{ '}}' }}",
+              "rightValue": "{{ n8n_discord_author_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-author-resume-1",
+      "name": "Check Author Resume",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1700, 500]
     },
     {
       "parameters": {
@@ -579,22 +608,22 @@
       "main": [[{"node": "Check Mention or Thread", "type": "main", "index": 0}]]
     },
     "Check Mention or Thread": {
-      "main": [[{"node": "Check Author", "type": "main", "index": 0}]]
+      "main": [[{"node": "Check If New Thread", "type": "main", "index": 0}]]
     },
-    "Check Author": {
+    "Check If New Thread": {
       "main": [
-        [{"node": "Check If New Thread", "type": "main", "index": 0}],
+        [{"node": "Check Author New", "type": "main", "index": 0}],
+        [{"node": "Get Thread Info", "type": "main", "index": 0}]
+      ]
+    },
+    "Check Author New": {
+      "main": [
+        [{"node": "React Eyes", "type": "main", "index": 0}],
         [{"node": "React Eyes Reject", "type": "main", "index": 0}]
       ]
     },
     "React Eyes Reject": {
       "main": [[{"node": "Reject Unauthorized User", "type": "main", "index": 0}]]
-    },
-    "Check If New Thread": {
-      "main": [
-        [{"node": "React Eyes", "type": "main", "index": 0}],
-        [{"node": "Get Thread Info", "type": "main", "index": 0}]
-      ]
     },
     "React Eyes": {
       "main": [[{"node": "Prepare New Prompt", "type": "main", "index": 0}]]
@@ -616,8 +645,14 @@
     },
     "Validate Thread": {
       "main": [
-        [{"node": "React Eyes Resume", "type": "main", "index": 0}],
+        [{"node": "Check Author Resume", "type": "main", "index": 0}],
         [{"node": "Check Handoff", "type": "main", "index": 0}]
+      ]
+    },
+    "Check Author Resume": {
+      "main": [
+        [{"node": "React Eyes Resume", "type": "main", "index": 0}],
+        [{"node": "React Eyes Reject", "type": "main", "index": 0}]
       ]
     },
     "React Eyes Resume": {
