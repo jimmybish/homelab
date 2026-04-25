@@ -107,6 +107,11 @@ mcp_sonarr_host:
 radarr_host:
   hosts:
     docker-1:
+# MCP Radarr
+mcp_radarr_host:
+  hosts:
+    docker-1:
+
 
 prowlarr_host:
   hosts:

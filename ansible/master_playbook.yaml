@@ -43,3 +43,6 @@
 
 - name: Deploy MCP Sonarr
   ansible.builtin.import_playbook: deploy_mcp_sonarr.yaml
+
+- name: Deploy MCP Radarr
+  ansible.builtin.import_playbook: deploy_mcp_radarr.yaml

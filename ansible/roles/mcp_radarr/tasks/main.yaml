@@ -1,0 +1,85 @@
+---
+# 1. Docker Prerequisites
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+# 2. Directory Setup
+- name: Setup mcp-radarr service directory
+  ansible.builtin.file:
+    path: "{{ mcp_radarr_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup mcp-radarr build context directory
+  ansible.builtin.file:
+    path: "{{ mcp_radarr_folder }}/build"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+# 3. Firewall
+- name: Allow mcp-radarr port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ mcp_radarr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+# 4. Sync build context and deploy
+- name: Copy MCP server source to build context
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ mcp_radarr_folder }}/build/{{ item | basename }}"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  loop:
+    - "{{ playbook_dir }}/../mcp-server-radarr/server.py"
+    - "{{ playbook_dir }}/../mcp-server-radarr/requirements.txt"
+    - "{{ playbook_dir }}/../mcp-server-radarr/Dockerfile"
+  notify:
+    - Start mcp_radarr
+
+- name: Deploy mcp-radarr docker-compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ mcp_radarr_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start mcp_radarr
+
+- name: Build and run mcp-radarr
+  community.docker.docker_compose_v2:
+    project_src: "{{ mcp_radarr_folder }}"
+    state: present
+    build: always
+    remove_orphans: true
+
+# 5. Health Check
+- name: Wait for mcp-radarr to start
+  ansible.builtin.pause:
+    seconds: 5
+
+- name: Check if mcp-radarr port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert mcp-radarr port is listening
+  ansible.builtin.assert:
+    that:
+      - mcp_radarr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "mcp-radarr port {{ mcp_radarr_port }} is not open and listening!"
+    success_msg: "mcp-radarr port {{ mcp_radarr_port }} is open and listening."

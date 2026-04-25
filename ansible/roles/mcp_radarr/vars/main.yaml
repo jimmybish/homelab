@@ -1,0 +1,19 @@
+---
+# MCP Radarr Server
+# Wraps: Radarr API v3 (GET /queue, GET /movie, DELETE /movie/{id})
+# Last Updated: 2026-04-25
+
+mcp_radarr_version: "latest"
+mcp_radarr_port: 8852
+
+# Target API connection (same host as Radarr)
+mcp_radarr_api_base_url: "http://localhost:7878"
+
+# Volume paths — stateless, just needs compose + build context
+mcp_radarr_folder: "{{ docker_storage_folder }}/mcp-radarr"
+
+# Feature flags — MCP servers have no web UI
+mcp_radarr_configure_dns: false
+mcp_radarr_is_proxied: false
+mcp_radarr_configure_proxy: false
+mcp_radarr_configure_homepage: false

@@ -1,0 +1,12 @@
+services:
+  mcp-radarr:
+    build:
+      context: "{{ mcp_radarr_folder }}/build"
+      dockerfile: Dockerfile
+    image: mcp-radarr:{{ mcp_radarr_version }}
+    container_name: mcp-radarr
+    restart: unless-stopped
+    environment:
+      - RADARR_API_KEY={{ radarr_api_key }}
+      - RADARR_BASE_URL={{ mcp_radarr_api_base_url }}
+    network_mode: host
