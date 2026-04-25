@@ -1,0 +1,85 @@
+---
+# 1. Docker Prerequisites
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+# 2. Directory Setup
+- name: Setup mcp-sonarr service directory
+  ansible.builtin.file:
+    path: "{{ mcp_sonarr_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup mcp-sonarr build context directory
+  ansible.builtin.file:
+    path: "{{ mcp_sonarr_folder }}/build"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+# 3. Firewall
+- name: Allow mcp-sonarr port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ mcp_sonarr_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+# 4. Sync build context and deploy
+- name: Copy MCP server source to build context
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ mcp_sonarr_folder }}/build/{{ item | basename }}"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  loop:
+    - "{{ playbook_dir }}/../mcp-server-sonarr/server.py"
+    - "{{ playbook_dir }}/../mcp-server-sonarr/requirements.txt"
+    - "{{ playbook_dir }}/../mcp-server-sonarr/Dockerfile"
+  notify:
+    - Start mcp_sonarr
+
+- name: Deploy mcp-sonarr docker-compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ mcp_sonarr_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start mcp_sonarr
+
+- name: Build and run mcp-sonarr
+  community.docker.docker_compose_v2:
+    project_src: "{{ mcp_sonarr_folder }}"
+    state: present
+    build: always
+    remove_orphans: true
+
+# 5. Health Check
+- name: Wait for mcp-sonarr to start
+  ansible.builtin.pause:
+    seconds: 5
+
+- name: Check if mcp-sonarr port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert mcp-sonarr port is listening
+  ansible.builtin.assert:
+    that:
+      - mcp_sonarr_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "mcp-sonarr port {{ mcp_sonarr_port }} is not open and listening!"
+    success_msg: "mcp-sonarr port {{ mcp_sonarr_port }} is open and listening."

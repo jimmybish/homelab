@@ -1,0 +1,19 @@
+---
+# MCP Sonarr Server
+# Wraps: Sonarr API v3 (GET /queue, DELETE /series/{id})
+# Last Updated: 2026-04-25
+
+mcp_sonarr_version: "latest"
+mcp_sonarr_port: 8851
+
+# Target API connection (same host as Sonarr)
+mcp_sonarr_api_base_url: "http://localhost:8989"
+
+# Volume paths — stateless, just needs compose + build context
+mcp_sonarr_folder: "{{ docker_storage_folder }}/mcp-sonarr"
+
+# Feature flags — MCP servers have no web UI
+mcp_sonarr_configure_dns: false
+mcp_sonarr_is_proxied: false
+mcp_sonarr_configure_proxy: false
+mcp_sonarr_configure_homepage: false
