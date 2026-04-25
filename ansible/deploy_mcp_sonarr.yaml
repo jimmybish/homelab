@@ -1,0 +1,6 @@
+---
+- name: Install MCP Sonarr
+  hosts: mcp_sonarr_host
+  become: true
+  roles:
+    - mcp_sonarr

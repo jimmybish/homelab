@@ -99,6 +99,11 @@ sonarr_host:
   hosts:
     docker-1:
 
+# MCP Sonarr
+mcp_sonarr_host:
+  hosts:
+    docker-1:
+
 radarr_host:
   hosts:
     docker-1:
