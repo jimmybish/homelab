@@ -1,0 +1,6 @@
+---
+- name: Install MCP Radarr
+  hosts: mcp_radarr_host
+  become: true
+  roles:
+    - mcp_radarr
