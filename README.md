@@ -33,6 +33,14 @@ All agents are required to log every change they make using the `change-logging`
 - [Playwright MCP](https://github.com/microsoft/playwright-mcp) — Browser automation for UI testing and validation
 - [Chrome DevTools MCP](https://github.com/nicholasgriffintn/chrome-devtools-mcp) — Browser inspection and debugging
 
+**Custom MCP Servers** live in `mcp-server-<name>/` directories at the repo root. Each wraps a homelab service's REST API as MCP tools using Python ([FastMCP](https://github.com/modelcontextprotocol/python-sdk)) and runs as a Docker container deployed via a corresponding Ansible role under `ansible/roles/mcp_<name>/`. Transport is SSE. New servers are created following the `mcp-server-creation` skill.
+
+| Server | Service | Description |
+|--------|---------|-------------|
+| `mcp-server-radarr` | Radarr | Movie library and download management |
+| `mcp-server-sonarr` | Sonarr | TV show library and download management |
+| `mcp-server-tracearr` | Tracearr | Media request tracking and analytics |
+
 ### Discord Integration
 
 Two Discord bots interface with the homelab via [n8n](https://n8n.io/) workflows:
