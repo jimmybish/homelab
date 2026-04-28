@@ -31,7 +31,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 mgmt '{{ n8n_copilot_path }} -p \"{{ '{{' }} $json.prompt {{ '}}' }}\" -s --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
+        "command": "=ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 mgmt '{{ n8n_copilot_path }} --agent virtuajimmy -p \"{{ '{{' }} $json.prompt {{ '}}' }}\" -s --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null'"
       },
       "id": "exec-copilot-1",
       "name": "Run Copilot via SSH",
