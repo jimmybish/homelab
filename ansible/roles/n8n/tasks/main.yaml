@@ -543,6 +543,9 @@
     - name: "Create Weekly Changelog Folder"
       template: "templates/create_weekly_changelog_workflow.json.j2"
       active: true
+    - name: "Log Monitor"
+      template: "templates/log_monitor_workflow.json.j2"
+      active: true
   loop_control:
     loop_var: workflow
 
@@ -575,3 +578,4 @@
     - "Copilot Still Thinking"
     - "Close Stale Discord Threads"
     - "Create Weekly Changelog Folder"
+    - "Log Monitor"
