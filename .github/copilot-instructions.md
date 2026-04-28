@@ -39,6 +39,7 @@ Treat each agent as a subject matter expert. When a task involves their domain, 
 | `proxmox_admin` | Proxmox VE, VMs, LXC containers, cluster resources | Creating/managing VMs or containers, adjusting resources, Proxmox troubleshooting |
 | `grafana_admin` | Grafana, Prometheus, Loki, alerting, observability | Querying dashboards, exploring metrics/logs, checking alerts, managing incidents |
 | `home_assistant_admin` | Home Assistant, smart home devices, automations | Checking device state, calling services, creating automations, managing dashboards, **any SSH access to the HAOS VM** |
+| `virtuajimmy` | Discord messaging, chat-formatted homelab Q&A | Answering questions destined for Discord, posting status updates in chat rooms |
 
 - **Delegate** when the task is clearly within an agent's domain — let them handle it end-to-end
 - **Consult** when you need domain expertise to inform a broader task — ask the agent for advice, then continue

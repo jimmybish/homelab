@@ -251,7 +251,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent virtuajimmy --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
       },
       "id": "exec-copilot-new-1",
       "name": "Run Copilot New",
@@ -437,7 +437,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent virtuajimmy --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
       },
       "id": "exec-copilot-handoff-1",
       "name": "Run Copilot Handoff",
@@ -495,7 +495,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume={{ '{{' }} $json.name {{ '}}' }} -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent virtuajimmy --resume={{ '{{' }} $json.name {{ '}}' }} -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
       },
       "id": "exec-copilot-resume-1",
       "name": "Run Copilot Resume",
