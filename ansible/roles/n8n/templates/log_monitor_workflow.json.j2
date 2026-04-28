@@ -1,0 +1,133 @@
+{
+  "name": "Log Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-hourly-1",
+      "name": "Hourly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prompt = [\n  'Perform a scheduled Loki sweep across all hosts for the last 90 minutes.',\n  '',\n  'YOU MUST use the `loki-scheduled-sweep` skill for this task. Read it first and follow its methodology and ignore list exactly. Findings consisting entirely of patterns on the ignore list must NOT be reported.',\n  '',\n  'INSTRUCTIONS:',\n  '1. Read the `loki-scheduled-sweep` skill before querying anything.',\n  '2. Query Loki for logs across all hosts from the last 90 minutes.',\n  '3. Apply the skill ignore list before counting or reporting findings.',\n  '4. For each remaining finding, include source, pattern, rate, and a recommended Grafana alert rule.',\n  '5. If nothing noteworthy remains after filtering, respond with ONLY the exact text: NO_ISSUES_FOUND',\n  '6. DO NOT include NO_ISSUES_FOUND anywhere in a report that contains findings.',\n  '',\n  '[IMPORTANT: Keep your reply under 1800 characters. Be concise.]',\n  '[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]'\n].join('\\n');\n\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+      },
+      "id": "prepare-prompt-1",
+      "name": "Prepare Copilot Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
+      },
+      "id": "exec-copilot-1",
+      "name": "Run Copilot",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet lastBlock = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    } else if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    } else if (responseText) {\n      lastBlock = responseText;\n      responseText = '';\n    }\n  } catch (e) {}\n}\nresponseText = responseText || lastBlock;\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = 'NO_ISSUES_FOUND';\nif (!sessionId) sessionId = require('crypto').randomUUID();\n\nreturn [{ json: { responseText, sessionId } }];"
+      },
+      "id": "parse-output-1",
+      "name": "Parse Copilot Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-has-issues",
+              "leftValue": "={{ '{{' }} $json.responseText {{ '}}' }}",
+              "rightValue": "NO_ISSUES_FOUND",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-issues-1",
+      "name": "Has Issues?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1160, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_alerts_channel_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.responseText}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "post-discord-1",
+      "name": "Post to Alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 200]
+    }
+  ],
+  "connections": {
+    "Hourly Trigger": {
+      "main": [[{"node": "Prepare Copilot Prompt", "type": "main", "index": 0}]]
+    },
+    "Prepare Copilot Prompt": {
+      "main": [[{"node": "Run Copilot", "type": "main", "index": 0}]]
+    },
+    "Run Copilot": {
+      "main": [[{"node": "Parse Copilot Output", "type": "main", "index": 0}]]
+    },
+    "Parse Copilot Output": {
+      "main": [[{"node": "Has Issues?", "type": "main", "index": 0}]]
+    },
+    "Has Issues?": {
+      "main": [
+        [{"node": "Post to Alerts", "type": "main", "index": 0}],
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

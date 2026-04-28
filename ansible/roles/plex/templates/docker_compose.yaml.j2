@@ -15,17 +15,6 @@ services:
     devices:
       - /dev/dri:/dev/dri
     restart: unless-stopped
-  tautulli:
-    image: ghcr.io/tautulli/tautulli
-    container_name: tautulli
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - {{ plex_tautulli_folder }}:/config
-    environment:
-      - PUID={{ docker_user_puid }}
-      - PGID={{ docker_user_pgid }}
-      - TZ={{ timezone }}
 
 volumes:
   mytv:
