@@ -12,7 +12,6 @@ auths:
 modules:
   qnap:
     walk:
-    - 1.3.6.1.4.1.24681.1.2.15
     - 1.3.6.1.4.1.24681.1.3.15
     - 1.3.6.1.4.1.24681.1.3.17
     - 1.3.6.1.4.1.24681.1.3.9
@@ -22,43 +21,11 @@ modules:
     - 1.3.6.1.4.1.24681.1.4.1.1.1.2
     - 1.3.6.1.4.1.24681.1.4.1.11.5.6
     get:
-    - 1.3.6.1.4.1.24681.1.2.16.0
-    - 1.3.6.1.4.1.24681.1.2.3.0
     - 1.3.6.1.4.1.24681.1.3.1.0
     - 1.3.6.1.4.1.24681.1.3.3.0
     - 1.3.6.1.4.1.24681.1.3.4.0
     - 1.3.6.1.4.1.24681.1.3.6.0
     metrics:
-    - name: sysFanIndex
-      oid: 1.3.6.1.4.1.24681.1.2.15.1.1
-      type: gauge
-      help: A unique value for each system fan - 1.3.6.1.4.1.24681.1.2.15.1.1
-      indexes:
-      - labelname: sysFanIndex
-        type: gauge
-    - name: sysFanDescr
-      oid: 1.3.6.1.4.1.24681.1.2.15.1.2
-      type: OctetString
-      help: A textual string containing information about the interface - 1.3.6.1.4.1.24681.1.2.15.1.2
-      indexes:
-      - labelname: sysFanIndex
-        type: gauge
-    - name: sysFanSpeed
-      oid: 1.3.6.1.4.1.24681.1.2.15.1.3
-      type: OctetString
-      help: System fan speed. - 1.3.6.1.4.1.24681.1.2.15.1.3
-      indexes:
-      - labelname: sysFanIndex
-        type: gauge
-    - name: sysVolumeNumber
-      oid: 1.3.6.1.4.1.24681.1.2.16
-      type: gauge
-      help: The number of system volumes (regardless of their current state) present
-        on this system. - 1.3.6.1.4.1.24681.1.2.16
-    - name: systemFreeMem
-      oid: 1.3.6.1.4.1.24681.1.2.3
-      type: OctetString
-      help: System free memory - 1.3.6.1.4.1.24681.1.2.3
     - name: systemCPU_UsageEX
       oid: 1.3.6.1.4.1.24681.1.3.1
       type: gauge
@@ -538,131 +505,16 @@ modules:
     max_repetitions: 25
     retries: 3
     timeout: 15s
-    use_unconnected_udp_socket: true
   qnaplong:
     walk:
-    - 1.3.6.1.4.1.24681.1.2.17
-    - 1.3.6.1.4.1.24681.1.3.11
     - 1.3.6.1.4.1.24681.1.3.17
     - 1.3.6.1.4.1.24681.1.4.1.1.1.1.5
     - 1.3.6.1.4.1.24681.1.4.1.1.1.2
     get:
-    - 1.3.6.1.4.1.24681.1.2.2.0
-    - 1.3.6.1.4.1.24681.1.3.12.0
-    - 1.3.6.1.4.1.24681.1.3.13.0
     - 1.3.6.1.4.1.24681.1.3.2.0
     - 1.3.6.1.4.1.55062.1.12.6.0
     - 1.3.6.1.4.1.55062.1.12.7.0
     metrics:
-    - name: sysVolumeIndex
-      oid: 1.3.6.1.4.1.24681.1.2.17.1.1
-      type: gauge
-      help: A unique value for each system volume - 1.3.6.1.4.1.24681.1.2.17.1.1
-      indexes:
-      - labelname: sysVolumeIndex
-        type: gauge
-    - name: sysVolumeDescr
-      oid: 1.3.6.1.4.1.24681.1.2.17.1.2
-      type: OctetString
-      help: A textual string containing information about the volume. - 1.3.6.1.4.1.24681.1.2.17.1.2
-      indexes:
-      - labelname: sysVolumeIndex
-        type: gauge
-    - name: sysVolumeFS
-      oid: 1.3.6.1.4.1.24681.1.2.17.1.3
-      type: OctetString
-      help: System Volume file system. - 1.3.6.1.4.1.24681.1.2.17.1.3
-      indexes:
-      - labelname: sysVolumeIndex
-        type: gauge
-    - name: sysVolumeTotalSize
-      oid: 1.3.6.1.4.1.24681.1.2.17.1.4
-      type: OctetString
-      help: System Volume total size. - 1.3.6.1.4.1.24681.1.2.17.1.4
-      indexes:
-      - labelname: sysVolumeIndex
-        type: gauge
-    - name: sysVolumeFreeSize
-      oid: 1.3.6.1.4.1.24681.1.2.17.1.5
-      type: OctetString
-      help: System Volume free size. - 1.3.6.1.4.1.24681.1.2.17.1.5
-      indexes:
-      - labelname: sysVolumeIndex
-        type: gauge
-    - name: sysVolumeStatus
-      oid: 1.3.6.1.4.1.24681.1.2.17.1.6
-      type: OctetString
-      help: System Volume status. - 1.3.6.1.4.1.24681.1.2.17.1.6
-      indexes:
-      - labelname: sysVolumeIndex
-        type: gauge
-    - name: systemTotalMem
-      oid: 1.3.6.1.4.1.24681.1.2.2
-      type: OctetString
-      help: System total memory - 1.3.6.1.4.1.24681.1.2.2
-    - name: hdIndexEX
-      oid: 1.3.6.1.4.1.24681.1.3.11.1.1
-      type: gauge
-      help: A unique value for each hard disk - 1.3.6.1.4.1.24681.1.3.11.1.1
-      indexes:
-      - labelname: hdIndex
-        type: gauge
-    - name: hdDescrEX
-      oid: 1.3.6.1.4.1.24681.1.3.11.1.2
-      type: OctetString
-      help: A textual string containing information about the interface - 1.3.6.1.4.1.24681.1.3.11.1.2
-      indexes:
-      - labelname: hdIndex
-        type: gauge
-    - name: hdTemperatureEX
-      oid: 1.3.6.1.4.1.24681.1.3.11.1.3
-      type: gauge
-      help: Hard disk temperature in centigrade. - 1.3.6.1.4.1.24681.1.3.11.1.3
-      indexes:
-      - labelname: hdIndex
-        type: gauge
-    - name: hdStatusEX
-      oid: 1.3.6.1.4.1.24681.1.3.11.1.4
-      type: gauge
-      help: HDD status - 1.3.6.1.4.1.24681.1.3.11.1.4
-      indexes:
-      - labelname: hdIndex
-        type: gauge
-      enum_values:
-        -9: rwError
-        -6: invalid
-        -5: noDisk
-        -4: unknown
-        0: ready
-    - name: hdModelEX
-      oid: 1.3.6.1.4.1.24681.1.3.11.1.5
-      type: OctetString
-      help: Hard disk model. - 1.3.6.1.4.1.24681.1.3.11.1.5
-      indexes:
-      - labelname: hdIndex
-        type: gauge
-    - name: hdCapacityEX
-      oid: 1.3.6.1.4.1.24681.1.3.11.1.6
-      type: counter
-      help: Hard disk capacity in byte. - 1.3.6.1.4.1.24681.1.3.11.1.6
-      indexes:
-      - labelname: hdIndex
-        type: gauge
-    - name: hdSmartInfoEX
-      oid: 1.3.6.1.4.1.24681.1.3.11.1.7
-      type: OctetString
-      help: Hard disk SMART information. - 1.3.6.1.4.1.24681.1.3.11.1.7
-      indexes:
-      - labelname: hdIndex
-        type: gauge
-    - name: modelNameEX
-      oid: 1.3.6.1.4.1.24681.1.3.12
-      type: OctetString
-      help: Model name - 1.3.6.1.4.1.24681.1.3.12
-    - name: hostNameEX
-      oid: 1.3.6.1.4.1.24681.1.3.13
-      type: OctetString
-      help: Model name - 1.3.6.1.4.1.24681.1.3.13
     - name: sysVolumeIndexEX
       oid: 1.3.6.1.4.1.24681.1.3.17.1.1
       type: gauge
@@ -965,4 +817,3 @@ modules:
     max_repetitions: 25
     retries: 3
     timeout: 30s
-    use_unconnected_udp_socket: true

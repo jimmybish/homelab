@@ -159,7 +159,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ '{{' }} JSON.stringify({name: $json.sessionId, auto_archive_duration: 1440}) {{ '}}' }}",
+        "jsonBody": "={{ '{{' }} JSON.stringify({name: 'virtuajimmy-' + $json.sessionId, auto_archive_duration: 1440}) {{ '}}' }}",
         "options": {}
       },
       "id": "create-thread-1",

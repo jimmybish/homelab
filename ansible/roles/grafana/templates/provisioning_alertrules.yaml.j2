@@ -389,7 +389,7 @@ groups:
             datasourceUid: {{ grafana_prometheus_uid }}
             model:
               refId: A
-              expr: "up{job=~\"snmp_qnap.*\"} == 0"
+              expr: "up{job=~\"snmp_qnap.*\"}"
               intervalMs: 1000
               maxDataPoints: 43200
           - refId: B
@@ -413,7 +413,7 @@ groups:
               maxDataPoints: 43200
               conditions:
                 - evaluator:
-                    type: gt
+                    type: lt
                     params:
                       - 0.5
 
