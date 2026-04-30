@@ -19,3 +19,6 @@ changelogs/
 
 # User mapping data (contains Discord user IDs)
 .github/skills/discord-plex-user-mapping/user_map.csv
+
+# Loki sweep reports (local-only, may contain sensitive log data)
+log-sweeps/

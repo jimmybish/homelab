@@ -7,20 +7,20 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 * * * *"
+              "expression": "0 18 * * *"
             }
           ]
         }
       },
-      "id": "schedule-hourly-1",
-      "name": "Hourly Trigger",
+      "id": "schedule-daily-1",
+      "name": "Daily 6pm Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [200, 300]
     },
     {
       "parameters": {
-        "jsCode": "const prompt = [\n  'Perform a scheduled Loki sweep across all hosts for the last 90 minutes.',\n  '',\n  'YOU MUST use the `loki-scheduled-sweep` skill for this task. Read it first and follow its methodology and ignore list exactly. Findings consisting entirely of patterns on the ignore list must NOT be reported.',\n  '',\n  'INSTRUCTIONS:',\n  '1. Read the `loki-scheduled-sweep` skill before querying anything.',\n  '2. Query Loki for logs across all hosts from the last 90 minutes.',\n  '3. Apply the skill ignore list before counting or reporting findings.',\n  '4. For each remaining finding, include source, pattern, rate, and a recommended Grafana alert rule.',\n  '5. If nothing noteworthy remains after filtering, respond with ONLY the exact text: NO_ISSUES_FOUND',\n  '6. DO NOT include NO_ISSUES_FOUND anywhere in a report that contains findings.',\n  '',\n  '[IMPORTANT: Keep your reply under 1800 characters. Be concise.]',\n  '[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]'\n].join('\\n');\n\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+        "jsCode": "const prompt = [\n  'Perform a scheduled Loki sweep across all hosts for the last 26 hours and write the outcome to a markdown report on disk.',\n  '',\n  'YOU MUST use the `loki-scheduled-sweep` skill for this task. Read it first and follow its methodology, report format, and ignore list exactly. Findings consisting entirely of patterns on the ignore list must NOT be included in the report.',\n  '',\n  'INSTRUCTIONS:',\n  '1. Read the `loki-scheduled-sweep` skill before querying anything.',\n  '2. Query Loki for logs across all hosts from the last 26 hours.',\n  '3. Apply the skill ignore list before counting or reporting findings.',\n  '4. For each remaining finding, investigate the root cause and either describe a concrete fix (config edit, role update, restart, etc.) or recommend adding the pattern to the ignore list. Do NOT recommend Grafana alert rules.',\n  '5. Write the report to `log-sweeps/YYYY-MM-DD-HHMM.md` (local time the sweep started) using the file structure defined in the skill. Create the `log-sweeps/` folder if it does not exist. One file per run, do not overwrite previous reports.',\n  '6. If nothing remains after filtering, still write the report file containing the single line: `No findings after applying the ignore list.`',\n  '7. After writing the file, reply with ONLY the report file path (e.g. `log-sweeps/2026-04-29-1800.md`) and nothing else. No prose, no markdown, no commentary.'\n].join('\\n');\n\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
       },
       "id": "prepare-prompt-1",
       "name": "Prepare Copilot Prompt",
@@ -40,7 +40,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet lastBlock = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    } else if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    } else if (responseText) {\n      lastBlock = responseText;\n      responseText = '';\n    }\n  } catch (e) {}\n}\nresponseText = responseText || lastBlock;\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = 'NO_ISSUES_FOUND';\nif (!sessionId) sessionId = require('crypto').randomUUID();\n\nreturn [{ json: { responseText, sessionId } }];"
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet lastBlock = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    } else if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    } else if (responseText) {\n      lastBlock = responseText;\n      responseText = '';\n    }\n  } catch (e) {}\n}\nresponseText = (responseText || lastBlock).trim();\n\nconst pathMatch = responseText.match(/log-sweeps\\/[^\\s`'\\\"]+\\.md/);\nconst reportPath = pathMatch ? pathMatch[0] : '';\nconst hasReport = reportPath.length > 0;\n\nlet discordMessage;\nif (hasReport) {\n  discordMessage = `<@313605750112911360> daily Loki sweep is done, report ready to view at \\`${reportPath}\\` on the mgmt host.`;\n} else {\n  discordMessage = `<@313605750112911360> daily Loki sweep ran but no report path was returned. Raw output:\\n\\`\\`\\`\\n${responseText.substring(0, 1500)}\\n\\`\\`\\``;\n}\n\nif (!sessionId) sessionId = require('crypto').randomUUID();\n\nreturn [{ json: { responseText, reportPath, hasReport, discordMessage, sessionId } }];"
       },
       "id": "parse-output-1",
       "name": "Parse Copilot Output",
@@ -58,12 +58,13 @@
           },
           "conditions": [
             {
-              "id": "check-has-issues",
-              "leftValue": "={{ '{{' }} $json.responseText {{ '}}' }}",
-              "rightValue": "NO_ISSUES_FOUND",
+              "id": "check-has-report",
+              "leftValue": "={{ '{{' }} $json.hasReport {{ '}}' }}",
+              "rightValue": true,
               "operator": {
-                "type": "string",
-                "operation": "notEquals"
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
               }
             }
           ],
@@ -72,7 +73,7 @@
         "options": {}
       },
       "id": "check-issues-1",
-      "name": "Has Issues?",
+      "name": "Report Written?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [1160, 300]
@@ -96,18 +97,18 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.responseText}) {{ '}}' }}",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.discordMessage, allowed_mentions: {parse: ['users']}}) {{ '}}' }}",
         "options": {}
       },
       "id": "post-discord-1",
-      "name": "Post to Alerts",
+      "name": "Notify Report Ready",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [1400, 200]
     }
   ],
   "connections": {
-    "Hourly Trigger": {
+    "Daily 6pm Trigger": {
       "main": [[{"node": "Prepare Copilot Prompt", "type": "main", "index": 0}]]
     },
     "Prepare Copilot Prompt": {
@@ -117,11 +118,11 @@
       "main": [[{"node": "Parse Copilot Output", "type": "main", "index": 0}]]
     },
     "Parse Copilot Output": {
-      "main": [[{"node": "Has Issues?", "type": "main", "index": 0}]]
+      "main": [[{"node": "Report Written?", "type": "main", "index": 0}]]
     },
-    "Has Issues?": {
+    "Report Written?": {
       "main": [
-        [{"node": "Post to Alerts", "type": "main", "index": 0}],
+        [{"node": "Notify Report Ready", "type": "main", "index": 0}],
         []
       ]
     }

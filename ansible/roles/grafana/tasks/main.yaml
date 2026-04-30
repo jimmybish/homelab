@@ -4,6 +4,13 @@
     name: docker-compose
     state: present
 
+- name: Ensure SNMP MIB tooling is installed (for snmp_exporter generator regenerations)
+  ansible.builtin.package:
+    name:
+      - snmp-mibs-downloader
+    state: present
+  become: true
+
 - name: Ensure Docker service is running
   ansible.builtin.service:
     name: docker
