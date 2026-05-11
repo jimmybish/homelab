@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Trivy CVE Scanner — dynamically discovers Docker images across hosts
+# Deployed by Ansible, invoked by n8n CVE Monitor workflow
+set -euo pipefail
+
+HOSTS=({% for host in trivy_scan_hosts %}"{{ host }}" {% endfor %})
+SEVERITY="HIGH,CRITICAL"
+TMPDIR=$(mktemp -d)
+FINDINGS_FILE="$TMPDIR/findings.json"
+ERRORS_FILE="$TMPDIR/errors.txt"
+
+echo '[]' > "$FINDINGS_FILE"
+touch "$ERRORS_FILE"
+
+cleanup() { rm -rf "$TMPDIR"; }
+trap cleanup EXIT
+
+# Discover all running images across Docker hosts
+IMAGES=""
+for host in "${HOSTS[@]}"; do
+  host_images=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$host" \
+    "sudo docker ps --format '{% raw %}{{.Image}}{% endraw %}'" 2>/dev/null) || {
+    echo "Failed to connect to ${host}" >> "$ERRORS_FILE"
+    continue
+  }
+  IMAGES="${IMAGES}${host_images}"$'\n'
+done
+
+# Deduplicate and filter out locally-built images (no registry/slash = local)
+UNIQUE_IMAGES=$(echo "$IMAGES" | sort -u | grep -v '^$' | grep -v '^mcp-' || true)
+
+if [[ -z "$UNIQUE_IMAGES" ]]; then
+  echo '{"images_scanned":0,"findings":[],"errors":"No images discovered"}'
+  exit 0
+fi
+
+IMAGE_COUNT=$(echo "$UNIQUE_IMAGES" | wc -l)
+SCAN_INDEX=0
+
+while IFS= read -r image; do
+  SCAN_INDEX=$((SCAN_INDEX + 1))
+  echo "[$SCAN_INDEX/$IMAGE_COUNT] Scanning: $image" >&2
+
+  SCAN_FILE="$TMPDIR/scan.json"
+  if ! trivy image --format json --severity "$SEVERITY" --quiet "$image" > "$SCAN_FILE" 2>/dev/null; then
+    echo "Scan failed: ${image}" >> "$ERRORS_FILE"
+    continue
+  fi
+
+  # Extract vulnerabilities and merge into findings
+  python3 - "$image" "$SCAN_FILE" "$FINDINGS_FILE" << 'PYEOF'
+import sys, json
+
+image = sys.argv[1]
+scan_file = sys.argv[2]
+findings_file = sys.argv[3]
+
+with open(scan_file) as f:
+    data = json.load(f)
+
+with open(findings_file) as f:
+    existing = json.load(f)
+
+for r in data.get('Results', []):
+    for v in r.get('Vulnerabilities', []):
+        existing.append({
+            'image': image,
+            'id': v.get('VulnerabilityID', ''),
+            'pkg': v.get('PkgName', ''),
+            'installed': v.get('InstalledVersion', ''),
+            'fixed': v.get('FixedVersion', ''),
+            'severity': v.get('Severity', ''),
+            'title': v.get('Title', '')[:120]
+        })
+
+with open(findings_file, 'w') as f:
+    json.dump(existing, f)
+PYEOF
+
+done <<< "$UNIQUE_IMAGES"
+
+# Output final JSON
+python3 - "$FINDINGS_FILE" "$ERRORS_FILE" "$IMAGE_COUNT" << 'PYEOF'
+import sys, json
+
+findings_file = sys.argv[1]
+errors_file = sys.argv[2]
+image_count = int(sys.argv[3])
+
+with open(findings_file) as f:
+    findings = json.load(f)
+
+with open(errors_file) as f:
+    errors = f.read().strip()
+
+output = {
+    'images_scanned': image_count,
+    'total_findings': len(findings),
+    'findings': findings,
+    'errors': errors
+}
+print(json.dumps(output))
+PYEOF

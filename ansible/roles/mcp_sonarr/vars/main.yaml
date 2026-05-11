@@ -1,7 +1,7 @@
 ---
 # MCP Sonarr Server
-# Wraps: Sonarr API v3 (GET /queue, DELETE /series/{id})
-# Last Updated: 2026-04-25
+# Wraps: Sonarr API v3 (queue, series, episodes, releases, blocklist, commands)
+# Last Updated: 2026-05-07
 
 mcp_sonarr_version: "latest"
 mcp_sonarr_port: 8851

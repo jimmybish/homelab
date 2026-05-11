@@ -92,13 +92,26 @@ The Sonarr MCP server (`sonarr/*`) provides direct API access to Sonarr. **Alway
 | `get_queue` | View active downloads — series, episode, quality, progress, status, errors |
 | `get_series` | List all shows or search by title — returns id, title, year, status, seasons, size on disk |
 | `delete_series` | Delete a show from Sonarr (deletes files, no exclusion list). Requires `series_id` |
+| `get_episodes` | List episodes for a series — returns id, title, season/episode number, air date, monitored, has file |
+| `blocklist_queue_item` | Remove a download from the queue and blocklist the release so Sonarr won't grab it again |
+| `search_releases` | Interactive search — query all indexers for available releases for a specific episode |
+| `grab_release` | Grab a specific release from search results and push it to the download client |
+| `trigger_episode_search` | Trigger automatic search for one or more episodes (Sonarr picks the best release) |
+| `trigger_series_search` | Trigger automatic search for all monitored episodes in a series |
 
 ### When to use which
 - **"What's downloading?"** → `get_queue`
 - **"What shows do I have?"** / **"Find show X"** → `get_series`
 - **"Delete this show"** → `get_series` to find the ID, then `delete_series`
+- **"Blocklist this release"** / **"This download is bad"** → `get_queue` to find the queue item ID, then `blocklist_queue_item`
+- **"Search for episode X"** / **"Find better quality"** → `get_series` → `get_episodes` to find IDs, then `search_releases`
+- **"Download this specific release"** → `search_releases` to find it, then `grab_release` with the `guid` and `indexerId`
+- **"Search for missing episodes"** → `get_episodes` to find IDs, then `trigger_episode_search`
+- **"Re-search everything for a show"** → `get_series` to find the ID, then `trigger_series_search`
 
 > **⚠️ `delete_series` is destructive** — it permanently removes episode files from disk. Always confirm with the user before calling it.
+> **⚠️ `blocklist_queue_item` removes the download from the client** — the release won't be grabbed again. Confirm before blocklisting.
+> **⚠️ `grab_release` starts a download immediately** — confirm the release looks right before grabbing.
 
 ## Radarr MCP Tools
 

@@ -546,6 +546,9 @@
     - name: "Log Monitor"
       template: "templates/log_monitor_workflow.json.j2"
       active: true
+    - name: "CVE Monitor"
+      template: "templates/cve_monitor_workflow.json.j2"
+      active: true
   loop_control:
     loop_var: workflow
 
@@ -579,3 +582,4 @@
     - "Close Stale Discord Threads"
     - "Create Weekly Changelog Folder"
     - "Log Monitor"
+    - "CVE Monitor"

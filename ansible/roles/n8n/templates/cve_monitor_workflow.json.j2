@@ -1,0 +1,161 @@
+{
+  "name": "CVE Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "schedule-weekly-1",
+      "name": "Weekly Monday 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "command": "ssh mgmt '/home/jimmy/bin/trivy-scan.sh'",
+        "timeout": 1200
+      },
+      "id": "exec-trivy-scan-1",
+      "name": "Run Trivy Scan",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nlet data;\ntry {\n  data = JSON.parse(stdout);\n} catch (e) {\n  return [{ json: { hasFindings: false, summary: 'Failed to parse Trivy output', imagesScanned: 0 } }];\n}\n\nconst findings = data.findings || [];\nconst imagesScanned = data.images_scanned || 0;\nconst errors = data.errors || '';\n\nif (findings.length === 0) {\n  return [{ json: { hasFindings: false, summary: 'No HIGH or CRITICAL CVEs found', imagesScanned, errors } }];\n}\n\n// Group findings by image\nconst byImage = {};\nfor (const f of findings) {\n  if (!byImage[f.image]) byImage[f.image] = { CRITICAL: [], HIGH: [] };\n  byImage[f.image][f.severity].push(f);\n}\n\n// Build summary\nconst lines = [`Scanned ${imagesScanned} images, found ${findings.length} vulnerabilities:\\n`];\nfor (const [image, sevs] of Object.entries(byImage)) {\n  const critCount = sevs.CRITICAL.length;\n  const highCount = sevs.HIGH.length;\n  const counts = [];\n  if (critCount > 0) counts.push(`${critCount} CRITICAL`);\n  if (highCount > 0) counts.push(`${highCount} HIGH`);\n  lines.push(`**${image}**: ${counts.join(', ')}`);\n\n  // List up to 5 most important CVEs per image (CRITICAL first)\n  const topCves = [...sevs.CRITICAL, ...sevs.HIGH].slice(0, 5);\n  for (const cve of topCves) {\n    const fixed = cve.fixed ? ` -> ${cve.fixed}` : ' (no fix available)';\n    lines.push(`  - ${cve.id} (${cve.severity}) ${cve.pkg} ${cve.installed}${fixed}`);\n  }\n}\n\nif (errors) lines.push(`\\nErrors: ${errors}`);\n\nlet summary = lines.join('\\n');\n// Truncate if too long for Copilot prompt (keep under 8000 chars)\nif (summary.length > 8000) {\n  summary = summary.substring(0, 7900) + '\\n... (truncated)';\n}\n\nreturn [{ json: { hasFindings: true, summary, imagesScanned, totalFindings: findings.length } }];"
+      },
+      "id": "parse-trivy-1",
+      "name": "Parse Trivy Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-findings",
+              "leftValue": "={{ '{{' }} $json.hasFindings {{ '}}' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-findings-1",
+      "name": "Has Findings?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const summary = $input.first().json.summary;\nconst prompt = [\n  'Review these Trivy CVE scan results for my homelab Docker infrastructure.',\n  '',\n  'YOU MUST use the `cve-scan-analysis` skill for this task. Read it first and follow its exposure model, urgency tiers, and reporting guidelines exactly.',\n  '',\n  'INSTRUCTIONS:',\n  '1. Read the `cve-scan-analysis` skill before analysing anything.',\n  '2. Classify each affected service by its exposure level (internet-exposed, LAN-only, internal-only) per the skill.',\n  '3. Flag any unmanaged containers (images not in the Ansible-managed inventory listed in the skill).',\n  '4. Group findings into urgency tiers: Upgrade Now / Upgrade Soon / Info Only.',\n  '5. For each affected service, note the exposure level, top CVEs, and the specific ansible-playbook command to update.',\n  '6. Skip noise — focus on what matters given the exposure model.',\n  '',\n  'Scan Results:',\n  summary,\n  '',\n  '[IMPORTANT: Keep your reply under 1800 characters. Be concise. Your reply will be posted to Discord — use the chat-room-communication skill for formatting.]'\n].join('\\n');\n\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent, summary } }];"
+      },
+      "id": "prepare-prompt-1",
+      "name": "Prepare Copilot Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 200]
+    },
+    {
+      "parameters": {
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent virtuajimmy --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
+      },
+      "id": "exec-copilot-1",
+      "name": "Run Copilot Analysis",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1400, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter(l => l.trim());\nlet responseText = '';\nlet lastBlock = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    } else if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    } else if (responseText) {\n      lastBlock = responseText;\n      responseText = '';\n    }\n  } catch (e) {}\n}\nresponseText = responseText || lastBlock;\n\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(CVE analysis returned no output)';\nif (!sessionId) sessionId = require('crypto').randomUUID();\n\nconst message = `🔒 **Weekly CVE Scan Report**\\n\\n${responseText}`;\n\nreturn [{ json: { message, sessionId } }];"
+      },
+      "id": "parse-copilot-1",
+      "name": "Parse Copilot Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1640, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_alerts_channel_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.message}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "post-discord-1",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1880, 200]
+    }
+  ],
+  "connections": {
+    "Weekly Monday 8am": {
+      "main": [[{"node": "Run Trivy Scan", "type": "main", "index": 0}]]
+    },
+    "Run Trivy Scan": {
+      "main": [[{"node": "Parse Trivy Results", "type": "main", "index": 0}]]
+    },
+    "Parse Trivy Results": {
+      "main": [[{"node": "Has Findings?", "type": "main", "index": 0}]]
+    },
+    "Has Findings?": {
+      "main": [
+        [{"node": "Prepare Copilot Prompt", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Prepare Copilot Prompt": {
+      "main": [[{"node": "Run Copilot Analysis", "type": "main", "index": 0}]]
+    },
+    "Run Copilot Analysis": {
+      "main": [[{"node": "Parse Copilot Output", "type": "main", "index": 0}]]
+    },
+    "Parse Copilot Output": {
+      "main": [[{"node": "Post to Discord", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

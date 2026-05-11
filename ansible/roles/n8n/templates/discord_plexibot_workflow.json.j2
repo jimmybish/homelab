@@ -49,7 +49,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst channelId = $('Filter Bots').item.json.channelId;\nconst mainChannels = ['{{ n8n_discord_plex_channel_id }}'];\nconst botId = '{{ n8n_plexibot_discord_client_id }}';\nconst otherBotId = '{{ n8n_discord_client_id }}';\n\n// Thread replies: allow unless @mentioning the other bot (let VirtuaJimmy handle those)\nif (!mainChannels.includes(channelId)) {\n  if (content.includes('<@' + otherBotId + '>')) return [];\n  return [$input.first()];\n}\n\n// New messages in main channel: require @mention\nif (content.includes('<@' + botId + '>')) {\n  return [$input.first()];\n}\n\nreturn [];"
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst channelId = $('Filter Bots').item.json.channelId;\nconst mainChannels = ['{{ n8n_discord_plex_channel_id }}'];\nconst botId = '{{ n8n_plexibot_discord_client_id }}';\nconst roleId = '{{ n8n_plexibot_discord_role_id }}';\nconst otherBotId = '{{ n8n_discord_client_id }}';\nconst otherRoleId = '{{ n8n_discord_role_id }}';\n\nconst mentionsThisBot = content.includes('<@' + botId + '>') || content.includes('<@&' + roleId + '>');\nconst mentionsOtherBot = content.includes('<@' + otherBotId + '>') || content.includes('<@&' + otherRoleId + '>');\n\n// Thread replies: allow unless @mentioning the other bot (let VirtuaJimmy handle those)\nif (!mainChannels.includes(channelId)) {\n  if (mentionsOtherBot) return [];\n  return [$input.first()];\n}\n\n// New messages in main channel: require @mention\nif (mentionsThisBot) {\n  return [$input.first()];\n}\n\nreturn [];"
       },
       "id": "check-mention-plexibot",
       "name": "Check Mention or Thread",
