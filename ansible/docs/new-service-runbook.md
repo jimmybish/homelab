@@ -67,7 +67,7 @@ Do NOT skip ahead. Complete each phase before moving to the next. If debugging d
 ## Phase 4: Create Tasks and Handlers
 
 ### Tasks
-**Skills:** `ansible-docker-deployment`, `ufw-firewall-configuration`, `docker-service-health-checks`, `nginx-swag-proxy-config`, `pfsense-dns-management`, `homepage-dashboard-integration`
+**Skills:** `ansible-docker-deployment`, `ufw-firewall-configuration`, `docker-service-health-checks`, `nginx-swag-proxy-config`, `homepage-dashboard-integration`
 
 - [ ] Create `tasks/main.yaml` following the standard task order:
   1. Docker prerequisites
@@ -76,10 +76,30 @@ Do NOT skip ahead. Complete each phase before moving to the next. If debugging d
   4. Deploy compose template + `docker_compose_v2`
   5. Health check (assert port listening)
   6. Proxy config deployment
-  7. DNS (full 9-step pfSense pattern)
+  7. DNS (shared pfSense DNS tasks)
   8. Homepage integration (include shared task + bridge handler notification)
 
-  For step 8, use the shared task pattern:
+  For step 7, use the shared DNS task pattern:
+  ```yaml
+  - name: Ensure deployment host DNS override exists
+    ansible.builtin.include_tasks:
+      file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
+    vars:
+      _dns_configure: "{{ <service>_configure_dns | default(true) }}"
+    when: <service>_configure_dns | default(true)
+
+  - name: Create <service> DNS alias
+    ansible.builtin.include_tasks:
+      file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+    vars:
+      _dns_configure: "{{ <service>_configure_dns | default(true) }}"
+      _dns_alias_host: <service>
+      _dns_alias_descr: <Service description>
+      _dns_is_proxied: "{{ <service>_is_proxied | default(true) }}"
+    when: <service>_configure_dns | default(true)
+  ```
+
+  For step 8, use the shared Homepage task pattern:
   ```yaml
   - name: Add <service> to Homepage <section> section
     ansible.builtin.include_tasks:

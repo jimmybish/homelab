@@ -24,7 +24,7 @@ Follow this order in `tasks/main.yaml`:
 4. Deploy Configuration Files & Run Compose
 5. Health Check *(use `docker-service-health-checks` skill)*
 6. Proxy Configuration *(use `nginx-swag-proxy-config` skill)*
-7. DNS Configuration *(use `pfsense-dns-management` skill)*
+7. DNS Configuration *(use shared tasks — see `new-service-runbook.md` Phase 4, step 7)*
 8. Homepage Integration *(use `homepage-dashboard-integration` skill)*
 
 ## 1. Docker Prerequisites

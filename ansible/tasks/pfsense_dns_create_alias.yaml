@@ -1,0 +1,180 @@
+---
+# Shared task: Create a DNS alias in pfSense with full lifecycle management.
+# Included via: ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+#
+# Prerequisites:
+#   Must call pfsense_dns_ensure_host_override.yaml first to set:
+#     _dns_overrides_data       — list of pfSense DNS host override entries
+#     _dns_deployment_override  — host override for the deployment target
+#
+# Required input variables:
+#   _dns_configure   — master flag to enable/disable DNS configuration (bool)
+#   _dns_alias_host  — hostname for the alias (e.g., "grafana", "request")
+#   _dns_alias_descr — description for the alias entry
+#
+# Optional input variables:
+#   _dns_is_proxied  — alias parent: proxy (true) or deployment host (false). Default: true
+
+# Reset state (important when called in a loop for multiple aliases)
+- name: "Reset DNS alias state: {{ _dns_alias_host }}"
+  ansible.builtin.set_fact:
+    _dns_alias_changed: false
+    _dns_proxy_override: {}
+  when: _dns_configure | bool
+
+# Find proxy host override (for proxied services)
+- name: "Find proxy host override: {{ _dns_alias_host }}"
+  ansible.builtin.set_fact:
+    _dns_proxy_override: >-
+      {{ _dns_overrides_data
+         | selectattr('host', 'equalto', 'proxy')
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | first
+         | default({}) }}
+  when:
+    - _dns_configure | bool
+    - _dns_is_proxied | default(true) | bool
+    - _dns_overrides_data is defined
+
+# Set parent override — proxied services use proxy, others use deployment host
+- name: "Set parent override (proxied): {{ _dns_alias_host }}"
+  ansible.builtin.set_fact:
+    _dns_parent_override: "{{ _dns_proxy_override }}"
+  when:
+    - _dns_configure | bool
+    - _dns_is_proxied | default(true) | bool
+
+- name: "Set parent override (direct): {{ _dns_alias_host }}"
+  ansible.builtin.set_fact:
+    _dns_parent_override: "{{ _dns_deployment_override }}"
+  when:
+    - _dns_configure | bool
+    - not (_dns_is_proxied | default(true) | bool)
+
+# Find all existing aliases for this hostname across all overrides
+- name: "Find existing aliases: {{ _dns_alias_host }}"
+  ansible.builtin.set_fact:
+    _dns_existing_aliases: >-
+      {{ _dns_overrides_data
+         | selectattr('aliases', 'defined')
+         | map(attribute='aliases')
+         | flatten
+         | selectattr('host', 'equalto', _dns_alias_host)
+         | selectattr('domain', 'equalto', internal_domain)
+         | list }}
+  when:
+    - _dns_configure | bool
+    - _dns_overrides_data is defined
+
+# Identify stale aliases under wrong parent
+- name: "Identify stale aliases: {{ _dns_alias_host }}"
+  ansible.builtin.set_fact:
+    _dns_stale_aliases: >-
+      {{ _dns_existing_aliases
+         | rejectattr('parent_id', 'equalto', _dns_parent_override.id | default(0))
+         | list }}
+  when:
+    - _dns_configure | bool
+    - _dns_existing_aliases is defined
+
+# Delete stale aliases
+- name: "Delete stale DNS aliases: {{ _dns_alias_host }}"
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: DELETE
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ item.parent_id }}"
+      id: "{{ item.id }}"
+      apply: false
+    validate_certs: false
+    status_code: [200, 204]
+  delegate_to: localhost
+  loop: "{{ _dns_stale_aliases }}"
+  when:
+    - _dns_configure | bool
+    - _dns_stale_aliases is defined
+    - _dns_stale_aliases | length > 0
+
+- name: "Mark DNS changed after cleanup: {{ _dns_alias_host }}"
+  ansible.builtin.set_fact:
+    _dns_alias_changed: true
+  when:
+    - _dns_configure | bool
+    - _dns_stale_aliases is defined
+    - _dns_stale_aliases | length > 0
+
+# Check if alias already exists under correct parent
+- name: "Check alias exists: {{ _dns_alias_host }}"
+  ansible.builtin.set_fact:
+    _dns_alias_exists: >-
+      {{ _dns_parent_override.aliases | default([])
+         | selectattr('host', 'equalto', _dns_alias_host)
+         | selectattr('domain', 'equalto', internal_domain)
+         | list
+         | length > 0 }}
+  when:
+    - _dns_configure | bool
+    - _dns_parent_override is defined
+    - _dns_parent_override | length > 0
+
+# Display status
+- name: "Display DNS alias status: {{ _dns_alias_host }}"
+  ansible.builtin.debug:
+    msg: >-
+      {% if _dns_parent_override | default({}) | length == 0 %}
+      Warning: Parent host override not found in pfSense DNS
+      {% elif _dns_alias_exists | default(false) %}
+      {{ _dns_alias_host }}.{{ internal_domain }} exists under {{ _dns_parent_override.host }}.{{ internal_domain }}
+      {% else %}
+      {{ _dns_alias_host }}.{{ internal_domain }} missing — creating under {{ _dns_parent_override.host }}.{{ internal_domain }}
+      {% endif %}
+  when: _dns_configure | bool
+
+# Create alias
+- name: "Create DNS alias: {{ _dns_alias_host }}"
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      parent_id: "{{ _dns_parent_override.id }}"
+      host: "{{ _dns_alias_host }}"
+      domain: "{{ internal_domain }}"
+      descr: "{{ _dns_alias_descr }}"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when:
+    - _dns_configure | bool
+    - _dns_parent_override | default({}) | length > 0
+    - not (_dns_alias_exists | default(false))
+
+- name: "Mark DNS changed after creation: {{ _dns_alias_host }}"
+  ansible.builtin.set_fact:
+    _dns_alias_changed: true
+  when:
+    - _dns_configure | bool
+    - _dns_parent_override | default({}) | length > 0
+    - not (_dns_alias_exists | default(false))
+
+# Apply all DNS changes (single apply covers both deletion and creation)
+- name: "Apply DNS changes: {{ _dns_alias_host }}"
+  ansible.builtin.uri:
+    url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      X-API-Key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    status_code: [200, 201]
+  delegate_to: localhost
+  when:
+    - _dns_configure | bool
+    - _dns_alias_changed | default(false)

@@ -6,6 +6,7 @@ warn_list:
 exclude_paths:
   - roles/arr_suite/tasks/tasks/
   - roles/grafana/tasks/tasks/
+  - roles/homepage/tasks/tasks/
   - roles/jellyfin/tasks/tasks/
   - roles/jellyseerr/tasks/tasks/
   - roles/maintainerr/tasks/tasks/
