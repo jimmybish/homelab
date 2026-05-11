@@ -164,7 +164,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst channelId = $('Filter Bots').item.json.channelId;\nconst mainChannels = ['{{ n8n_discord_alerts_channel_id }}', '{{ n8n_discord_plex_channel_id }}'];\nconst botId = '{{ n8n_discord_client_id }}';\nconst item = $input.first();\n\nif (!mainChannels.includes(channelId)) {\n  // Thread reply — check if this bot was explicitly @mentioned (cross-bot handoff)\n  item.json.mentionedInThread = content.includes('<@' + botId + '>');\n  return [item];\n}\n\n// New messages in main channel: require @mention\nif (content.includes('<@' + botId + '>')) {\n  item.json.mentionedInThread = false;\n  return [item];\n}\n\nreturn [];"
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst channelId = $('Filter Bots').item.json.channelId;\nconst mainChannels = ['{{ n8n_discord_alerts_channel_id }}', '{{ n8n_discord_plex_channel_id }}'];\nconst botId = '{{ n8n_discord_client_id }}';\nconst roleId = '{{ n8n_discord_role_id }}';\nconst item = $input.first();\n\nconst mentionsThisBot = content.includes('<@' + botId + '>') || content.includes('<@&' + roleId + '>');\n\nif (!mainChannels.includes(channelId)) {\n  // Thread reply — check if this bot was explicitly @mentioned (cross-bot handoff)\n  item.json.mentionedInThread = mentionsThisBot;\n  return [item];\n}\n\n// New messages in main channel: require @mention\nif (mentionsThisBot) {\n  item.json.mentionedInThread = false;\n  return [item];\n}\n\nreturn [];"
       },
       "id": "check-mention-1",
       "name": "Check Mention or Thread",

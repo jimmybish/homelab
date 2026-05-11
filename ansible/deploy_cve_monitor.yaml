@@ -1,0 +1,47 @@
+---
+- name: Setup CVE Monitoring
+  hosts: mgmt_hosts
+  become: true
+  vars_files:
+    - roles/n8n/vars/main.yaml
+  tasks:
+    - name: Install Trivy GPG key
+      ansible.builtin.shell: |
+        curl -fsSL https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor -o /usr/share/keyrings/trivy.gpg
+      args:
+        creates: /usr/share/keyrings/trivy.gpg
+
+    - name: Add Trivy APT repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main"
+        filename: trivy
+        state: present
+
+    - name: Install Trivy
+      ansible.builtin.apt:
+        name: trivy
+        state: present
+        update_cache: true
+
+    - name: Ensure ~/bin directory exists
+      ansible.builtin.file:
+        path: /home/jimmy/bin
+        state: directory
+        mode: '0755'
+        owner: jimmy
+        group: jimmy
+      become: false
+
+    - name: Deploy Trivy scan script
+      ansible.builtin.template:
+        src: "roles/n8n/templates/trivy_scan.sh.j2"
+        dest: /home/jimmy/bin/trivy-scan.sh
+        mode: '0755'
+        owner: jimmy
+        group: jimmy
+      become: false
+
+    - name: Warm Trivy vulnerability database
+      ansible.builtin.command: trivy image --download-db-only
+      become: false
+      changed_when: false

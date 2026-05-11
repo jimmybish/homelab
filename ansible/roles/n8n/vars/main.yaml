@@ -23,3 +23,10 @@ n8n_configure_dns: true         # ALWAYS true - n8n has web interface
 
 # Copilot CLI path on mgmt host
 n8n_copilot_path: "/home/jimmy/.local/bin/copilot"
+
+# Docker hosts to scan for CVEs (mgmt SSHes to each and runs `docker ps`)
+trivy_scan_hosts:
+  - docker-1
+  - docker-2
+  - proxy
+  - jellyfin-lxc
