@@ -11,7 +11,7 @@
 # Output facts:
 #   _homepage_service_result — register result from blockinfile (use .changed to trigger handlers)
 
-- name: "Add {{ _homepage_service_name }} to Homepage services"
+- name: "Add service to Homepage: {{ _homepage_service_name }}"
   ansible.builtin.blockinfile:
     path: "{{ homepage_folder }}/config/services.yaml"
     marker: "# {mark} ANSIBLE MANAGED BLOCK - {{ _homepage_marker }}"
