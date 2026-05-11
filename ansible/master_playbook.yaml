@@ -1,4 +1,17 @@
 ---
+- name: Silence Grafana alerts for full deployment
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Mark master silence active
+      ansible.builtin.set_fact:
+        grafana_master_silence_active: true
+
+    - name: Create Grafana silence
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Master playbook full deployment"
+
 - name: Initial OS Configuration
   ansible.builtin.import_playbook: os_setup.yaml
 
@@ -46,3 +59,14 @@
 
 - name: Deploy MCP Radarr
   ansible.builtin.import_playbook: deploy_mcp_radarr.yaml
+
+- name: Re-enable Grafana alerts after deployment
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Remove Grafana silence
+      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+
+    - name: Clear master silence flag
+      ansible.builtin.set_fact:
+        grafana_master_silence_active: false

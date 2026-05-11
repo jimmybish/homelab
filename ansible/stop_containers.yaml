@@ -27,6 +27,11 @@
       when: not is_host_group
       with_items: "{{ target_hosts.split(',') }}"
 
+    - name: Silence Grafana alerts before stopping containers
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Stopping containers — {{ target_hosts }}"
+
 - name: Stop containers
   hosts: hosts_list
   become: true
@@ -54,3 +59,10 @@
     - name: Show running containers again
       ansible.builtin.debug:
         var: docker_info.containers
+
+- name: Re-enable Grafana alerts
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Remove Grafana silence
+      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml

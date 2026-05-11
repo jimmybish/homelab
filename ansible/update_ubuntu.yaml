@@ -1,4 +1,13 @@
 ---
+- name: Silence Grafana alerts during Ubuntu updates
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Create Grafana silence
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Updating and rebooting Ubuntu hosts"
+
 - name: Update, upgrade, and reboot all Ubuntu hosts
   hosts: "ubuntu"
   become: true
@@ -25,3 +34,10 @@
       ansible.builtin.wait_for_connection:
         timeout: 300
       when: upgrade_result.changed
+
+- name: Re-enable Grafana alerts after Ubuntu updates
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Remove Grafana silence
+      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml

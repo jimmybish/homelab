@@ -2,6 +2,15 @@
 # Playbook to update all Docker Compose containers to the latest version
 # Equivalent to: docker compose pull && docker compose up -d
 
+- name: Silence Grafana alerts during container updates
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Create Grafana silence
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Updating all Docker containers"
+
 - name: Update all Docker Compose containers
   hosts:
     - ubuntu
@@ -46,3 +55,10 @@
     - name: Show up results
       ansible.builtin.debug:
         var: up_results
+
+- name: Re-enable Grafana alerts after container updates
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Remove Grafana silence
+      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
