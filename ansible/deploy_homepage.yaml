@@ -11,6 +11,20 @@
   roles:
     - homepage
   post_tasks:
+    - name: Populate Homepage with all service entries
+      ansible.builtin.include_tasks: tasks/homepage_populate_all_services.yaml
+      tags:
+        - homepage
+        - homepage_config
+
+    - name: Restart Homepage to apply service entries
+      community.docker.docker_compose_v2:
+        project_src: "{{ homepage_folder }}"
+        state: restarted
+      tags:
+        - homepage
+        - homepage_config
+
     - name: Remove Grafana alert silence
       ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
       when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))

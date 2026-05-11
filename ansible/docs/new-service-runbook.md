@@ -55,9 +55,10 @@ Do NOT skip ahead. Complete each phase before moving to the next. If debugging d
 ### Homepage Entry
 **Skill:** `homepage-dashboard-integration`
 
-- [ ] Create `templates/homepage_service.yaml.j2`
+- [ ] Create `templates/homepage/<service>_service.yaml.j2` in the **playbook-level** templates directory (not the role's templates/)
 - [ ] Use 2-space indentation for list items, 6-space for properties
 - [ ] Only add a `widget` block if the service is listed at `https://gethomepage.dev/widgets/`
+- [ ] Add an entry to `tasks/homepage_populate_all_services.yaml` for the new service
 
 **Gate:** All templates created and reviewed for correctness.
 
@@ -76,7 +77,34 @@ Do NOT skip ahead. Complete each phase before moving to the next. If debugging d
   5. Health check (assert port listening)
   6. Proxy config deployment
   7. DNS (full 9-step pfSense pattern)
-  8. Homepage integration (blockinfile + tags)
+  8. Homepage integration (include shared task + bridge handler notification)
+
+  For step 8, use the shared task pattern:
+  ```yaml
+  - name: Add <service> to Homepage <section> section
+    ansible.builtin.include_tasks:
+      file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+    vars:
+      _homepage_service_name: <Service Name>
+      _homepage_marker: <service> service
+      _homepage_template: <service>_service.yaml.j2
+      _homepage_insertafter: "^- <Section>:"
+    when: <service>_configure_homepage | default(true)
+    tags:
+      - homepage
+      - homepage_config
+
+  - name: Notify Homepage restart for <service>
+    ansible.builtin.debug:
+      msg: "<service> homepage entry updated"
+    changed_when: _homepage_service_result is changed
+    notify:
+      - Restart Homepage
+    when: <service>_configure_homepage | default(true)
+    tags:
+      - homepage
+      - homepage_config
+  ```
 
 ### Handlers
 **Skill:** `ansible-docker-deployment`

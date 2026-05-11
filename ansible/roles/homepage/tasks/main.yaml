@@ -278,20 +278,18 @@
     state: restarted
   tags:
     - homepage
-    - homepage_config
 
-- name: Display next steps for populating Homepage with services
+- name: Display Homepage deployment status
   ansible.builtin.debug:
     msg:
       - "=========================================="
       - "Homepage deployment complete!"
       - "=========================================="
       - ""
-      - "To populate Homepage with all deployed services, run:"
-      - "  ansible-playbook master_playbook.yaml --tags homepage_config --vault-password-file ~/ansible_key"
+      - "Service entries will be populated automatically via post_tasks."
       - ""
-      - "Or to update a specific service's Homepage entry:"
-      - "  ansible-playbook deploy_<service>.yaml --tags homepage --vault-password-file ~/ansible_key"
+      - "To update all service entries manually:"
+      - "  ansible-playbook deploy_homepage.yaml --tags homepage_config --vault-password-file ~/ansible_key"
       - ""
       - "Homepage is accessible at: https://homepage.{{ internal_domain }}"
       - "=========================================="

@@ -224,13 +224,22 @@
 
 # Homepage Configuration
 - name: Add n8n service to Homepage Smart Home section
-  ansible.builtin.blockinfile:
-    path: "{{ homepage_folder }}/config/services.yaml"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK - n8n service"
-    block: "{{ lookup('template', 'homepage_service.yaml.j2') }}"
-    insertafter: "^- Smart Home:"
-    mode: '0644'
-  delegate_to: "{{ groups['homepage_host'][0] }}"
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: n8n
+    _homepage_marker: n8n service
+    _homepage_template: n8n_service.yaml.j2
+    _homepage_insertafter: "^- Smart Home:"
+  when: n8n_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for n8n
+  ansible.builtin.debug:
+    msg: "n8n homepage entry updated"
+  changed_when: _homepage_service_result is changed
   notify: Restart Homepage
   when: n8n_configure_homepage | default(true)
   tags:

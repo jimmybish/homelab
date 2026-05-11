@@ -1,0 +1,132 @@
+---
+# Shared task file: Populate Homepage with all service entries.
+# Included via: ansible.builtin.include_tasks: tasks/homepage_populate_all_services.yaml
+#
+# Calls homepage_add_service.yaml once per service to insert blockinfile entries
+# into Homepage's services.yaml. Order matters: arr_suite creates the ARR section
+# that maintainerr inserts into, so arr_suite must come first.
+
+# --- Media section ---
+
+- name: "Homepage config: Plex"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: Plex
+    _homepage_marker: plex services
+    _homepage_template: plex_services.yaml.j2
+    _homepage_insertafter: "^- Media:"
+  when: plex_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: "Homepage config: Jellyfin"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: Jellyfin
+    _homepage_marker: jellyfin services
+    _homepage_template: jellyfin_services.yaml.j2
+    _homepage_insertafter: "^- Media:"
+  when: jellyfin_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: "Homepage config: Jellyseerr"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: Jellyseerr
+    _homepage_marker: jellyseerr service
+    _homepage_template: jellyseerr_service.yaml.j2
+    _homepage_insertafter: "^- Media:"
+  when: jellyseerr_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: "Homepage config: Tracearr"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: Tracearr
+    _homepage_marker: tracearr service
+    _homepage_template: tracearr_service.yaml.j2
+    _homepage_insertafter: "^- Media:"
+  when: tracearr_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+# --- ARR section (arr_suite creates the section header, maintainerr inserts into it) ---
+
+- name: "Homepage config: ARR Suite"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: ARR Suite
+    _homepage_marker: arr_suite services
+    _homepage_template: arr_suite_services.yaml.j2
+    _homepage_insertafter: EOF
+  when: arr_suite_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: "Homepage config: Maintainerr"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: Maintainerr
+    _homepage_marker: maintainerr service
+    _homepage_template: maintainerr_service.yaml.j2
+    _homepage_insertafter: "^- ARR:"
+  when: maintainerr_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+# --- Smart Home section ---
+
+- name: "Homepage config: n8n"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: n8n
+    _homepage_marker: n8n service
+    _homepage_template: n8n_service.yaml.j2
+    _homepage_insertafter: "^- Smart Home:"
+  when: n8n_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: "Homepage config: Paperless-NGX"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: Paperless-NGX
+    _homepage_marker: paperless
+    _homepage_template: paperless_service.yaml.j2
+    _homepage_insertafter: "^- Smart Home:"
+  when: paperless_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+# --- Infra section ---
+
+- name: "Homepage config: Grafana"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: Grafana
+    _homepage_marker: grafana service
+    _homepage_template: grafana_service.yaml.j2
+    _homepage_insertafter: "^- Infra:"
+  when: grafana_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
