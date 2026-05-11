@@ -46,7 +46,6 @@ Use these skills on-demand based on the task at hand:
 - `ufw-firewall-configuration` — Opening ports via UFW in Ansible tasks
 - `docker-service-health-checks` — Adding port-listening assertions after deployment
 - `nginx-swag-proxy-config` — Creating/deploying NGINX reverse proxy configs for SWAG
-- `pfsense-dns-management` — Managing DNS host overrides and aliases via pfSense API
 - `homepage-dashboard-integration` — Adding services to the Homepage dashboard with correct templates and tags
 - `ansible-vault-secrets` — Encrypting secrets and adding vault-encrypted variables to group_vars
 - `playbook-creation-testing` — Creating deploy playbooks, testing, master playbook integration, running/troubleshooting
