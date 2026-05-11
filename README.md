@@ -99,7 +99,7 @@ Services run as Docker Compose stacks on VMs and LXC containers across the Proxm
 - [Homepage](https://gethomepage.dev/)
 - **Media:**
   - [Jellyfin](https://hub.docker.com/r/linuxserver/jellyfin), [Plex](https://hub.docker.com/r/linuxserver/plex), [Tautulli](https://tautulli.com/)
-  - [Jellyseerr](https://hub.docker.com/r/fallenbagel/jellyseerr), [Overseerr](https://hub.docker.com/r/linuxserver/overseerr)
+  - [Jellyseerr](https://hub.docker.com/r/fallenbagel/jellyseerr)
   - [Maintainerr](https://github.com/jorenn92/maintainerr), [JellyPlex-Watched](https://github.com/luigi311/JellyPlex-Watched), [Tracearr](https://github.com/connorgallopo/tracearr)
 - **Arr Suite (media automation):**
   - [Sonarr](https://hub.docker.com/r/linuxserver/sonarr), [Radarr](https://hub.docker.com/r/linuxserver/radarr), [Prowlarr](https://hub.docker.com/r/linuxserver/prowlarr), [Lidarr](https://hub.docker.com/r/linuxserver/lidarr)

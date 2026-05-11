@@ -1,0 +1,22 @@
+---
+# Shared task file: Add a service entry to Homepage's services.yaml via blockinfile.
+# Included via: ansible.builtin.include_tasks: tasks/homepage_add_service.yaml
+#
+# Required input variables:
+#   _homepage_service_name  — human-readable name for the task label (e.g. "Grafana")
+#   _homepage_marker        — unique blockinfile marker (e.g. "grafana service")
+#   _homepage_template      — template filename in templates/homepage/ (e.g. "grafana_service.yaml.j2")
+#   _homepage_insertafter   — regex for blockinfile insertafter (e.g. "^- Infra:") or "EOF"
+#
+# Output facts:
+#   _homepage_service_result — register result from blockinfile (use .changed to trigger handlers)
+
+- name: "Add {{ _homepage_service_name }} to Homepage services"
+  ansible.builtin.blockinfile:
+    path: "{{ homepage_folder }}/config/services.yaml"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - {{ _homepage_marker }}"
+    block: "{{ lookup('template', playbook_dir + '/templates/homepage/' + _homepage_template) }}"
+    insertafter: "{{ _homepage_insertafter }}"
+    mode: '0644'
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+  register: _homepage_service_result
