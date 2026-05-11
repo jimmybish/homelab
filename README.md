@@ -1,9 +1,9 @@
-## Jimmy's Home Lab
+# Jimmy's Home Lab
 All the self-hosted thangs, mostly controlled by Ansible.
 
 **This is a work in progress - not all deployed apps are via Ansible yet, not all roles are tested, and there's probably smarter ways of doing things. Always learning!**
 
-### GitHub Copilot Agents
+## GitHub Copilot Agents
 
 I use GitHub Copilot with custom agents and reusable skills to manage the homelab.
 
@@ -17,7 +17,9 @@ I use GitHub Copilot with custom agents and reusable skills to manage the homela
 
 **Skills** are step-by-step instructions in [.github/skills](.github/skills) that Copilot loads on demand when a task matches their domain. They encode repeatable patterns — like scaffolding an Ansible role, templating a Docker Compose file, or wiring up a SWAG proxy config — so each deployment follows the same conventions without re-explaining the process. Current skills cover: application research, role scaffolding, Docker deployment tasks, Compose templating, vault secrets, Homepage integration, NGINX/SWAG proxy configs, pfSense DNS management, UFW firewall rules, service health checks, playbook creation/testing, n8n workflow deployment, change logging, and chat room communication formatting.
 
-### Change Logging
+
+
+## Change Logging
 
 All agents are required to log every change they make using the `change-logging` skill. Logs are written to the `changelogs/` directory (gitignored) in a CAB-style change ticket format covering: summary, files changed with before/after values, commands run on remote hosts, and a rollback plan.
 
@@ -25,7 +27,9 @@ All agents are required to log every change they make using the `change-logging`
 - **Automation:** An n8n workflow creates the weekly folder every Sunday at midnight
 - **Scope:** All agents — not just infrastructure ones
 
-**MCP Servers** provide tool access to external services:
+## MCP Servers
+
+I use the following publicly-available MCP servers:
 
 - [Context7](https://context7.com/) — Up-to-date library and framework documentation lookup
 - [Grafana MCP](https://github.com/grafana/mcp-grafana) — Dashboards, Prometheus/Loki queries, alerting, incidents, and on-call management
@@ -33,7 +37,9 @@ All agents are required to log every change they make using the `change-logging`
 - [Playwright MCP](https://github.com/microsoft/playwright-mcp) — Browser automation for UI testing and validation
 - [Chrome DevTools MCP](https://github.com/nicholasgriffintn/chrome-devtools-mcp) — Browser inspection and debugging
 
-**Custom MCP Servers** live in `mcp-server-<name>/` directories at the repo root. Each wraps a homelab service's REST API as MCP tools using Python ([FastMCP](https://github.com/modelcontextprotocol/python-sdk)) and runs as a Docker container deployed via a corresponding Ansible role under `ansible/roles/mcp_<name>/`. Transport is SSE. New servers are created following the `mcp-server-creation` skill.
+### Custom MCP Servers
+
+Used as a means of managing permissions. They only contain functions I allow Plexibot to run, and I block that agent from running terminal commands by not providing the tools to do so. Custom MCP servers live in `mcp-server-<name>/` directories at the repo root. Each wraps a homelab service's REST API as MCP tools using Python ([FastMCP](https://github.com/modelcontextprotocol/python-sdk)) and runs as a Docker container deployed via a corresponding Ansible role under `ansible/roles/mcp_<name>/`. Transport is SSE. New servers are created following the `mcp-server-creation` skill.
 
 | Server | Service | Description |
 |--------|---------|-------------|
@@ -41,7 +47,7 @@ All agents are required to log every change they make using the `change-logging`
 | `mcp-server-sonarr` | Sonarr | TV show library and download management |
 | `mcp-server-tracearr` | Tracearr | Media request tracking and analytics |
 
-### Discord Integration
+## Discord Integration
 
 Two Discord bots interface with the homelab via [n8n](https://n8n.io/) workflows:
 
@@ -49,6 +55,44 @@ Two Discord bots interface with the homelab via [n8n](https://n8n.io/) workflows
 - **Plexibot** — Plex-focused bot using the `--agent plexibot` flag. Responds to @mentions, scoped to Plex/Arr/Tracearr/log queries only.
 
 Both bots use mention-based routing — each only responds when @mentioned directly, and thread replies continue within the same Copilot session. Supporting workflows handle "still thinking" status updates and stale thread cleanup across both channels.
+
+### Examples
+
+Click to expand `Details` and see each screenshot.
+
+#### VirtuaJimmy reacts to a Grafana alert and resolves the issue after seeking confirmation:
+
+<details>
+
+![Discord thread showing Virtuajimmy clearing HDD space in reaction to an alert](images/virtuajimmy-alert.png)
+
+</details>
+
+#### Plexibot assists a user with a playback error:
+
+<details>
+
+![Plexibot assists a user having trouble with a Dolby Vision encoded episode](images/plexibot-assistance.png)
+
+</details>
+
+## Hardware
+- pfSense router (Intel Celeron J4125 Mini PC, 4x 2.5gbe)
+- 2x Intel NUC 12 Pro — Proxmox HA cluster
+- TP-Link Omada (24-port POE switch + APs)
+- QNAP TS-664 NAS + TR-004 (6x 8TB + 4x 4TB, RAID 5)
+
+![image](images/Network-rack.jpg)
+
+## Software
+
+Services run as Docker Compose stacks on VMs and LXC containers across the Proxmox hosts, with a couple of storage-heavy or Coral TPU services on the QNAP NAS.
+
+- Default OS: Ubuntu Server 22.04 for both VMs and LXCs.
+- LXCs built from [community scripts](https://community-scripts.github.io/ProxmoxVE/scripts?id=ubuntu). Jellyfin and Plex are privileged with [hardware acceleration](https://github.com/community-scripts/ProxmoxVE/blob/main/misc/hw-acceleration.sh).
+- VMs built from a cloud-init template.
+- Proxmox vGPUs configured via [this blog post](https://www.derekseaman.com/2024/07/proxmox-ve-8-2-windows-11-vgpu-vt-d-passthrough-with-intel-alder-lake.html).
+- Home Assistant runs the [official HA OS image](https://community-scripts.github.io/ProxmoxVE/scripts?id=haos-vm), not managed by Ansible.
 
 ### Deployed Services
 - Docker
@@ -63,23 +107,6 @@ Both bots use mention-based routing — each only responds when @mentioned direc
 - **Productivity:** [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx), [n8n](https://n8n.io/)
 - **Monitoring:** [Grafana](https://grafana.com/), [Prometheus](https://prometheus.io/), [Loki](https://grafana.com/oss/loki/), [InfluxDB](https://www.influxdata.com/), [Alloy](https://grafana.com/oss/alloy/) (all hosts — collects logs via journald/Docker and metrics via built-in node exporter, pushed to Loki/Prometheus via remote write)
 - **Infrastructure:** [SWAG](https://docs.linuxserver.io/general/swag/) (internal & external reverse proxies)
-
-### Hardware
-- pfSense router (Intel Celeron J4125 Mini PC, 4x 2.5gbe)
-- 2x Intel NUC 12 Pro — Proxmox HA cluster
-- TP-Link Omada (24-port POE switch + APs)
-- QNAP TS-664 NAS + TR-004 (6x 8TB + 4x 4TB, RAID 5)
-
-![image](images/Network-rack.jpg)
-
-### Software
-Services run as Docker Compose stacks on VMs and LXC containers across the Proxmox hosts, with a couple of storage-heavy or Coral TPU services on the QNAP NAS.
-
-- Default OS: Ubuntu Server 22.04 for both VMs and LXCs.
-- LXCs built from [community scripts](https://community-scripts.github.io/ProxmoxVE/scripts?id=ubuntu). Jellyfin and Plex are privileged with [hardware acceleration](https://github.com/community-scripts/ProxmoxVE/blob/main/misc/hw-acceleration.sh).
-- VMs built from a cloud-init template.
-- Proxmox vGPUs configured via [this blog post](https://www.derekseaman.com/2024/07/proxmox-ve-8-2-windows-11-vgpu-vt-d-passthrough-with-intel-alder-lake.html).
-- Home Assistant runs the [official HA OS image](https://community-scripts.github.io/ProxmoxVE/scripts?id=haos-vm), not managed by Ansible.
 
 ### Proxy Structure
 Two linuxserver/SWAG containers — one for external traffic, one for internal. Both use DNS01 verification against Cloudflare for wildcard LetsEncrypt certificates. Currently a single NGINX proxy host serves all services.
