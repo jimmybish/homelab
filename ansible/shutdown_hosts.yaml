@@ -18,6 +18,11 @@
         groups: hosts_list
       with_items: "{{ target_hosts.split(',') }}"
 
+    - name: Silence Grafana alerts before shutdown
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Host shutdown — {{ target_hosts }}"
+
 - name: Stop containers
   hosts: hosts_list
   tasks:

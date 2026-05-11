@@ -1,0 +1,54 @@
+---
+# Shared task file: Create a Grafana alerting silence for maintenance windows.
+# Included via: ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+#
+# Optional input variables:
+#   grafana_silence_comment  — description shown in Grafana UI (default: "Ansible maintenance")
+#
+# Output facts (set on the delegated host — localhost):
+#   grafana_silence_id       — ID used to remove the silence later
+
+- name: Create Grafana maintenance silence
+  ansible.builtin.uri:
+    url: "{{ internal_grafana_url }}/api/alertmanager/grafana/api/v2/silences"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ grafana_api_token }}"
+    validate_certs: false
+    body_format: json
+    body:
+      matchers:
+        - name: alertname
+          value: ".+"
+          isRegex: true
+          isEqual: true
+      startsAt: "{{ '%Y-%m-%dT%H:%M:%S.000Z' | strftime(now().timestamp() | int) }}"
+      endsAt: "{{ '%Y-%m-%dT%H:%M:%S.000Z' | strftime((now().timestamp() | int) + (grafana_silence_duration_minutes | default(30) | int) * 60) }}"
+      createdBy: ansible
+      comment: "{{ grafana_silence_comment | default('Ansible maintenance') }}"
+    status_code: [200, 202]
+  register: _grafana_silence_result
+  delegate_to: localhost
+  become: false
+  ignore_errors: true
+
+- name: Store silence ID for later removal
+  ansible.builtin.set_fact:
+    grafana_silence_id: "{{ _grafana_silence_result.json.silenceID }}"
+  delegate_to: localhost
+  delegate_facts: true
+  become: false
+  when:
+    - _grafana_silence_result is not failed
+    - _grafana_silence_result.json.silenceID is defined
+
+- name: Show silence status
+  ansible.builtin.debug:
+    msg: >-
+      {% if _grafana_silence_result is failed %}
+      Warning: Could not create Grafana silence (Grafana may be unreachable). Continuing without silence.
+      {% else %}
+      Grafana silence created (ID: {{ hostvars['localhost']['grafana_silence_id'] | default('unknown') }}, expires in {{ grafana_silence_duration_minutes | default(30) }} min)
+      {% endif %}
+  delegate_to: localhost
+  become: false

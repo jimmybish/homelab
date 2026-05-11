@@ -2,5 +2,15 @@
 - name: Install Overseerr
   hosts: overseerr_host
   become: true
+  pre_tasks:
+    - name: Silence Grafana alerts
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Deploying Overseerr"
+      when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
   roles:
     - overseerr
+  post_tasks:
+    - name: Remove Grafana alert silence
+      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+      when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))

@@ -1,0 +1,36 @@
+---
+# Shared task file: Remove a Grafana alerting silence after maintenance.
+# Included via: ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+#
+# Requires grafana_silence_id to be set (by grafana_create_silence.yaml).
+# Retries to handle cases where Grafana is still starting (e.g. after deploy_grafana).
+
+- name: Remove Grafana maintenance silence
+  ansible.builtin.uri:
+    url: "{{ internal_grafana_url }}/api/alertmanager/grafana/api/v2/silence/{{ hostvars['localhost']['grafana_silence_id'] }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ grafana_api_token }}"
+    validate_certs: false
+    status_code: [200, 202]
+  register: _grafana_unsilence_result
+  delegate_to: localhost
+  become: false
+  ignore_errors: true
+  retries: 3
+  delay: 10
+  until: _grafana_unsilence_result is not failed
+  when: hostvars['localhost']['grafana_silence_id'] is defined
+
+- name: Show unsilence status
+  ansible.builtin.debug:
+    msg: >-
+      {% if hostvars['localhost']['grafana_silence_id'] is not defined %}
+      No silence to remove (none was created).
+      {% elif _grafana_unsilence_result is failed %}
+      Warning: Could not remove Grafana silence {{ hostvars['localhost']['grafana_silence_id'] }}. It will auto-expire.
+      {% else %}
+      Grafana silence {{ hostvars['localhost']['grafana_silence_id'] }} removed — alerts re-enabled.
+      {% endif %}
+  delegate_to: localhost
+  become: false
