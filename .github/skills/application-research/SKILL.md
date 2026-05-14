@@ -1,6 +1,6 @@
 ---
 name: application-research
-description: 'Use when: researching a new application before deployment, identifying Docker images, finding default ports, locating compose examples, checking LinuxServer reverse-proxy-confs, or documenting application requirements. ALWAYS invoke before defining variables or configuration for a new service.'
+description: 'Use when: researching a new application before deployment, identifying Docker images, finding default ports, locating compose examples, checking LinuxServer reverse-proxy-confs, or documenting application requirements. ALWAYS invoke before defining variables or configuration for any new Docker service or self-hosted application.'
 ---
 
 # Application Research
@@ -16,19 +16,19 @@ description: 'Use when: researching a new application before deployment, identif
 
 ## Research Checklist
 
-### 1. Find Official Documentation
+### 1. Core Sources
 
 - Look for official Docker Hub page (e.g., `https://hub.docker.com/r/<vendor>/<app>`)
 - Check the official project documentation or GitHub repository
 - Review installation guides and deployment examples
 
-### 2. Locate Docker Compose Examples
+### 2. Deployment Examples
 
 - Search for official `docker-compose.yaml` examples
 - Check the project's GitHub repository (often in `/docker/` or `/examples/` directories)
 - Look for community-maintained examples on GitHub or forums
 
-### 3. Identify Default Configuration
+### 3. Runtime Configuration
 
 - **Default ports:** What port(s) does the application listen on?
 - **Volume mounts:** What directories need persistence? (config, data, logs)
@@ -37,21 +37,21 @@ description: 'Use when: researching a new application before deployment, identif
 - **User/permissions:** Does it need specific PUID/PGID settings?
 - **Proxy configuration:** Check `https://github.com/linuxserver/reverse-proxy-confs` for pre-built NGINX configs
 
-### 4. Understand Application Architecture
+### 4. Service Shape
 
 - Is it a single container or multi-container stack?
 - Does it have a web interface?
 - Does it need to communicate with external services?
 - Are there any special networking requirements?
 
-### 5. Review Best Practices
+### 5. Operational Notes
 
 - Security recommendations (authentication, SSL requirements)
 - Performance tuning (memory limits, CPU constraints)
 - Backup requirements (what data needs to be backed up?)
 - Update/upgrade procedures
 
-### 6. Check for Security Vulnerabilities
+### 6. Security Review
 
 - **CVE databases:** Search for known CVEs against the application and its Docker image
   - Search `https://www.cvedetails.com` or `https://nvd.nist.gov` for the application name

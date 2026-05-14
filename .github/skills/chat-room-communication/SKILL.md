@@ -16,9 +16,10 @@ How to write messages for Discord, Slack, Telegram, and similar chat platforms. 
 
 ## Tone and Voice
 
+- Priority: sound like a teammate and get to the point quickly
 - Casual, like talking to a coworker
 - Confident but not stiff
-- Skip greetings like "Hello!" or "Hi there!" unless replying to someone directly
+- Skip greetings like "Hello!" or "Hi there!" unless this is the first message in a one-to-one reply or direct conversation
 - No sign-offs like "Best regards" or "Let me know if you need anything else"
 - Use contractions naturally (don't, can't, it's, we're)
 - First person is fine ("I checked the logs", "looks like it's a DNS issue")
@@ -27,6 +28,7 @@ How to write messages for Discord, Slack, Telegram, and similar chat platforms. 
 
 ## Formatting Rules
 
+- Priority: keep messages easy to scan in a chat window
 - No markdown tables
 - No emdashes (use commas, periods, or parentheses instead)
 - Bullet and numbered lists are ok, but keep items short (one line each ideally)

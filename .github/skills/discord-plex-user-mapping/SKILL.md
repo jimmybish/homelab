@@ -13,6 +13,12 @@ Maps Discord users to their Plex usernames so Plexibot can correlate stream acti
 - Plexibot needs to check who a Discord user is on Plex (e.g., "am I watching anything?")
 - Cross-referencing Tracearr stream data with Discord users
 
+## Priorities
+
+1. Use `discord_user_id` as the primary lookup key.
+2. Preserve exact Plex username spelling and case.
+3. Check whether `user_map.csv` exists before creating or updating it.
+
 ## Data File
 
 **Path:** `/home/jimmy/homelab/.github/skills/discord-plex-user-mapping/user_map.csv`
@@ -40,7 +46,7 @@ callum|518293746102938475|callumski999
 
 ### Creating the File
 
-If the file doesn't exist, create it with the header:
+If the file does not exist when you need it, verify that first and then create it with the header below:
 
 ```bash
 echo 'discord_handle|discord_user_id|plex_username' > /home/jimmy/homelab/.github/skills/discord-plex-user-mapping/user_map.csv

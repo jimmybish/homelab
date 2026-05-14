@@ -1,6 +1,6 @@
 ---
 name: ansible-docker-deployment
-description: 'Use when: writing the main tasks/main.yaml for an Ansible role that deploys a Docker service, setting up Docker prerequisites, creating service directories, deploying docker-compose templates, running docker-compose up, or creating handlers/main.yaml with restart handlers for Docker services, Homepage, or SWAG proxy instances. Covers the standard task ordering and handler patterns for Docker-based Ansible roles.'
+description: 'Use when: writing `tasks/main.yaml` or `handlers/main.yaml` for an Ansible role that deploys a Docker service. Covers the standard task order for Docker prerequisites, directory setup, compose deployment, and the usual restart handlers for the service, Homepage, and SWAG.'
 ---
 
 # Ansible Docker Deployment Tasks
@@ -16,16 +16,16 @@ Standard task sequence for `tasks/main.yaml` in Ansible roles that deploy Docker
 
 ## Task Order
 
-Follow this order in `tasks/main.yaml`:
+Follow this order in `tasks/main.yaml`. Use the linked skill only when you reach that step:
 
 1. Docker Prerequisites
 2. Directory Setup
-3. Firewall Configuration *(use `ufw-firewall-configuration` skill)*
+3. Firewall Configuration *(use `ufw-firewall-configuration`)*
 4. Deploy Configuration Files & Run Compose
-5. Health Check *(use `docker-service-health-checks` skill)*
-6. Proxy Configuration *(use `nginx-swag-proxy-config` skill)*
-7. DNS Configuration *(use shared tasks — see `new-service-runbook.md` Phase 4, step 7)*
-8. Homepage Integration *(use `homepage-dashboard-integration` skill)*
+5. Health Check *(use `docker-service-health-checks`)*
+6. Proxy Configuration *(use `nginx-swag-proxy-config`)*
+7. DNS Configuration *(use the shared DNS tasks from `new-service-runbook.md` when the service needs a hostname)*
+8. Homepage Integration *(use `homepage-dashboard-integration`)*
 
 ## 1. Docker Prerequisites
 
@@ -144,7 +144,7 @@ Every role that deploys a Docker service should include a handler to restart it.
 ### Handler Notes
 
 - **Start/Restart service:** Include in every role. Triggered by compose template changes via `notify`.
-- **Restart Homepage:** Include if the role has Homepage integration (`notify: Restart Homepage` from blockinfile task).
+- **Restart Homepage:** Include if the role updates Homepage config and that task uses `notify: Restart Homepage`, for example a `blockinfile` task that inserts the service entry into Homepage's YAML.
 - **Restart Swag Internal:** Include if the role deploys an internal proxy config. Most web-facing services use this.
 - **Restart Swag External:** Include only if the role deploys an external proxy config (public internet access).
 - Only include the handlers your role actually notifies — omit unused ones.

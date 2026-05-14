@@ -18,7 +18,7 @@ Standard directory structure, variable patterns, and conventions for creating An
 
 Before creating a new role, ensure you understand:
 - The service you're deploying (use the `application-research` skill first)
-- Whether it has a web interface, and if so, whether it should be routed through the reverse proxy (ask the user if not obvious)
+- Whether it has a web interface, and if so, whether it should be routed through the reverse proxy (ask the user if the official documentation or research findings do not make this clear)
 - What DNS aliases are needed
 - Which inventory group(s) will use this role
 
@@ -89,8 +89,8 @@ Use research findings (from the `application-research` skill) to populate accura
 
 ## Decision Points
 
-- **Has web interface?**
-  - **YES** → Set all of: `configure_proxy: true`, `configure_dns: true`, `configure_homepage: true`
-  - Web interface services MUST expose ports and MUST configure internal SWAG proxy
-  - Homepage link is ALWAYS added for web interfaces
-  - All services are accessed via internal network through the SWAG internal proxy
+1. Determine whether the service has a user-facing web interface.
+2. If it does, set all of: `configure_proxy: true`, `configure_dns: true`, `configure_homepage: true`.
+3. For web interface services, expose the required port and configure the internal SWAG proxy.
+4. Add a Homepage entry for every web interface service.
+5. Assume web interface services are accessed on the internal network through the SWAG internal proxy unless the service requirements say otherwise.
