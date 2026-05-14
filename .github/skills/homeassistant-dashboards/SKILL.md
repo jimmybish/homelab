@@ -9,20 +9,26 @@ Patterns and decisions for designing Home Assistant Lovelace dashboards.
 
 ## Table of Contents
 
-- [Dashboard Structure](#dashboard-structure)
-- [View Types](#view-types)
-- [Built-in Cards](#built-in-cards)
-- [Features](#features)
-- [Actions](#actions)
-- [Custom Cards](#custom-cards)
-- [CSS Styling](#css-styling)
-- [HACS Integration](#hacs-integration)
-- [Complete Example: Multi-View Dashboard](#complete-example-multi-view-dashboard)
-- [Common Pitfalls](#common-pitfalls)
-- [Modern Best Practices (2024+)](#modern-best-practices-2024)
-- [Visual Iteration Workflow](#visual-iteration-workflow)
+- Dashboard Structure
+- View Types
+- Built-in Cards
+- Features
+- Actions
+- Custom Cards
+- CSS Styling
+- HACS Integration
+- Complete Example: Multi-View Dashboard
+- Common Pitfalls
+- Modern Best Practices (2024+)
+- Visual Iteration Workflow
 
 ---
+
+## Priorities
+
+1. Start with `sections` views and `tile` cards unless the use case clearly needs something else.
+2. Prefer built-in cards first, then HACS cards, then fully custom cards.
+3. Add CSS or card-mod styling only after the dashboard structure and card choices are working.
 
 ## Dashboard Structure
 
@@ -264,7 +270,7 @@ entities:
 
 ### Finding and Installing Cards
 
-Search HACS for community cards by name/category, review repository details, then install. HACS install operations are destructive — clients will ask for user confirmation.
+Search HACS for community cards by name/category, review repository details, then install. HACS install operations can overwrite or add dashboard resources, so clients should ask for user confirmation before proceeding.
 
 ### Popular HACS Cards
 

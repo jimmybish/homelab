@@ -1,6 +1,6 @@
 ---
 name: mcp-server-creation
-description: 'Use when: creating a new MCP (Model Context Protocol) server to expose a service API as tools for Copilot/LLM consumption. Covers the Python server source, Dockerfile, Ansible role for deployment, client configuration, and agent integration. Follow this skill end-to-end for each new MCP server.'
+description: 'Use when: creating a new MCP (Model Context Protocol) server that exposes a service API as Copilot tools. Covers the Python server source, Dockerfile, Ansible deployment role, client configuration, and agent integration. Follow this skill end-to-end for each new MCP server.'
 ---
 
 # MCP Server Creation
@@ -41,6 +41,7 @@ Before writing any code, fully understand the API you're wrapping:
 - Identify the authentication mechanism (Bearer token, API key header, etc.)
 - Identify the base URL from the homelab network (prefer `localhost:<port>` if on same host)
 - Note which parameters are optional vs required
+- Note expected failure modes for each endpoint, especially `401`, `403`, `404`, `429`, and `5xx`, and decide whether the tool should surface the raw error or add a short explanatory prefix before raising it
 
 ## Step 2: Create the Python MCP Server
 
@@ -97,12 +98,25 @@ if __name__ == "__main__":
 
 ### Tool Design Guidelines
 
+#### Tool shape
+
 - **One tool per API endpoint** — don't combine multiple endpoints into one tool
 - **Return raw JSON as string** — let the LLM interpret the data, don't pre-format
-- **Use `Optional` parameters** — filter `None` values before passing to the API
-- **Write descriptive docstrings** — these are the only thing the LLM sees to decide when to call the tool
-- **Use snake_case for parameters** — even if the API uses camelCase (map in the `_get` call)
+
+#### Parameters
+
+- **Use `Optional` parameters** for optional API inputs
+- **Use snake_case for parameters** — even if the API uses camelCase in requests
 - **Strip None values** before sending to the API: `{k: v for k, v in params.items() if v is not None}`
+
+#### Tool descriptions
+
+- **Write descriptive docstrings** — these are the main cues the LLM uses to decide when to call the tool
+
+#### Failure handling
+
+- Let HTTP errors fail loudly with `resp.raise_for_status()` unless the API needs a clearer message for common cases such as unauthorized or rate-limited requests
+- If you add context, keep it short and preserve the original status code in the raised error
 
 ### `requirements.txt`
 
@@ -150,7 +164,7 @@ Use the standard `ansible-role-scaffolding` and `ansible-docker-deployment` skil
 # Last Updated: <date>
 
 mcp_<service>_version: "latest"
-mcp_<service>_port: <port>  # Pick a free port — check existing roles for conflicts
+mcp_<service>_port: <port>  # Pick an unused port after checking existing role vars and confirming the target host is not already listening on it
 
 # Target API connection
 mcp_<service>_api_base_url: "http://localhost:<target_port>"

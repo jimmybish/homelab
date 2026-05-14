@@ -18,9 +18,11 @@ Patterns for adding services to the Homepage dashboard via Ansible, including te
 
 Create `templates/homepage_service.yaml.j2`:
 
-**Before adding a widget**, check whether the service has a supported Homepage service widget at `https://gethomepage.dev/widgets/`. If no widget exists for the service, omit the `widget` block entirely.
+Template checklist:
 
-**CRITICAL: Use correct YAML indentation (2 spaces for list items, 6 spaces for properties)**
+1. Check whether the service has a supported Homepage widget at `https://gethomepage.dev/widgets/`.
+2. If no widget exists for the service, omit the `widget` block entirely.
+3. Keep the YAML indentation exactly as shown below.
 
 **With widget** (only if listed at `https://gethomepage.dev/widgets/`):
 
@@ -103,7 +105,7 @@ All roles that integrate with Homepage use standardized tags to enable targeted 
 - Modifying Homepage service entries (descriptions, icons, widgets)
 - Troubleshooting Homepage integration issues
 - Re-deploying Homepage after configuration changes
-- Updating all service entries after Homepage template changes
+- Updating every affected service entry after a shared Homepage template change
 
 **Use `--tags homepage_config` when:**
 - Only updating Homepage config files (settings, widgets, bookmarks)

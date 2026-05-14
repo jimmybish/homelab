@@ -16,7 +16,7 @@ How to perform a scheduled Loki sweep across all hosts, work out how to address 
 ## Sweep Methodology
 
 1. Query Loki across all hosts for the last **26 hours** (gives 2h of overlap with the previous daily run so nothing slips between sweeps).
-2. Focus on `level=~"warning|error|critical"` plus any unusual repeating patterns at lower levels.
+2. Focus on `level=~"warning|error|critical"` plus repeating lower-level patterns that occur more than 10 times in the 26-hour window or clearly represent a new recurring issue.
 3. **Apply the ignore list below before counting or reporting anything.** A finding made up entirely of ignored patterns is not a finding.
 4. For each remaining finding, do real investigation, do not just describe the symptom:
    - Identify the source (host, container/unit, stream labels) and a representative log line.
@@ -25,6 +25,14 @@ How to perform a scheduled Loki sweep across all hosts, work out how to address 
      - **Fixable** — describe the concrete change needed (config edit, role update, package upgrade, restart, etc.) and where in the repo it lives.
      - **Not fixable by us** — explain why (upstream bug, third-party SaaS, expected noise) and recommend adding it to the ignore list in this skill, including the exact stream selector and substring/regex to match.
 5. Do **not** recommend Grafana alert rules in the report. The point of the sweep is to drive the noise down, not to alert on it.
+
+## Sweep Constraints
+
+- Apply the ignore list before counting, ranking, or writing findings.
+- Investigate the source and root cause, not just the visible symptom.
+- Prefer a concrete fix when it is under our control.
+- If it is not under our control, recommend an ignore-list addition with exact matching details.
+- Do not recommend Grafana alert rules in the report.
 
 ## Report Output
 

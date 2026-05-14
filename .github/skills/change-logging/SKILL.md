@@ -1,6 +1,6 @@
 ---
 name: change-logging
-description: 'Use when: completing any task that modifies files, runs commands on remote hosts, or changes configuration. ALWAYS log changes at the end of a task. This skill is mandatory — never skip it when changes have been made.'
+description: 'Use when: completing any task that modifies files, runs commands on remote hosts, or changes configuration. Log changes at the end of a task unless the task was only read-only queries, searches, or informational lookups. This skill is mandatory when changes have been made.'
 ---
 
 # Change Logging
@@ -30,6 +30,13 @@ The week folder uses the most recent Sunday. In a terminal:
 ```bash
 date -d "last sunday" +%Y-%m-%d  # or today's date if it IS Sunday
 ```
+
+## File Handling Rules
+
+- Use one log file per day: `log_YYMMDD.md`
+- If the week folder does not exist, create it first
+- If the log file already exists, append the new entry to the bottom
+- Separate multiple entries in the same file with `---`
 
 ## Log Entry Format
 
@@ -71,12 +78,10 @@ Examples of good rollback plans:
 - "No rollback needed — this was a new file addition with no side effects"
 ```
 
-## Rules
+## Entry Rules
 
-1. **Write to disk only** — do not git add, commit, or push the changelog
-2. **One file per day** — all entries for the same day go in the same `log_YYMMDD.md` file
-3. **Append, don't overwrite** — if the file exists, add `---` then the new entry at the bottom
-4. **Be specific** — list actual file paths, actual values changed, actual commands run. Don't be vague
-5. **Include before/after** — when changing a value, note what it was and what it became
-6. **Summarise, don't dump** — for large diffs, summarise the key changes rather than pasting entire files
-7. **Always include rollback** — even if it's "N/A", the section must be present
+- **Write to disk only** — do not git add, commit, or push the changelog
+- **Be specific** — list actual file paths, actual values changed, and actual commands run
+- **Include before/after** — when changing a value, note what it was and what it became
+- **Summarise, don't dump** — for large diffs, summarise the key changes rather than pasting entire files
+- **Always include rollback** — even if it's "N/A", the section must be present

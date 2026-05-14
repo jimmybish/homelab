@@ -83,9 +83,15 @@ networks:
 
 ## Best Practices
 
-- **Single containers:** Default Docker network is sufficient, no explicit network needed
-- **Multi-container stacks:** MUST define an explicit Docker network for isolation
-- **ALWAYS expose ports if service has a web interface** (required for proxy access)
-- For multi-container stacks, use internal container names (e.g., `http://postgres:5432`) for inter-service communication
+### Single-Container Templates
+
+- Default Docker bridge networking is usually sufficient
+- Expose ports when the service provides an HTTP-based interface that users or the reverse proxy must reach
+- Backend-only services with no user-facing HTTP interface can skip port exposure
+
+### Multi-Container Templates
+
+- Define an explicit Docker network for stack isolation
+- Use internal container names for inter-service communication, for example `http://postgres:5432`
 - Use `depends_on` to define container startup order
-- Only backend services without web interfaces can skip port exposure
+- Only expose ports for the container that users or the reverse proxy need to reach

@@ -1,6 +1,6 @@
 ---
 name: ansible-vault-secrets
-description: 'Use when: encrypting secrets with Ansible Vault, adding vault-encrypted variables to group_vars, or managing sensitive configuration values like API keys, passwords, or tokens for service deployments.'
+description: 'Use when: encrypting secrets with Ansible Vault, adding vault-encrypted variables to group_vars, or managing sensitive configuration values within Ansible Vault for service deployments.'
 ---
 
 # Ansible Vault Secrets Management
@@ -37,6 +37,7 @@ homepage_<service>_key: !vault |
 ## Notes
 
 - The vault password file is located at `~/ansible_key`
+- If `~/ansible_key` is missing or unreadable, stop and tell the user before continuing; do not guess an alternative password file path
 - All playbooks that use vault secrets must include `--vault-password-file ~/ansible_key`
 - Never commit plain-text credentials — always use `ansible-vault encrypt_string`
 - Vault-encrypted values are safe to commit to version control

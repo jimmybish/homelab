@@ -16,6 +16,11 @@ Ansible task pattern for verifying that a Docker service is running and its port
 ## Task Pattern
 
 ```yaml
+- name: Bring containers up
+  community.docker.docker_compose_v2:
+    project_src: "{{ <service>_folder }}"
+    state: present
+
 - name: Check if service ports are open and listening
   community.general.listen_ports_facts:
 
@@ -29,7 +34,8 @@ Ansible task pattern for verifying that a Docker service is running and its port
 
 ## Notes
 
-- Place this after the `docker_compose_v2` task that brings containers up
+- Place this after the `community.docker.docker_compose_v2` task in `tasks/main.yaml` that starts the service containers
 - For multi-port services, add each port to the `that` list as a separate assertion
+- For services with dynamic or ephemeral ports, determine the actual bound port first and store it in a variable before asserting
 - Uses the `community.general.listen_ports_facts` module to gather TCP/UDP listening ports
 - The assertion will fail the playbook if the service didn't start correctly

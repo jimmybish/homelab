@@ -28,6 +28,12 @@
     state: absent
   register: pve_nosub_removed
 
+- name: Remove old pve-enterprise.sources (deb822)
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve-enterprise.sources
+    state: absent
+  register: pve_enterprise_sources_removed
+
 - name: Configure PVE no-subscription repository (deb822)
   ansible.builtin.copy:
     dest: /etc/apt/sources.list.d/proxmox.sources
@@ -45,7 +51,7 @@
 - name: Update apt cache after repo changes
   ansible.builtin.apt:
     update_cache: true
-  when: pve_enterprise_removed.changed or pve_nosub_removed.changed or pve_repo.changed
+  when: pve_enterprise_removed.changed or pve_nosub_removed.changed or pve_enterprise_sources_removed.changed or pve_repo.changed
 
 # OS hardening and configuration (safe for Proxmox)
 - name: Ensure fail2ban is installed
