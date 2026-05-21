@@ -146,7 +146,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const item = $('Filter Bots').item.json;\nconst content = item.content || '';\nconst authorName = item.authorName || item.authorUsername || 'unknown';\nconst authorId = item.authorId || 'unknown';\nconst prompt = content + '\\n\\n[Discord user: ' + authorName + ', Discord user ID: ' + authorId + ']\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+        "jsCode": "const item = $('Filter Bots').item.json;\nconst content = item.content || '';\nconst authorName = item.authorName || item.authorUsername || 'unknown';\nconst authorId = item.authorId || 'unknown';\nconst prompt = content + '\\n\\n[Discord user: ' + authorName + ', Discord user ID: ' + authorId + ']\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst slug = (content.toLowerCase().replace(/<@[!&]?\\d+>/g, '').replace(/[^a-z0-9\\s-]/g, '').trim().split(/\\s+/).filter(Boolean).slice(0, 5).join('-').substring(0, 40)) || 'query';\nconst suffix = Math.random().toString(16).substring(2, 8);\nconst sessionName = slug + '-' + suffix;\nreturn [{ json: { safeContent, sessionName } }];"
       },
       "id": "prepare-new-prompt-plexibot",
       "name": "Prepare New Prompt",
@@ -156,7 +156,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent plexibot --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent plexibot --name=\"{{ '{{' }} $json.sessionName {{ '}}' }}\" -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
       },
       "id": "exec-copilot-new-plexibot",
       "name": "Run Copilot New",
@@ -193,7 +193,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ '{{' }} JSON.stringify({name: 'plexibot-' + $json.sessionId, auto_archive_duration: 1440}) {{ '}}' }}",
+        "jsonBody": "={{ '{{' }} JSON.stringify({name: 'plexibot-' + $('Prepare New Prompt').item.json.sessionName, auto_archive_duration: 1440}) {{ '}}' }}",
         "options": {}
       },
       "id": "create-thread-plexibot",
@@ -301,7 +301,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent plexibot --resume={{ '{{' }} $json.name {{ '}}' }} -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent plexibot --resume=\"{{ '{{' }} $json.name {{ '}}' }}\" -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
       },
       "id": "exec-copilot-resume-plexibot",
       "name": "Run Copilot Resume",
