@@ -241,7 +241,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+        "jsCode": "const content = $('Filter Bots').item.json.content || '';\nconst prompt = content + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst slug = (content.toLowerCase().replace(/<@[!&]?\\d+>/g, '').replace(/[^a-z0-9\\s-]/g, '').trim().split(/\\s+/).filter(Boolean).slice(0, 5).join('-').substring(0, 40)) || 'query';\nconst suffix = Math.random().toString(16).substring(2, 8);\nconst sessionName = slug + '-' + suffix;\nreturn [{ json: { safeContent, sessionName } }];"
       },
       "id": "prepare-new-prompt-1",
       "name": "Prepare New Prompt",
@@ -251,7 +251,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent virtuajimmy --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent virtuajimmy --name=\"{{ '{{' }} $json.sessionName {{ '}}' }}\" -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
       },
       "id": "exec-copilot-new-1",
       "name": "Run Copilot New",
@@ -288,7 +288,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ '{{' }} JSON.stringify({name: 'virtuajimmy-' + $json.sessionId, auto_archive_duration: 1440}) {{ '}}' }}",
+        "jsonBody": "={{ '{{' }} JSON.stringify({name: 'virtuajimmy-' + $('Prepare New Prompt').item.json.sessionName, auto_archive_duration: 1440}) {{ '}}' }}",
         "options": {}
       },
       "id": "create-thread-1",
@@ -427,7 +427,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const messages = $('Fetch Thread History').all().map(i => i.json);\nconst sorted = messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));\nconst transcript = sorted.map(m => (m.author?.bot ? m.author.username : m.author?.username || 'unknown') + ': ' + (m.content || '(empty)')).join('\\n');\nconst userContent = $('Filter Bots').item.json.content || '';\nconst prompt = '[Thread history for context:]\\n' + transcript + '\\n\\n[New message from user:]\\n' + userContent + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { safeContent } }];"
+        "jsCode": "const messages = $('Fetch Thread History').all().map(i => i.json);\nconst sorted = messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));\nconst transcript = sorted.map(m => (m.author?.bot ? m.author.username : m.author?.username || 'unknown') + ': ' + (m.content || '(empty)')).join('\\n');\nconst userContent = $('Filter Bots').item.json.content || '';\nconst prompt = '[Thread history for context:]\\n' + transcript + '\\n\\n[New message from user:]\\n' + userContent + '\\n\\n[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]';\nconst safeContent = Buffer.from(prompt).toString('base64');\nconst slug = (userContent.toLowerCase().replace(/<@[!&]?\\d+>/g, '').replace(/[^a-z0-9\\s-]/g, '').trim().split(/\\s+/).filter(Boolean).slice(0, 5).join('-').substring(0, 40)) || 'handoff';\nconst suffix = Math.random().toString(16).substring(2, 8);\nconst sessionName = 'handoff-' + slug + '-' + suffix;\nreturn [{ json: { safeContent, sessionName } }];"
       },
       "id": "prepare-handoff-prompt-1",
       "name": "Prepare Handoff Prompt",
@@ -437,7 +437,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent virtuajimmy --resume=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent virtuajimmy --name=\"{{ '{{' }} $json.sessionName {{ '}}' }}\" -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
       },
       "id": "exec-copilot-handoff-1",
       "name": "Run Copilot Handoff",
@@ -495,7 +495,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent virtuajimmy --resume={{ '{{' }} $json.name {{ '}}' }} -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent virtuajimmy --resume=\"{{ '{{' }} $json.name {{ '}}' }}\" -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
       },
       "id": "exec-copilot-resume-1",
       "name": "Run Copilot Resume",
