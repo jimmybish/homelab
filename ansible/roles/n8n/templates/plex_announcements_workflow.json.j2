@@ -1,0 +1,177 @@
+{
+  "name": "Plex Library Announcements",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "{{ n8n_plex_webhook_path }}",
+        "responseMode": "onReceived",
+        "options": {
+          "binaryData": true
+        }
+      },
+      "id": "webhook-trigger-1",
+      "name": "Plex Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "plex-library-new"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst body = item.json.body || {};\nlet payloadStr = '';\nif (typeof body.payload === 'string') {\n  payloadStr = body.payload;\n} else if (body.payload) {\n  payloadStr = JSON.stringify(body.payload);\n} else if (item.binary && item.binary.payload) {\n  const buf = await this.helpers.getBinaryDataBuffer(0, 'payload');\n  payloadStr = buf.toString('utf8');\n}\nlet payload = {};\ntry { payload = JSON.parse(payloadStr); } catch (e) {}\nconst event = payload.event || '';\nconst meta = payload.Metadata || {};\nconst type = meta.type || '';\n\nlet itemType = 'skip';\nif (event === 'library.new') {\n  if (type === 'movie' || type === 'show' || type === 'season' || type === 'episode') {\n    itemType = type;\n  }\n}\n\nconst title = meta.title || 'Unknown';\nconst year = meta.year ? ' (' + meta.year + ')' : '';\nconst rawSummary = meta.summary || '';\nconst summary = rawSummary.length > 500 ? rawSummary.substring(0, 500) + '...' : rawSummary;\nconst showTitle = meta.grandparentTitle || '';\nconst seasonNum = meta.parentIndex;\nconst epNum = meta.index;\n\nlet embedTitle = '';\nlet description = summary;\nlet color = 15048717;\nlet content = '';\n\nif (itemType === 'movie') {\n  embedTitle = '\ud83c\udfac New Movie: ' + title + year;\n  color = 15048717;\n} else if (itemType === 'show') {\n  embedTitle = '\ud83d\udcfa New Show: ' + title + year;\n  color = 2074957;\n} else if (itemType === 'season') {\n  const showPart = showTitle ? showTitle + ' \u2014 ' : '';\n  embedTitle = '\ud83c\udf9e\ufe0f New Season: ' + showPart + title;\n  color = 10181046;\n} else if (itemType === 'episode') {\n  const sxe = (seasonNum != null && epNum != null)\n    ? 'S' + String(seasonNum).padStart(2, '0') + 'E' + String(epNum).padStart(2, '0')\n    : '';\n  const showPart = showTitle || 'Unknown Show';\n  const sxePart = sxe ? ' ' + sxe : '';\n  content = '\ud83d\udcfc **New Episode**: ' + showPart + sxePart + ' \u2014 ' + title;\n  if (content.length > 1900) content = content.substring(0, 1900);\n}\n\nconst hasThumb = !!(item.binary && item.binary.thumb);\nif (hasThumb) {\n  item.binary.thumb.fileName = 'poster.jpg';\n  if (!item.binary.thumb.mimeType) item.binary.thumb.mimeType = 'image/jpeg';\n}\n\nconst embed = { color: color };\nif (embedTitle) embed.title = embedTitle;\nif (description) embed.description = description;\nif (hasThumb && itemType !== 'episode' && itemType !== 'skip') {\n  embed.image = { url: 'attachment://poster.jpg' };\n}\n\nitem.json.itemType = itemType;\nitem.json.content = content;\nitem.json.hasThumb = hasThumb;\nitem.json.payload_json = JSON.stringify({ embeds: [embed] });\n\nreturn [item];"
+      },
+      "id": "parse-payload-1",
+      "name": "Parse Plex Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "filter-skip",
+              "leftValue": "={{ '{{' }} $json.itemType {{ '}}' }}",
+              "rightValue": "skip",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-valid-1",
+      "name": "Skip Non-Library Events",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-episode",
+              "leftValue": "={{ '{{' }} $json.itemType {{ '}}' }}",
+              "rightValue": "episode",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "route-episode-1",
+      "name": "Episode or Artwork",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_plex_channel_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_plexibot_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.content}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "post-episode-1",
+      "name": "Post Episode (Text)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_plex_channel_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_plexibot_discord_bot_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "payload_json",
+              "value": "={{ '{{' }} $json.payload_json {{ '}}' }}"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "files[0]",
+              "inputDataFieldName": "thumb"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "post-artwork-1",
+      "name": "Post With Artwork",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 400]
+    }
+  ],
+  "connections": {
+    "Plex Webhook": {
+      "main": [[{"node": "Parse Plex Payload", "type": "main", "index": 0}]]
+    },
+    "Parse Plex Payload": {
+      "main": [[{"node": "Skip Non-Library Events", "type": "main", "index": 0}]]
+    },
+    "Skip Non-Library Events": {
+      "main": [
+        [{"node": "Episode or Artwork", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Episode or Artwork": {
+      "main": [
+        [{"node": "Post Episode (Text)", "type": "main", "index": 0}],
+        [{"node": "Post With Artwork", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

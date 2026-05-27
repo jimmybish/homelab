@@ -69,18 +69,10 @@ Keep each finding tight. Prose is fine, no tables.
 
 ## Ignore List (Known Benign Patterns)
 
-These are log patterns confirmed to be noise. Do not include them in reports, do not propose fixes for them, and do not count them when assessing severity of nearby findings.
-
-| Source | Pattern | Why it's safe to ignore |
-|---|---|---|
-| `container_name="addon_core_matter_server"` | `CHIP_ERROR [chip.native.DIS] Failed to parse mDNS query` / `Failed to parse mDNS query` | Upstream CHIP SDK minimal-mDNS resolver logs `CHIP_ERROR` for any unparseable mDNS packet on `224.0.0.251:5353`, including normal Bonjour/AirPlay/Chromecast/HomeKit/Sonos/printer announcements. Matter functionality unaffected. Tracked in `project-chip/connectedhomeip#27425`. |
-| `container_name="addon_d5369777_music_assistant"` | `aiosonos.api` `playbackError` `ERROR_LOST_CONNECTION` (typically `serviceId: 303` / Sonos Radio) | Sonos Radio ad streams routinely drop the connection mid-play and the Sonos group auto-recovers to the next track. Logged by `aiosonos` as a player-reported error but not actionable from our side, it's an upstream Sonos Radio ad-insertion issue. Safe to ignore unless it correlates with actual playback outages reported by users. |
-| `container_name="hassio_supervisor"` | `[supervisor.addons.validate]` lines containing `deprecated` (e.g. `App config 'arch' uses deprecated values [...]` or `uses deprecated 'codenotary' field`) | Supervisor emits these at WARNING level on every addon load for third-party HA addons (Overseerr, MQTT IO, Folding@home, Google Drive Backup, Everything Presence Zone Configurator, etc.) that haven't dropped legacy `arch` values or the removed `codenotary` field. Loki tags the stream `level=error` but the log line itself is WARNING and addon functionality is unaffected. Nothing we can fix, it's on upstream addon maintainers. |
-
-When adding a new entry: include the stream selector, the substring/regex to match, and a one-line justification with a link to the upstream issue or the changelog entry that established it as benign.
+The full list of known-benign patterns lives in [ignore-list.md](ignore-list.md) alongside this skill. Read it at the start of every sweep and apply it before counting, ranking, or reporting findings.
 
 ## Maintenance
 
-- When a finding is determined to be unfixable, add it to the ignore list above in the same task that produced the report so the next sweep doesn't re-report it.
-- Patterns should be removed from the ignore list if the underlying cause is later fixed upstream and the noise stops.
+- When a finding is determined to be unfixable, add it to [ignore-list.md](ignore-list.md) in the same task that produced the report so the next sweep doesn't re-report it.
+- Remove patterns from [ignore-list.md](ignore-list.md) if the underlying cause is later fixed upstream and the noise stops.
 - The `log-sweeps/` folder is local-only and must remain in `.gitignore`.

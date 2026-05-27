@@ -22,3 +22,6 @@ changelogs/
 
 # Loki sweep reports (local-only, may contain sensitive log data)
 log-sweeps/
+
+# Loki sweep ignore list (may reference internal hosts/IPs)
+.github/skills/loki-scheduled-sweep/ignore-list.md
