@@ -230,6 +230,7 @@ n8n_copilot_ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAub6oGoC8jyPvbRJYD
 n8n_copilot_mgmt_host: "{{ groups['mgmt_hosts'][0] }}.{{ internal_domain }}"
 n8n_copilot_mgmt_user: "jimmy"
 n8n_grafana_webhook_path: "grafana-alerts"
+n8n_plex_webhook_path: "plex-library-new"
 grafana_webhook_secret: !vault |
           $ANSIBLE_VAULT;1.1;AES256
           62376234623963613437343566333938306235356535396238393661346532343430653738373066

@@ -145,5 +145,59 @@ async def trigger_series_search(series_id: int) -> str:
     return await _post("/command", {"name": "SeriesSearch", "seriesId": series_id})
 
 
+@mcp.tool()
+async def list_quality_profiles() -> str:
+    """List all quality profiles configured in Sonarr. Returns id and name for each profile. Use the 'id' field as quality_profile_id when calling add_series."""
+    return await _get("/qualityprofile")
+
+
+@mcp.tool()
+async def list_root_folders() -> str:
+    """List all root folders configured in Sonarr (e.g. /tv). Returns id, path, and freeSpace. Use the 'path' field as root_folder_path when calling add_series."""
+    return await _get("/rootfolder")
+
+
+@mcp.tool()
+async def add_series(
+    tvdb_id: int,
+    quality_profile_id: Optional[int] = None,
+    root_folder_path: Optional[str] = None,
+    monitor: Optional[str] = "all",
+    season_folder: Optional[bool] = True,
+    search_for_missing_episodes: Optional[bool] = True,
+    search_for_cutoff_unmet_episodes: Optional[bool] = False,
+) -> str:
+    """Add a new TV series to Sonarr by TVDB id. The lookup payload is fetched automatically (title, year, images, seasons). If quality_profile_id or root_folder_path are omitted, the first configured one is used. monitor controls which episodes are monitored: 'all', 'future', 'missing', 'existing', 'pilot', 'firstSeason', 'lastSeason', 'none'. Set search_for_missing_episodes=true to kick off a search immediately after adding. Use get_series (with a title) first to find the tvdbId, or list_quality_profiles / list_root_folders to pick specific values."""
+    lookup_raw = await _get("/series/lookup", {"term": f"tvdb:{tvdb_id}"})
+    lookup = json.loads(lookup_raw)
+    if not lookup:
+        return json.dumps({"error": f"No series found for tvdbId {tvdb_id}"}, indent=2)
+    series = lookup[0]
+
+    if quality_profile_id is None:
+        profiles = json.loads(await _get("/qualityprofile"))
+        if not profiles:
+            return json.dumps({"error": "No quality profiles configured in Sonarr"}, indent=2)
+        quality_profile_id = profiles[0]["id"]
+
+    if root_folder_path is None:
+        folders = json.loads(await _get("/rootfolder"))
+        if not folders:
+            return json.dumps({"error": "No root folders configured in Sonarr"}, indent=2)
+        root_folder_path = folders[0]["path"]
+
+    series["qualityProfileId"] = quality_profile_id
+    series["rootFolderPath"] = root_folder_path
+    series["monitored"] = True
+    series["seasonFolder"] = season_folder
+    series["addOptions"] = {
+        "monitor": monitor,
+        "searchForMissingEpisodes": search_for_missing_episodes,
+        "searchForCutoffUnmetEpisodes": search_for_cutoff_unmet_episodes,
+    }
+
+    return await _post("/series", series)
+
+
 if __name__ == "__main__":
     mcp.run(transport="sse")

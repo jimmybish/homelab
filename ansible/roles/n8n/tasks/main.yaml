@@ -490,6 +490,9 @@
     - name: "CVE Monitor"
       template: "templates/cve_monitor_workflow.json.j2"
       active: true
+    - name: "Plex Library Announcements"
+      template: "templates/plex_announcements_workflow.json.j2"
+      active: true
   loop_control:
     loop_var: workflow
 
@@ -524,3 +527,4 @@
     - "Create Weekly Changelog Folder"
     - "Log Monitor"
     - "CVE Monitor"
+    - "Plex Library Announcements"
