@@ -10,14 +10,6 @@
     state: started
     enabled: true
 
-- name: Setup Jellyfin stack parent directory
-  ansible.builtin.file:
-    path: "{{ jellyfin_parent_folder }}"
-    state: directory
-    mode: '0755'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-
 - name: Setup Jellyfin directory
   ansible.builtin.file:
     path: "{{ jellyfin_folder }}/config"
@@ -54,7 +46,7 @@
 - name: Deploy Jellyfin using Docker Compose
   ansible.builtin.template:
     src: "templates/docker_compose.yaml.j2"
-    dest: "{{ jellyfin_parent_folder }}/docker-compose.yaml"
+    dest: "{{ jellyfin_folder }}/docker-compose.yaml"
     mode: '0755'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
@@ -64,7 +56,7 @@
 
 - name: Run Jellyfin docker-compose up
   community.docker.docker_compose_v2:
-    project_src: "{{ jellyfin_parent_folder }}"
+    project_src: "{{ jellyfin_folder }}"
     state: present
     remove_orphans: true
 

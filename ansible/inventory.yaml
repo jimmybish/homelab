@@ -36,6 +36,7 @@ ubuntu:
     docker-1:
     docker-2:
     jellyfin-lxc:
+    plex-lxc:
     proxy:
 
 # Docker VM hosts (non-LXC) - used for cAdvisor scraping
@@ -55,7 +56,7 @@ docker_vm_hosts:
 # Plex Media Server
 plex_host:
   hosts:
-    jellyfin-lxc:
+    plex-lxc:
 
 # Jellyseerr
 jellyseerr_host:
