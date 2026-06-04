@@ -9,7 +9,7 @@ services:
       - PGID={{ docker_user_pgid }}
       - VERSION=docker
     volumes:
-      - {{ plex_folder }}:/config
+      - ./config:/config
       - mytv:/tv
       - mymovies:/movies
     devices:
