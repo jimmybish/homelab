@@ -12,8 +12,7 @@ plex_version: "latest"
 plex_port: 32400  # Plex main web interface (uses host networking)
 
 # Volume paths
-plex_parent_folder: "{{ docker_storage_folder }}/plex-stack"
-plex_folder: "{{ plex_parent_folder }}/plex"
+plex_folder: "{{ docker_storage_folder }}/plex"
 
 # Feature flags
 plex_configure_dns: true

@@ -10,14 +10,6 @@
     state: started
     enabled: true
 
-- name: Create parent directory for Plex stack
-  ansible.builtin.file:
-    path: "{{ plex_parent_folder }}"
-    state: directory
-    mode: '0755'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-
 - name: Setup Plex directory
   ansible.builtin.file:
     path: "{{ plex_folder }}/config"
@@ -100,7 +92,7 @@
 - name: Deploy Plex using Docker Compose
   ansible.builtin.template:
     src: "templates/docker_compose.yaml.j2"
-    dest: "{{ plex_parent_folder }}/docker-compose.yaml"
+    dest: "{{ plex_folder }}/docker-compose.yaml"
     mode: '0644'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
@@ -110,7 +102,7 @@
 
 - name: Run Plex docker-compose up
   community.docker.docker_compose_v2:
-    project_src: "{{ plex_parent_folder }}"
+    project_src: "{{ plex_folder }}"
     state: present
     remove_orphans: true
 
