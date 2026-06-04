@@ -1,7 +1,7 @@
 ---
 - name: Start Jellyfin
   community.docker.docker_compose_v2:
-    project_src: "{{ jellyfin_parent_folder }}"
+    project_src: "{{ jellyfin_folder }}"
     state: restarted
     remove_orphans: true
 

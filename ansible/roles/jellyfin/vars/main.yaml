@@ -13,9 +13,8 @@ jellyfin_https_port: 8920
 jellyfin_udp_port1: 7359
 jellyfin_udp_port2: 1900
 
-# Volume paths - Keep -stack folder for future expansion
-jellyfin_parent_folder: "{{ docker_storage_folder }}/jellyfin-stack"
-jellyfin_folder: "{{ jellyfin_parent_folder }}/jellyfin"
+# Volume paths
+jellyfin_folder: "{{ docker_storage_folder }}/jellyfin"
 
 # Feature flags
 jellyfin_configure_dns: true
