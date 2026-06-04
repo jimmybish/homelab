@@ -22,8 +22,8 @@ scrape_configs:
 {% endif %}
 {% endfor %}
   - job_name: 'snmp_qnap'
-    scrape_interval: 2m
-    scrape_timeout: 2m
+    scrape_interval: 5m
+    scrape_timeout: 4m
     static_configs:
 {% for snmp_target in grafana_snmp_targets %}
       - targets:
@@ -43,8 +43,8 @@ scrape_configs:
       - target_label: __address__
         replacement: snmp-exporter:9116
   - job_name: 'snmp_qnap_long'
-    scrape_interval: 5m
-    scrape_timeout: 2m
+    scrape_interval: 10m
+    scrape_timeout: 4m
     static_configs:
 {% for snmp_target in grafana_snmp_targets %}
       - targets:
