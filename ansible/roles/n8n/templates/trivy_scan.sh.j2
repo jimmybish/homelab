@@ -3,7 +3,7 @@
 # Deployed by Ansible, invoked by n8n CVE Monitor workflow
 set -euo pipefail
 
-HOSTS=({% for host in trivy_scan_hosts %}"{{ host }}" {% endfor %})
+HOSTS=({% for host in n8n_trivy_scan_hosts %}"{{ host }}" {% endfor %})
 SEVERITY="HIGH,CRITICAL"
 TMPDIR=$(mktemp -d)
 FINDINGS_FILE="$TMPDIR/findings.json"

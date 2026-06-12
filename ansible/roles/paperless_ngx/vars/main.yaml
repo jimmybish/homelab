@@ -7,19 +7,19 @@
 # - Gotenberg (document conversion): https://gotenberg.dev/
 # - Apache Tika (text extraction): https://tika.apache.org/
 
-paperless_version: "latest"
-redis_version: "7"
-postgres_version: "16"
-gotenberg_version: "8.7"
-tika_version: "latest"
+paperless_ngx_version: "latest"
+paperless_ngx_redis_version: "7"
+paperless_ngx_postgres_version: "16"
+paperless_ngx_gotenberg_version: "8.7"
+paperless_ngx_tika_version: "latest"
 
 # External port
-paperless_port: 8000
+paperless_ngx_port: 8000
 
 # Volume paths
-paperless_folder: "{{ docker_storage_folder }}/paperless"
+paperless_ngx_folder: "{{ docker_storage_folder }}/paperless"
 
 # Feature flags
-paperless_configure_dns: true
-paperless_configure_proxy: true
-paperless_configure_homepage: true
+paperless_ngx_configure_dns: true
+paperless_ngx_configure_proxy: true
+paperless_ngx_configure_homepage: true

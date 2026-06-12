@@ -9,7 +9,7 @@
         grafana_silence_comment: "Deploying Paperless"
       when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
   roles:
-    - paperless-ngx
+    - paperless_ngx
   post_tasks:
     - name: Remove Grafana alert silence
       ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml

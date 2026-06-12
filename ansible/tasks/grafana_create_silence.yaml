@@ -48,7 +48,9 @@
       {% if _grafana_silence_result is failed %}
       Warning: Could not create Grafana silence (Grafana may be unreachable). Continuing without silence.
       {% else %}
-      Grafana silence created (ID: {{ hostvars['localhost']['grafana_silence_id'] | default('unknown') }}, expires in {{ grafana_silence_duration_minutes | default(30) }} min)
+      Grafana silence created (ID:
+      {{ hostvars['localhost']['grafana_silence_id'] | default('unknown') }},
+      expires in {{ grafana_silence_duration_minutes | default(30) }} min)
       {% endif %}
   delegate_to: localhost
   become: false
