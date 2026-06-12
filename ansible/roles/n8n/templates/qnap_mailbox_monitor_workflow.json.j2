@@ -1,0 +1,179 @@
+{
+  "name": "QNAP Mailbox Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "mailbox": "INBOX",
+        "postProcessAction": "read",
+        "format": "simple",
+        "options": {
+          "customEmailConfig": "[\"UNSEEN\"]",
+          "forceReconnect": 1,
+          "trackLastMessageId": true
+        }
+      },
+      "id": "imap-trigger-1",
+      "name": "QNAP Mail Trigger",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [200, 280],
+      "credentials": {
+        "imap": {
+          "id": "{{ qnap_imap_credential_id }}",
+          "name": "QNAP Mailbox IMAP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst email = item.json || {};\nconst subject = email.subject || '(no subject)';\nconst from = email.from || 'unknown sender';\nconst to = email.to || '{{ n8n_qnap_mailbox_address }}';\nconst date = email.date || '';\nconst body = (email.textPlain || email.textHtml || '').toString().trim();\nconst trimmedBody = body.length > 6000 ? body.substring(0, 6000) + '...' : body;\n\nconst prompt = [\n  'You are reviewing an unread alert email from the QNAP/fileserver mailbox.',\n  '',\n  `Mailbox: ${to}`,\n  `From: ${from}`,\n  `Subject: ${subject}`,\n  `Date: ${date}`,\n  '',\n  'Email body:',\n  trimmedBody || '(empty body)',\n  '',\n  'Summarize this email for Discord operators:',\n  '1. One-line summary of the issue.',\n  '2. Impact and urgency.',\n  '3. Key evidence/details.',\n  '4. Recommended next action.',\n  '',\n  '[IMPORTANT: Keep your reply under 1800 characters. Be concise.]',\n  '[Your reply will be posted to Discord. Use the chat-room-communication skill for formatting.]'\n].join('\\n');\n\nconst safeContent = Buffer.from(prompt).toString('base64');\nreturn [{ json: { subject, from, date, safeContent } }];"
+      },
+      "id": "prepare-copilot-prompt-1",
+      "name": "Prepare Copilot Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 280]
+    },
+    {
+      "parameters": {
+        "command": "=ssh mgmt 'export PATH=$HOME/.local/bin:$PATH && cd /home/jimmy/homelab && {{ n8n_copilot_path }} --agent virtuajimmy --session-id=$(uuidgen) -p \"$(echo {{ '{{' }} $json.safeContent {{ '}}' }} | base64 -d)\" --output-format json --allow-all-tools --no-ask-user --model claude-opus-4.7 2>/dev/null | grep -e assistant.message -e sessionId'"
+      },
+      "id": "exec-copilot-1",
+      "name": "Run VirtuaJimmy",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [680, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst lines = stdout.split('\\n').filter((line) => line.trim());\nlet responseText = '';\nlet lastBlock = '';\nlet sessionId = '';\n\nfor (const line of lines) {\n  try {\n    const obj = JSON.parse(line);\n    if (obj.type === 'assistant.message' && obj.data && obj.data.content) {\n      responseText += obj.data.content;\n    } else if (obj.type === 'result' && obj.sessionId) {\n      sessionId = obj.sessionId;\n    } else if (responseText) {\n      lastBlock = responseText;\n      responseText = '';\n    }\n  } catch (e) {}\n}\n\nresponseText = (responseText || lastBlock).trim();\nif (responseText.length > 1900) {\n  responseText = responseText.substring(0, 1900) + '...';\n}\nif (!responseText) responseText = '(VirtuaJimmy returned no output)';\nif (!sessionId) sessionId = require('crypto').randomUUID();\n\nconst source = $('Prepare Copilot Prompt').item.json;\nreturn [{\n  json: {\n    responseText,\n    sessionId,\n    subject: source.subject,\n    from: source.from,\n    date: source.date\n  }\n}];"
+      },
+      "id": "parse-copilot-output-1",
+      "name": "Parse Copilot Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = $input.first().json;\nconst summary = [\n  'QNAP mailbox alert received.',\n  `Subject: ${email.subject || '(no subject)'}`,\n  `From: ${email.from || 'unknown sender'}`,\n  email.date ? `Date: ${email.date}` : ''\n].filter(Boolean).join('\\n');\n\nreturn [{ json: { ...email, summary } }];"
+      },
+      "id": "format-parent-message-1",
+      "name": "Format Parent Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_alerts_channel_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.summary}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "post-alert-parent-1",
+      "name": "Post Alert Parent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ n8n_discord_alerts_channel_id }}/messages/{{ '{{' }} $('Post Alert Parent').item.json.id {{ '}}' }}/threads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({name: 'virtuajimmy-qnap-' + ($json.sessionId || '').substring(0, 12), auto_archive_duration: 1440}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "create-thread-1",
+      "name": "Create Thread",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ '{{' }} $json.id {{ '}}' }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $('Format Parent Message').item.json.responseText}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "post-summary-thread-1",
+      "name": "Post Summary In Thread",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1880, 280]
+    }
+  ],
+  "connections": {
+    "QNAP Mail Trigger": {
+      "main": [[{"node": "Prepare Copilot Prompt", "type": "main", "index": 0}]]
+    },
+    "Prepare Copilot Prompt": {
+      "main": [[{"node": "Run VirtuaJimmy", "type": "main", "index": 0}]]
+    },
+    "Run VirtuaJimmy": {
+      "main": [[{"node": "Parse Copilot Output", "type": "main", "index": 0}]]
+    },
+    "Parse Copilot Output": {
+      "main": [[{"node": "Format Parent Message", "type": "main", "index": 0}]]
+    },
+    "Format Parent Message": {
+      "main": [[{"node": "Post Alert Parent", "type": "main", "index": 0}]]
+    },
+    "Post Alert Parent": {
+      "main": [[{"node": "Create Thread", "type": "main", "index": 0}]]
+    },
+    "Create Thread": {
+      "main": [[{"node": "Post Summary In Thread", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
