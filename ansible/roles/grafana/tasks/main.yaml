@@ -4,13 +4,6 @@
     name: docker-compose
     state: present
 
-- name: Ensure SNMP MIB tooling is installed (for snmp_exporter generator regenerations)
-  ansible.builtin.package:
-    name:
-      - snmp-mibs-downloader
-    state: present
-  become: true
-
 - name: Ensure Docker service is running
   ansible.builtin.service:
     name: docker
@@ -73,25 +66,6 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
-- name: Setup SNMP Exporter directory
-  ansible.builtin.file:
-    path: "{{ grafana_snmp_exporter_data_folder }}"
-    state: directory
-    mode: '0755'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-
-- name: Deploy SNMP Exporter configuration
-  ansible.builtin.template:
-    src: "templates/snmp_exporter_config.yml.j2"
-    dest: "{{ grafana_snmp_exporter_data_folder }}/snmp.yml"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-    force: true
-  notify:
-    - Start Grafana
-
 - name: Allow Grafana port through UFW
   community.general.ufw:
     rule: allow
@@ -117,13 +91,6 @@
   community.general.ufw:
     rule: allow
     port: "{{ grafana_influxdb_port }}"
-    proto: tcp
-  when: ansible_os_family == "Debian"
-
-- name: Allow SNMP Exporter port through UFW
-  community.general.ufw:
-    rule: allow
-    port: "{{ grafana_snmp_exporter_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
