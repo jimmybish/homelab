@@ -20,7 +20,7 @@
 
 - name: Setup directory
   ansible.builtin.file:
-    path: "{{ paperless_folder }}"
+    path: "{{ paperless_ngx_folder }}"
     state: directory
     mode: '0755'
     owner: "{{ docker_user }}"
@@ -29,14 +29,14 @@
 - name: Allow Paperless port through UFW
   community.general.ufw:
     rule: allow
-    port: "{{ paperless_port }}"
+    port: "{{ paperless_ngx_port }}"
     proto: tcp
   when: ansible_os_family == "Debian"
 
 - name: Deploy Paperless using Docker Compose
   ansible.builtin.template:
     src: "templates/docker_compose.yaml.j2"
-    dest: "{{ paperless_folder }}/docker-compose.yaml"
+    dest: "{{ paperless_ngx_folder }}/docker-compose.yaml"
     mode: '0644'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
@@ -46,7 +46,7 @@
 
 - name: Run Paperless docker-compose up
   community.docker.docker_compose_v2:
-    project_src: "{{ paperless_folder }}"
+    project_src: "{{ paperless_ngx_folder }}"
     state: present
     remove_orphans: true
 
@@ -57,13 +57,13 @@
 - name: Assert Paperless port is listening
   ansible.builtin.assert:
     that:
-      - paperless_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
-    fail_msg: "Paperless port {{ paperless_port }} is not open and listening!"
-    success_msg: "Paperless port {{ paperless_port }} is open and listening."
+      - paperless_ngx_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Paperless port {{ paperless_ngx_port }} is not open and listening!"
+    success_msg: "Paperless port {{ paperless_ngx_port }} is open and listening."
 
 # Proxy Configuration
 - name: Configure nginx proxy for paperless
-  when: paperless_configure_proxy | default(true)
+  when: paperless_ngx_configure_proxy | default(true)
   block:
     - name: Get paperless host IP for proxy
       ansible.builtin.set_fact:
@@ -84,18 +84,18 @@
   ansible.builtin.include_tasks:
     file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
   vars:
-    _dns_configure: "{{ paperless_configure_dns | default(true) }}"
-  when: paperless_configure_dns | default(true)
+    _dns_configure: "{{ paperless_ngx_configure_dns | default(true) }}"
+  when: paperless_ngx_configure_dns | default(true)
 
 - name: Create paperless DNS alias
   ansible.builtin.include_tasks:
     file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
   vars:
-    _dns_configure: "{{ paperless_configure_dns | default(true) }}"
+    _dns_configure: "{{ paperless_ngx_configure_dns | default(true) }}"
     _dns_alias_host: paperless
     _dns_alias_descr: Paperless-NGX document management
     _dns_is_proxied: true
-  when: paperless_configure_dns | default(true)
+  when: paperless_ngx_configure_dns | default(true)
 
 # Homepage Configuration
 - name: Add paperless service to Homepage Smart Home section
@@ -106,7 +106,7 @@
     _homepage_marker: paperless
     _homepage_template: paperless_service.yaml.j2
     _homepage_insertafter: "^- Smart Home:"
-  when: paperless_configure_homepage | default(true)
+  when: paperless_ngx_configure_homepage | default(true)
   tags:
     - homepage
     - homepage_config
@@ -116,7 +116,7 @@
     msg: "paperless homepage entry updated"
   changed_when: _homepage_service_result is changed
   notify: Restart Homepage
-  when: paperless_configure_homepage | default(true)
+  when: paperless_ngx_configure_homepage | default(true)
   tags:
     - homepage
     - homepage_config

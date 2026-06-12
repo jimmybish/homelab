@@ -11,6 +11,6 @@ exclude_paths:
   - roles/jellyseerr/tasks/tasks/
   - roles/maintainerr/tasks/tasks/
   - roles/n8n/tasks/tasks/
-  - roles/paperless-ngx/tasks/tasks/
+  - roles/paperless_ngx/tasks/tasks/
   - roles/plex/tasks/tasks/
   - roles/tracearr/tasks/tasks/

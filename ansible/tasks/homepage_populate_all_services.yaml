@@ -111,7 +111,7 @@
     _homepage_marker: paperless
     _homepage_template: paperless_service.yaml.j2
     _homepage_insertafter: "^- Smart Home:"
-  when: paperless_configure_homepage | default(true)
+  when: paperless_ngx_configure_homepage | default(true)
   tags:
     - homepage
     - homepage_config
