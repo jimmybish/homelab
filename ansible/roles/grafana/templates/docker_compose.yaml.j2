@@ -46,8 +46,6 @@ services:
     volumes:
       - {{ grafana_prometheus_data_folder }}:/prometheus
       - {{ grafana_prometheus_data_folder }}/prometheus.yml:/etc/prometheus/prometheus.yml
-    extra_hosts:
-      - "snmp-exporter:{{ ansible_default_ipv4.address }}"
     networks:
       - grafana_net
 
@@ -69,14 +67,6 @@ services:
       - {{ grafana_influxdb_data_folder }}/config:/etc/influxdb2
     networks:
       - grafana_net
-
-  snmp-exporter:
-    image: prom/snmp-exporter:{{ grafana_snmp_exporter_version }}
-    container_name: snmp-exporter
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - {{ grafana_snmp_exporter_data_folder }}/snmp.yml:/etc/snmp_exporter/snmp.yml:ro
 
 networks:
   grafana_net:

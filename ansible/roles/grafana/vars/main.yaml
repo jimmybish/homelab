@@ -35,21 +35,6 @@ grafana_influxdb_bucket: "default"
 grafana_influxdb_proxmox_org: "proxmox"
 grafana_influxdb_proxmox_bucket: "proxmox"
 
-# SNMP Exporter - for monitoring QNAP NAS and other SNMP devices
-# Docker Hub: https://hub.docker.com/r/prom/snmp-exporter - Default port: 9116
-# GitHub: https://github.com/prometheus/snmp_exporter
-grafana_snmp_exporter_version: "v0.30.1"
-grafana_snmp_exporter_port: 9116
-grafana_snmp_exporter_data_folder: "{{ grafana_parent_folder }}/snmp-exporter"
-
-# SNMP targets - list of devices to monitor
-# Set snmpv3_username, snmpv3_auth_passphrase, snmpv3_priv_passphrase
-# in group_vars/all/vars.yaml with vault encryption
-grafana_snmp_targets:
-  - name: "{{ groups['qnap'][0] }}"
-    target: "{{ groups['qnap'][0] }}.{{ internal_domain }}"
-    module: if_mib
-
 # Alerting - webhook integration with N8N
 grafana_alert_webhook_path: "grafana-alerts"
 
@@ -59,9 +44,6 @@ grafana_loki_uid: "P8E80F9AEF21F6940"
 
 # Alerting - thresholds
 grafana_alert_disk_threshold_local: 20    # Alert when local FS has <20% free (>80% used)
-grafana_alert_disk_threshold_qnap: 5      # Alert when QNAP volume has <5% free (>95% used)
-grafana_alert_qnap_temp_threshold: 55     # Alert when QNAP temp > 55°C
-grafana_alert_snmp_stale_minutes: 25      # Alert when SNMP scrape fails for >25 minutes
 grafana_alert_loki_error_threshold: 10    # Alert when > 10 errors in 5m window
 grafana_alert_n8n_trigger_loop_threshold: 6  # Alert when > 6 trigger removals in 5m window
 
