@@ -454,6 +454,74 @@
   delegate_to: localhost
   when: webhook_auth_credential_id | default('') != '' and webhook_auth_credential_created is skipped
 
+# IMAP Credential (for QNAP mailbox monitor)
+- name: Find existing QNAP Mailbox IMAP credential
+  ansible.builtin.set_fact:
+    qnap_imap_credential_id: "{{ (n8n_credentials.json.data | selectattr('name', 'equalto', 'QNAP Mailbox IMAP') | list | first).id | default('') }}"
+  failed_when: false
+
+- name: Create QNAP Mailbox IMAP credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials"
+    method: POST
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body: >-
+      {{
+        {
+          'name': 'QNAP Mailbox IMAP',
+          'type': 'imap',
+          'data': {
+            'user': n8n_qnap_mailbox_address,
+            'password': n8n_qnap_imap_password,
+            'host': n8n_qnap_imap_host,
+            'port': (n8n_qnap_imap_port | int),
+            'secure': (n8n_qnap_imap_ssl | bool),
+            'allowUnauthorizedCerts': false
+          }
+        } | to_json
+      }}
+    body_format: raw
+    validate_certs: false
+    status_code: [200, 201]
+  register: qnap_imap_credential_created
+  delegate_to: localhost
+  when: qnap_imap_credential_id | default('') == ''
+
+- name: Set QNAP IMAP credential ID from creation
+  ansible.builtin.set_fact:
+    qnap_imap_credential_id: "{{ qnap_imap_credential_created.json.id }}"
+  when: qnap_imap_credential_created is not skipped
+
+- name: Update QNAP Mailbox IMAP credential
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/credentials/{{ qnap_imap_credential_id }}"
+    method: PATCH
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+      Content-Type: "application/json"
+    body: >-
+      {{
+        {
+          'name': 'QNAP Mailbox IMAP',
+          'type': 'imap',
+          'data': {
+            'user': n8n_qnap_mailbox_address,
+            'password': n8n_qnap_imap_password,
+            'host': n8n_qnap_imap_host,
+            'port': (n8n_qnap_imap_port | int),
+            'secure': (n8n_qnap_imap_ssl | bool),
+            'allowUnauthorizedCerts': false
+          }
+        } | to_json
+      }}
+    body_format: raw
+    validate_certs: false
+    status_code: [200]
+  delegate_to: localhost
+  when: qnap_imap_credential_id | default('') != '' and qnap_imap_credential_created is skipped
+
 # Deploy workflows
 - name: List existing N8N workflows
   ansible.builtin.uri:
@@ -502,6 +570,9 @@
     - name: "Docker Image Prune"
       template: "templates/docker_image_prune_workflow.json.j2"
       active: true
+    - name: "QNAP Mailbox Monitor"
+      template: "templates/qnap_mailbox_monitor_workflow.json.j2"
+      active: true
   loop_control:
     loop_var: workflow
 
@@ -538,3 +609,4 @@
     - "CVE Monitor"
     - "Plex Library Announcements"
     - "Docker Image Prune"
+    - "QNAP Mailbox Monitor"
