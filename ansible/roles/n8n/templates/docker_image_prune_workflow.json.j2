@@ -1,0 +1,86 @@
+{
+  "name": "Docker Image Prune",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 4 * * 5"
+            }
+          ]
+        }
+      },
+      "id": "schedule-friday-1",
+      "name": "Weekly Friday 4am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "command": "ssh mgmt 'set +e; for HOST in docker-1 docker-2 proxy jellyfin-lxc; do echo \"=== $HOST ===\"; ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \"$HOST\" \"sudo docker image prune -a -f --filter until=336h 2>&1 | tail -5\" 2>&1; done'",
+        "timeout": 600
+      },
+      "id": "exec-prune-1",
+      "name": "Prune Docker Images",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst stderr = $input.first().json.stderr || '';\nconst exitCode = $input.first().json.exitCode;\n\nconst hosts = {};\nlet currentHost = null;\nfor (const line of stdout.split('\\n')) {\n  const m = line.match(/^=== (.+) ===$/);\n  if (m) {\n    currentHost = m[1];\n    hosts[currentHost] = { reclaimed: 'unknown', output: [] };\n    continue;\n  }\n  if (currentHost) {\n    hosts[currentHost].output.push(line);\n    const r = line.match(/Total reclaimed space:\\s*(.+)$/);\n    if (r) hosts[currentHost].reclaimed = r[1].trim();\n  }\n}\n\nconst lines = ['🧹 **Weekly Docker Image Prune**', ''];\nlet totalSuccess = 0;\nlet totalFailed = 0;\nfor (const [host, info] of Object.entries(hosts)) {\n  const failed = info.output.some(l => /denied|refused|error|cannot|permission/i.test(l)) && info.reclaimed === 'unknown';\n  if (failed) {\n    lines.push(`❌ \\`${host}\\`: failed — ${info.output.filter(l => l.trim()).slice(-1)[0] || 'no output'}`);\n    totalFailed++;\n  } else {\n    lines.push(`✅ \\`${host}\\`: reclaimed ${info.reclaimed}`);\n    totalSuccess++;\n  }\n}\n\nlines.push('');\nlines.push(`Hosts processed: ${totalSuccess} ok, ${totalFailed} failed`);\nlines.push('Filter: images older than 14 days (until=336h)');\n\nlet message = lines.join('\\n');\nif (message.length > 1900) message = message.substring(0, 1900) + '...';\nreturn [{ json: { message } }];"
+      },
+      "id": "parse-prune-1",
+      "name": "Format Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ n8n_discord_alerts_channel_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ n8n_discord_bot_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ '{{' }} JSON.stringify({content: $json.message}) {{ '}}' }}",
+        "options": {}
+      },
+      "id": "post-discord-1",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "Weekly Friday 4am": {
+      "main": [[{"node": "Prune Docker Images", "type": "main", "index": 0}]]
+    },
+    "Prune Docker Images": {
+      "main": [[{"node": "Format Summary", "type": "main", "index": 0}]]
+    },
+    "Format Summary": {
+      "main": [[{"node": "Post to Discord", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

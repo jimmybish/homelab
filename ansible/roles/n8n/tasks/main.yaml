@@ -207,6 +207,7 @@
       type: "discordBotApi"
       data:
         botToken: "{{ n8n_discord_bot_token }}"
+        allowedHttpRequestDomains: "all"
     body_format: json
     validate_certs: false
     status_code: [200, 201]
@@ -231,6 +232,7 @@
       type: "discordBotApi"
       data:
         botToken: "{{ n8n_discord_bot_token }}"
+        allowedHttpRequestDomains: "all"
     body_format: json
     validate_certs: false
     status_code: [200]
@@ -310,6 +312,7 @@
       type: "discordBotApi"
       data:
         botToken: "{{ n8n_plexibot_discord_bot_token }}"
+        allowedHttpRequestDomains: "all"
     body_format: json
     validate_certs: false
     status_code: [200, 201]
@@ -334,6 +337,7 @@
       type: "discordBotApi"
       data:
         botToken: "{{ n8n_plexibot_discord_bot_token }}"
+        allowedHttpRequestDomains: "all"
     body_format: json
     validate_certs: false
     status_code: [200]
@@ -417,6 +421,7 @@
       data:
         name: "Authorization"
         value: "Bearer {{ grafana_webhook_secret }}"
+        allowedHttpRequestDomains: "all"
     body_format: json
     validate_certs: false
     status_code: [200, 201]
@@ -442,6 +447,7 @@
       data:
         name: "Authorization"
         value: "Bearer {{ grafana_webhook_secret }}"
+        allowedHttpRequestDomains: "all"
     body_format: json
     validate_certs: false
     status_code: [200]
@@ -493,6 +499,9 @@
     - name: "Plex Library Announcements"
       template: "templates/plex_announcements_workflow.json.j2"
       active: true
+    - name: "Docker Image Prune"
+      template: "templates/docker_image_prune_workflow.json.j2"
+      active: true
   loop_control:
     loop_var: workflow
 
@@ -528,3 +537,4 @@
     - "Log Monitor"
     - "CVE Monitor"
     - "Plex Library Announcements"
+    - "Docker Image Prune"
