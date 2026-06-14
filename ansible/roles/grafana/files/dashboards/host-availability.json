@@ -1,0 +1,631 @@
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": {
+                    "type": "grafana",
+                    "uid": "-- Grafana --"
+                },
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "id": null,
+    "links": [],
+    "panels": [
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "mappings": [
+                        {
+                            "options": {
+                                "0": {
+                                    "color": "red",
+                                    "index": 0,
+                                    "text": "DOWN"
+                                },
+                                "1": {
+                                    "color": "green",
+                                    "index": 1,
+                                    "text": "UP"
+                                }
+                            },
+                            "type": "value"
+                        }
+                    ],
+                    "noValue": "DOWN",
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": 0
+                            },
+                            {
+                                "color": "green",
+                                "value": 1
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 7,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "options": {
+                "colorMode": "background_fixed",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "value_and_name",
+                "wideLayout": true
+            },
+            "pluginVersion": "12.4.1",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "expr": "up{job=\"node_exporter\"}",
+                    "instant": true,
+                    "legendFormat": "{{ instance }}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Host Status",
+            "transformations": [
+                {
+                    "id": "renameByRegex",
+                    "options": {
+                        "regex": "(.+)\\.jimmynrose\\.id\\.au:9100",
+                        "renamePattern": "$1"
+                    }
+                }
+            ],
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "thresholds"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 100,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 0,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "never",
+                        "showValues": false,
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [
+                        {
+                            "options": {
+                                "0": {
+                                    "color": "red",
+                                    "index": 0,
+                                    "text": "DOWN"
+                                },
+                                "1": {
+                                    "color": "green",
+                                    "index": 1,
+                                    "text": "UP"
+                                }
+                            },
+                            "type": "value"
+                        }
+                    ],
+                    "noValue": "DOWN",
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": 0
+                            },
+                            {
+                                "color": "green",
+                                "value": 1
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 7
+            },
+            "id": 2,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": true
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "12.4.1",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "expr": "up{job=\"node_exporter\"}",
+                    "legendFormat": "{{ instance }}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Host Availability Timeline",
+            "transformations": [
+                {
+                    "id": "renameByRegex",
+                    "options": {
+                        "regex": "(.+)\\.jimmynrose\\.id\\.au:9100",
+                        "renamePattern": "$1"
+                    }
+                }
+            ],
+            "type": "timeseries"
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 15
+            },
+            "id": 10,
+            "panels": [],
+            "title": "Uptime",
+            "type": "row"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "decimals": 1,
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": 0
+                            },
+                            {
+                                "color": "orange",
+                                "value": 1
+                            },
+                            {
+                                "color": "green",
+                                "value": 7
+                            }
+                        ]
+                    },
+                    "unit": "d"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 7,
+                "w": 24,
+                "x": 0,
+                "y": 16
+            },
+            "id": 11,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "value_and_name",
+                "wideLayout": true
+            },
+            "pluginVersion": "12.4.1",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "expr": "(time() - node_boot_time_seconds{job=\"node_exporter\"}) / 86400",
+                    "instant": true,
+                    "legendFormat": "{{ instance }}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Uptime (days)",
+            "transformations": [
+                {
+                    "id": "renameByRegex",
+                    "options": {
+                        "regex": "(.+)\\.jimmynrose\\.id\\.au:9100",
+                        "renamePattern": "$1"
+                    }
+                }
+            ],
+            "type": "stat"
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 23
+            },
+            "id": 20,
+            "panels": [],
+            "title": "Availability & Scrape Health",
+            "type": "row"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "decimals": 2,
+                    "mappings": [],
+                    "max": 100,
+                    "min": 0,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": 0
+                            },
+                            {
+                                "color": "orange",
+                                "value": 95
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 99
+                            },
+                            {
+                                "color": "green",
+                                "value": 99.9
+                            }
+                        ]
+                    },
+                    "unit": "percent"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 7,
+                "w": 12,
+                "x": 0,
+                "y": 24
+            },
+            "id": 21,
+            "options": {
+                "minVizHeight": 75,
+                "minVizWidth": 75,
+                "orientation": "auto",
+                "reduceOptions": {
+                    "calcs": [
+                        "mean"
+                    ],
+                    "fields": "",
+                    "values": false
+                },
+                "showThresholdLabels": false,
+                "showThresholdMarkers": true,
+                "sizing": "auto"
+            },
+            "pluginVersion": "12.4.1",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "expr": "avg_over_time(up{job=\"node_exporter\"}[$__range]) * 100",
+                    "instant": true,
+                    "legendFormat": "{{ instance }}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Availability (over selected range)",
+            "transformations": [
+                {
+                    "id": "renameByRegex",
+                    "options": {
+                        "regex": "(.+)\\.jimmynrose\\.id\\.au:9100",
+                        "renamePattern": "$1"
+                    }
+                }
+            ],
+            "type": "gauge"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "decimals": 3,
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": 0
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 0.5
+                            },
+                            {
+                                "color": "red",
+                                "value": 1
+                            }
+                        ]
+                    },
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 7,
+                "w": 12,
+                "x": 12,
+                "y": 24
+            },
+            "id": 22,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "value_and_name",
+                "wideLayout": true
+            },
+            "pluginVersion": "12.4.1",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "expr": "scrape_duration_seconds{job=\"node_exporter\"}",
+                    "instant": true,
+                    "legendFormat": "{{ instance }}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Scrape Duration",
+            "transformations": [
+                {
+                    "id": "renameByRegex",
+                    "options": {
+                        "regex": "(.+)\\.jimmynrose\\.id\\.au:9100",
+                        "renamePattern": "$1"
+                    }
+                }
+            ],
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 2,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "never",
+                        "showValues": false,
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": 0
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 31
+            },
+            "id": 23,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": true
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "12.4.1",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "expr": "scrape_duration_seconds{job=\"node_exporter\"}",
+                    "legendFormat": "{{ instance }}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Scrape Duration Over Time",
+            "transformations": [
+                {
+                    "id": "renameByRegex",
+                    "options": {
+                        "regex": "(.+)\\.jimmynrose\\.id\\.au:9100",
+                        "renamePattern": "$1"
+                    }
+                }
+            ],
+            "type": "timeseries"
+        }
+    ],
+    "preload": false,
+    "refresh": "30s",
+    "schemaVersion": 42,
+    "tags": [
+        "node-exporter",
+        "hosts",
+        "availability"
+    ],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-24h",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "browser",
+    "title": "Host Availability",
+    "uid": "host-availability",
+    "version": 2,
+    "weekStart": ""
+}
