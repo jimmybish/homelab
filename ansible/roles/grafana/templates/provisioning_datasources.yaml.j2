@@ -3,6 +3,7 @@ apiVersion: 1
 datasources:
   - name: Loki
     type: loki
+    uid: {{ grafana_loki_uid }}
     access: proxy
     url: http://loki:3100
     isDefault: false
@@ -10,6 +11,7 @@ datasources:
 
   - name: Prometheus
     type: prometheus
+    uid: {{ grafana_prometheus_uid }}
     access: proxy
     url: http://prometheus:9090
     isDefault: true
@@ -17,6 +19,7 @@ datasources:
 
   - name: InfluxDB
     type: influxdb
+    uid: {{ grafana_influxdb_uid }}
     access: proxy
     url: http://influxdb:8086
     isDefault: false
@@ -30,6 +33,7 @@ datasources:
 
   - name: InfluxDB - Proxmox
     type: influxdb
+    uid: {{ grafana_influxdb_proxmox_uid }}
     access: proxy
     url: http://influxdb:8086
     isDefault: false

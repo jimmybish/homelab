@@ -159,7 +159,6 @@ jellyplex_watched_host:
 # Linux Desktop
 linux_desktop:
   hosts:
-    mgmt:
 
 # Klipper 3d printer
 sovol_sv08:

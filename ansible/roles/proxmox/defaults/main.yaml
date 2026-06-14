@@ -1,0 +1,6 @@
+---
+# Disable NVMe Autonomous Power State Transition (APST) by setting the
+# nvme_core.default_ps_max_latency_us kernel parameter to 0. This works around
+# broken APST firmware on the Samsung 990 PRO drives that has caused rpool to
+# suspend with uncorrectable I/O errors under sustained ZFS replication writes.
+proxmox_nvme_disable_apst: true

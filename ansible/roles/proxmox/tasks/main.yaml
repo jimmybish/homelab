@@ -15,6 +15,22 @@
     - proxmox_zfs_autotrim is defined
     - proxmox_zfs_autotrim_state.stdout | default('') | trim != proxmox_zfs_autotrim
 
+# Disable NVMe APST to work around broken Samsung 990 PRO power-state firmware
+# that suspended rpool with uncorrectable I/O errors. Appends the parameter to
+# the single /etc/kernel/cmdline line, preserving any existing parameters, and
+# only when it is not already present (idempotent). Activated on next boot after
+# proxmox-boot-tool refresh; a reboot is performed manually per node.
+- name: Disable NVMe APST in kernel cmdline
+  ansible.builtin.replace:
+    path: /etc/kernel/cmdline
+    regexp: '^(?!.*nvme_core\.default_ps_max_latency_us=)(.*boot=zfs.*)$'
+    replace: '\1 nvme_core.default_ps_max_latency_us=0'
+    backup: true
+  when: proxmox_nvme_disable_apst | bool
+  notify: Refresh Proxmox boot config
+  tags:
+    - nvme_apst
+
 # APT repository configuration (must come before any package installs)
 - name: Remove old pve-enterprise.list
   ansible.builtin.file:

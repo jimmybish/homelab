@@ -64,6 +64,46 @@ Quick-reference runbook for recurring issues. When responding to an alert or tro
 
 ---
 
+## Proxmox-2 rpool Uncorrectable I/O Failure
+
+**Symptoms:** The first sign is that **all hosts on proxmox-2 stop sending metrics to Grafana**. Shortly after that, Proxmox-2 becomes completely unresponsive. The console shows a hung ZFS task stack (`zio_wait`, `zvol_write_task`, `dmu_tx_hold_write_by_dnode`) followed by repeated messages like `WARNING: Pool 'rpool' has encountered an uncorrectable I/O failure and has been suspended.` The node usually needs a hard power cycle before it responds again.
+
+**Status:** This is a real storage-path failure, not a benign reboot or a thermal pad issue. The 990 Pro temperature trace showed the NVMe was not hot when metrics stopped, and the Asus NUC 12 Pro chassis has identical built-in thermal pads on Proxmox-1 and Proxmox-2.
+
+### Ruled Out
+
+- **Thermal pad differences**: Both NUCs use the same chassis and built-in thermal pads.
+- **NVMe overheating**: The temperature graph for Proxmox-2 was only around the mid-40s to low-60s °C when metrics stopped, well below throttle territory.
+- **A simple deployment restart**: The node is fully hung and stops serving metrics before the hard power-off.
+- **ZFS replication deadlock as the primary explanation**: The console evidence points to an uncorrectable I/O suspension on `rpool`, not just a stuck replication job.
+
+### Yet To Be Implemented
+
+- **Disable NVMe APST / power-state management** by setting `nvme_core.default_ps_max_latency_us=0` on the Proxmox boot cmdline.
+- **Update Samsung 990 Pro firmware** on both nodes to the newest available release.
+- **Enable persistent journaling** so the last boot's kernel and ZFS messages survive a hard reset.
+- **Enable crash capture** with `kdump` or equivalent so a future hang/panic can be inspected.
+- **Add storage-path alerting** for NVMe media errors, I/O timeouts, and repeated ZFS suspend events.
+
+### Data Collection Checklist
+
+When the issue is active, collect the following before power-cycling if possible. The metric blackout itself is the earliest signal, so note the exact time Grafana stopped receiving samples from proxmox-2:
+
+1. `zpool status -v rpool` and `zpool events -v`
+2. `smartctl -a /dev/nvme0n1` and `nvme smart-log /dev/nvme0`
+3. `dmesg | grep -E 'error|fail|nvme|zfs|I/O|timeout|hung'`
+4. `journalctl -b -1 -p err --no-pager` if persistent journaling is enabled
+5. Grafana/Prometheus temperature graphs for both Proxmox nodes
+6. The exact console text showing the first `rpool` suspend message and the hung-task stack
+
+### Next Steps
+
+1. Keep the 68°C alert in place so we still get early warning if temperatures do rise.
+2. Apply the NVMe APST change and firmware update before the next heavy write window.
+3. Capture the commands above during the next failure so we can confirm whether the trigger is power-state handling, firmware, or another NVMe path issue.
+
+---
+
 ## High Error Rate in Logs
 
 **Alert:** `High Error Rate in Logs` (Grafana, severity: warning)

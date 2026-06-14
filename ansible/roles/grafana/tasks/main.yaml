@@ -163,6 +163,35 @@
   notify:
     - Start Grafana
 
+- name: Ensure Grafana dashboards provisioning directory exists
+  ansible.builtin.file:
+    path: "{{ grafana_folder }}/provisioning/dashboards/json"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Deploy Grafana dashboard provider config
+  ansible.builtin.template:
+    src: "templates/provisioning_dashboards.yaml.j2"
+    dest: "{{ grafana_folder }}/provisioning/dashboards/dashboards.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Grafana
+
+- name: Deploy Grafana dashboard JSON files
+  ansible.builtin.copy:
+    src: "dashboards/"
+    dest: "{{ grafana_folder }}/provisioning/dashboards/json/"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Start Grafana
+
 - name: Deploy Grafana using Docker Compose
   ansible.builtin.template:
     src: "templates/docker_compose.yaml.j2"
@@ -193,6 +222,14 @@
       - grafana_influxdb_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
     fail_msg: "One or more Grafana stack ports are not open and listening!"
     success_msg: "All Grafana stack ports are open and listening."
+
+# Ensure the Copilot/MCP service account + token (validate, ensure, persist)
+- name: Ensure Copilot Grafana service account and token
+  ansible.builtin.include_tasks:
+    file: service_account.yaml
+  when: grafana_configure_service_account | default(true)
+  tags:
+    - service_account
 
 # Configure SWAG Internal Proxy
 - name: Resolve grafana host IP for proxy configuration

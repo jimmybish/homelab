@@ -272,3 +272,61 @@ groups:
                     type: gt
                     params:
                       - {{ grafana_alert_n8n_trigger_loop_threshold }}
+
+  # NVMe Drive Temperature High - fires when a Proxmox NVMe drive runs hot
+  - orgId: 1
+    name: proxmox_hardware
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: nvme-temp-high-1
+        title: NVMe Drive Temperature High
+        condition: C
+        for: 2m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "NVMe drive temperature high on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "Current NVMe temperature: {% raw %}{{ $value }}{% endraw %}°C (threshold: {{ grafana_alert_nvme_temp_threshold }}°C)"
+          runbook_url: "https://wiki.jimmynrose.id.au/storage#nvme-temperature-management"
+        labels:
+          severity: warning
+          component: storage
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: {{ grafana_prometheus_uid }}
+            model:
+              refId: A
+              # max() collapses the per-chip series to one value per instance, and
+              # the reduce step (B) is required so the threshold (C) evaluates a
+              # single instant value rather than a multi-point range frame.
+              expr: "max by (instance) (node_hwmon_temp_celsius{chip=\"nvme_nvme0\",instance=~\"proxmox-[12].*\"})"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - {{ grafana_alert_nvme_temp_threshold }}
