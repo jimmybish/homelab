@@ -1,0 +1,6 @@
+---
+- name: Configure management host
+  hosts: mgmt_hosts
+  become: true
+  roles:
+    - management

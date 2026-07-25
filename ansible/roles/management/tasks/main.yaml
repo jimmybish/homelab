@@ -1,0 +1,78 @@
+---
+- name: Install management package prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - gpg
+      - apt-transport-https
+    state: present
+    update_cache: true
+
+- name: Download Trivy GPG key
+  ansible.builtin.get_url:
+    url: https://aquasecurity.github.io/trivy-repo/deb/public.key
+    dest: /usr/share/keyrings/trivy.asc
+    mode: '0644'
+
+- name: Install Trivy GPG key
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --dearmor
+      - --yes
+      - --output
+      - /usr/share/keyrings/trivy.gpg
+      - /usr/share/keyrings/trivy.asc
+  args:
+    creates: /usr/share/keyrings/trivy.gpg
+
+- name: Add Trivy APT repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main"
+    filename: trivy
+    state: present
+
+- name: Add Microsoft GPG key
+  ansible.builtin.apt_key:
+    url: https://packages.microsoft.com/keys/microsoft.asc
+    keyring: /etc/apt/keyrings/packages.microsoft.gpg
+    state: present
+
+- name: Add Azure CLI repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.microsoft.gpg]
+      https://packages.microsoft.com/repos/azure-cli/ {{ ansible_distribution_release }} main
+    filename: azure-cli
+    state: present
+
+- name: Install Trivy and Azure CLI
+  ansible.builtin.apt:
+    name:
+      - trivy
+      - azure-cli
+    state: present
+    update_cache: true
+
+- name: Ensure management bin directory exists
+  ansible.builtin.file:
+    path: "{{ management_bin_dir }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ management_user }}"
+    group: "{{ management_user }}"
+  become: false
+
+- name: Deploy Trivy scan script
+  ansible.builtin.template:
+    src: trivy_scan.sh.j2
+    dest: "{{ management_trivy_scan_script_path }}"
+    mode: '0755'
+    owner: "{{ management_user }}"
+    group: "{{ management_user }}"
+  become: false
+
+- name: Warm Trivy vulnerability database
+  ansible.builtin.command: trivy image --download-db-only
+  become: false
+  changed_when: false

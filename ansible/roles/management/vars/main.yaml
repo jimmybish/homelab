@@ -1,0 +1,11 @@
+---
+management_user: jimmy
+management_user_home: "/home/{{ management_user }}"
+management_bin_dir: "{{ management_user_home }}/bin"
+management_trivy_scan_script_path: "{{ management_bin_dir }}/trivy-scan.sh"
+
+management_trivy_scan_hosts:
+  - docker-1
+  - docker-2
+  - proxy
+  - jellyfin-lxc
