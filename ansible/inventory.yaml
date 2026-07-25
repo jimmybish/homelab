@@ -35,6 +35,7 @@ ubuntu:
     mgmt:
     docker-1:
     docker-2:
+    hermes:
     jellyfin-lxc:
     plex-lxc:
     proxy:
