@@ -1,0 +1,23 @@
+---
+# Research Notes - Bambuddy
+# Official Source: https://github.com/maziggy/bambuddy
+# Example Compose: https://github.com/maziggy/bambuddy/blob/main/docker-compose.yml
+# NGINX Proxy Config: no LinuxServer sample available
+# Homepage Widget: no native widget available
+# Current Release: v1.2.5
+# Last Updated: 2026-07-25
+# Bridge networking requires printers to be added manually by IP.
+# SQLite is used by default; no database sidecar or initial credentials are required.
+# Use latest to receive upstream security fixes, including external-folder hardening.
+
+bambuddy_version: "latest"
+bambuddy_port: 8000
+
+bambuddy_folder: "{{ docker_storage_folder }}/bambuddy"
+bambuddy_data_folder: "{{ bambuddy_folder }}/data"
+bambuddy_logs_folder: "{{ bambuddy_folder }}/logs"
+
+bambuddy_configure_homepage: true
+bambuddy_configure_proxy: true
+bambuddy_configure_dns: true
+bambuddy_is_proxied: true

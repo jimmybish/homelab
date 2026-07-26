@@ -252,7 +252,7 @@
     _homepage_service_name: ARR Suite
     _homepage_marker: arr_suite services
     _homepage_template: arr_suite_services.yaml.j2
-    _homepage_insertafter: EOF
+    _homepage_insertafter: "^- ARR:"
   when: arr_suite_configure_homepage | default(true)
   tags:
     - homepage

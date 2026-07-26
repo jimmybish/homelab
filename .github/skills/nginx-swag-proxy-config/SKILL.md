@@ -89,7 +89,7 @@ Add these to `tasks/main.yaml` after the health check.
   ansible.builtin.template:
     src: <service>.subdomain.conf.j2
     dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/<service>.subdomain.conf"
-    mode: '0644'
+    mode: '0664'
   delegate_to: "{{ groups['proxy_host'][0] }}"
   notify:
     - Restart Swag Internal
@@ -102,8 +102,12 @@ Add these to `tasks/main.yaml` after the health check.
   ansible.builtin.template:
     src: <service>.subdomain.conf.j2
     dest: "{{ proxy_folder }}/external/nginx/proxy-confs/<service>.subdomain.conf"
-    mode: '0644'
+    mode: '0664'
   delegate_to: "{{ groups['proxy_host'][0] }}"
   notify:
     - Restart Swag External
 ```
+
+SWAG normalizes files in its proxy-confs directories to mode `0664` at startup. Set
+that mode in Ansible templates to prevent a mode-only change and container restart on
+every deployment.

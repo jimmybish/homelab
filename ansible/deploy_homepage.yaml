@@ -21,6 +21,15 @@
       community.docker.docker_compose_v2:
         project_src: "{{ homepage_folder }}"
         state: restarted
+      when: >-
+        (_homepage_bookmarks_config is changed)
+        or (_homepage_bambuddy_icon is changed)
+        or (_homepage_docker_config is changed)
+        or (_homepage_kubernetes_config is changed)
+        or (_homepage_services_base_config is changed)
+        or (_homepage_settings_config is changed)
+        or (_homepage_widgets_config is changed)
+        or (_homepage_services_changed | default(false) | bool)
       tags:
         - homepage
         - homepage_config

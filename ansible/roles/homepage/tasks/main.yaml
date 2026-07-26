@@ -34,6 +34,30 @@
   tags:
     - homepage
 
+- name: Setup Homepage custom icons directory
+  ansible.builtin.file:
+    path: "{{ homepage_folder }}/icons"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Download Bambuddy custom icon
+  ansible.builtin.get_url:
+    url: "{{ homepage_bambuddy_icon_url }}"
+    dest: "{{ homepage_folder }}/icons/bambuddy.png"
+    checksum: "{{ homepage_bambuddy_icon_checksum }}"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  register: _homepage_bambuddy_icon
+  tags:
+    - homepage
+    - homepage_config
+
 - name: Allow Homepage port through UFW
   community.general.ufw:
     rule: allow
@@ -51,6 +75,7 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  register: _homepage_bookmarks_config
   tags:
     - homepage
     - homepage_config
@@ -63,6 +88,7 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  register: _homepage_docker_config
   tags:
     - homepage
     - homepage_config
@@ -75,18 +101,34 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  register: _homepage_kubernetes_config
   tags:
     - homepage
     - homepage_config
 
-- name: Deploy Services config
+- name: Deploy Services base config
   ansible.builtin.template:
     src: "templates/services.yaml.j2"
-    dest: "{{ homepage_folder }}/config/services.yaml"
+    dest: "{{ homepage_folder }}/config/services.yaml.base"
     mode: '0644'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  register: _homepage_services_base_config
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Prepare Services config from updated base
+  ansible.builtin.copy:
+    src: "{{ homepage_folder }}/config/services.yaml.base"
+    dest: "{{ homepage_folder }}/config/services.yaml"
+    remote_src: true
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  when: _homepage_services_base_config is changed  # noqa: no-handler - must precede service insertion
+  register: _homepage_services_config
   tags:
     - homepage
     - homepage_config
@@ -99,6 +141,7 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  register: _homepage_settings_config
   tags:
     - homepage
     - homepage_config
@@ -111,6 +154,7 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  register: _homepage_widgets_config
   tags:
     - homepage
     - homepage_config

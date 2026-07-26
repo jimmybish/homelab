@@ -1,0 +1,112 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup Bambuddy directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  loop:
+    - "{{ bambuddy_folder }}"
+    - "{{ bambuddy_data_folder }}"
+    - "{{ bambuddy_logs_folder }}"
+
+- name: Allow Bambuddy port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ bambuddy_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Deploy Bambuddy using Docker Compose
+  ansible.builtin.template:
+    src: templates/docker_compose.yaml.j2
+    dest: "{{ bambuddy_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Bambuddy
+
+- name: Run docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ bambuddy_folder }}"
+    state: present
+    remove_orphans: true
+
+- name: Check if service ports are open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Bambuddy port is listening
+  ansible.builtin.assert:
+    that:
+      - bambuddy_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Bambuddy port is not open and listening!"
+    success_msg: "Bambuddy port is open and listening."
+
+- name: Resolve service host IP for proxy configuration
+  ansible.builtin.set_fact:
+    bambuddy_proxy_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+
+- name: Deploy Bambuddy nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: bambuddy.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/bambuddy.subdomain.conf"
+    mode: '0664'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag Internal
+
+- name: Ensure deployment host DNS override exists
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
+  vars:
+    _dns_configure: "{{ bambuddy_configure_dns | default(true) }}"
+  when: bambuddy_configure_dns | default(true)
+
+- name: Create bambuddy DNS alias
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+  vars:
+    _dns_configure: "{{ bambuddy_configure_dns | default(true) }}"
+    _dns_alias_host: bambuddy
+    _dns_alias_descr: 3D printer management
+    _dns_is_proxied: "{{ bambuddy_is_proxied | default(true) }}"
+  when: bambuddy_configure_dns | default(true)
+
+- name: Add Bambuddy to Homepage Smart Home section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: Bambuddy
+    _homepage_marker: bambuddy service
+    _homepage_template: bambuddy_service.yaml.j2
+    _homepage_insertafter: "^- Smart Home:"
+  when: bambuddy_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+- name: Notify Homepage restart for bambuddy
+  ansible.builtin.debug:
+    msg: "bambuddy homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify:
+    - Restart Homepage
+  when: bambuddy_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+...

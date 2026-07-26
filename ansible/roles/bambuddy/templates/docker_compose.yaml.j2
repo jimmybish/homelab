@@ -1,0 +1,18 @@
+services:
+  bambuddy:
+    image: ghcr.io/maziggy/bambuddy:{{ bambuddy_version }}
+    container_name: bambuddy
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      - TZ={{ timezone }}
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+      - PORT=8000
+    ports:
+      - '{{ bambuddy_port }}:8000'
+    volumes:
+      - {{ bambuddy_data_folder }}:/app/data
+      - {{ bambuddy_logs_folder }}:/app/logs
+    restart: unless-stopped
+    stop_grace_period: 30s

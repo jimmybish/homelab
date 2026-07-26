@@ -24,6 +24,9 @@
 - name: Deploy Homepage
   ansible.builtin.import_playbook: deploy_homepage.yaml
 
+- name: Deploy Bambuddy
+  ansible.builtin.import_playbook: deploy_bambuddy.yaml
+
 - name: Deploy Maintainerr
   ansible.builtin.import_playbook: deploy_maintainerr.yaml
 

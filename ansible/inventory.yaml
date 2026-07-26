@@ -142,6 +142,11 @@ maintainerr_host:
   hosts:
     docker-2:
 
+# Bambuddy
+bambuddy_host:
+  hosts:
+    docker-1:
+
 # Tracearr
 tracearr_host:
   hosts:

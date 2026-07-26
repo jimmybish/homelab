@@ -10,6 +10,10 @@ homepage_version: "latest"
 # External port
 homepage_port: 3000
 
+# Custom service icons
+homepage_bambuddy_icon_url: "https://raw.githubusercontent.com/maziggy/bambuddy/3dcbbdd25e5a86ba267357e7fa4397c5a6569784/static/img/android-chrome-512x512.png"
+homepage_bambuddy_icon_checksum: "sha256:cd1c375e5018c627a5782618c02c92e018b769f8481e37479c036bc9680e4ccb"
+
 # Feature flags
 homepage_configure_proxy: true
 homepage_configure_dns: true

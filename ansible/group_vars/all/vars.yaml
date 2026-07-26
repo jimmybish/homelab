@@ -287,6 +287,7 @@ internal_lidarr_url: "https://lidarr.{{ internal_domain }}"
 internal_sabnzbd_url: "https://sabnzbd.{{ internal_domain }}"
 internal_qbittorrent_url: "https://qbittorrent.{{ internal_domain }}"
 internal_maintainerr_url: "https://maintainerr.{{ internal_domain }}"
+internal_bambuddy_url: "https://bambuddy.{{ internal_domain }}"
 internal_sovol_url: "http://{{ (lookup('ansible.builtin.inventory_hostnames', 'sovol_sv08').split(','))[0] }}/"
 internal_tracearr_url: "https://tracearr.{{ internal_domain }}"
 internal_mcp_tracearr_url: "http://docker-2:8850"
@@ -368,7 +369,6 @@ homepage_tracearr_key: !vault |
           63326638653266346139636663303036636563373666353233353863366536333733326338363635
           66626238333636313163663039316432326165306637663464663734623864313135393932363133
           363435373138373662336235643663653434
-homepage_maintainerr_key: "PLACEHOLDER_KEY"  # TODO: Generate API key after deployment
 scrypted_webhook_auth: !vault |
           $ANSIBLE_VAULT;1.1;AES256
           37386337333033303061383034373161396134653138356533366531373937313434383134366631

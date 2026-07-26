@@ -20,3 +20,15 @@
     mode: '0644'
   delegate_to: "{{ groups['homepage_host'][0] }}"
   register: _homepage_service_result
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Record Homepage service configuration changes
+  ansible.builtin.set_fact:
+    _homepage_services_changed: >-
+      {{ (_homepage_services_changed | default(false) | bool)
+         or (_homepage_service_result is changed) }}
+  tags:
+    - homepage
+    - homepage_config

@@ -27,31 +27,31 @@ Template checklist:
 **With widget** (only if listed at `https://gethomepage.dev/widgets/`):
 
 ```yaml
-  - <Service Name>:
-      icon: <service>.png
-      href: {{ internal_<service>_url }}
-      description: Service description
-      widget:
-        type: <service>
-        url: {{ internal_<service>_url }}
-        key: {{ homepage_<service>_key }}
+    - <Service Name>:
+        icon: <service>.png
+        href: {{ internal_<service>_url }}
+        description: Service description
+        widget:
+          type: <service>
+          url: {{ internal_<service>_url }}
+          key: {{ homepage_<service>_key }}
 ```
 
 **Without widget** (service not listed on Homepage widgets page):
 
 ```yaml
-  - <Service Name>:
-      icon: <service>.png
-      href: {{ internal_<service>_url }}
-      description: Service description
+    - <Service Name>:
+        icon: <service>.png
+        href: {{ internal_<service>_url }}
+        description: Service description
 ```
 
 ### Indentation Rules
 
-- List items (starting with `-`): 2 spaces from section level
-- Service properties (`icon`, `href`, etc.): 6 spaces from section level
-- Widget properties: 8 spaces from section level
-- **NEVER use 4 spaces** — this will break the YAML structure
+- List items (starting with `-`): 4 spaces under the top-level section
+- Service properties (`icon`, `href`, etc.): 8 spaces
+- Widget properties: 10 spaces
+- Match the indentation of existing entries in the target section before deploying
 
 ## Ansible Task
 
