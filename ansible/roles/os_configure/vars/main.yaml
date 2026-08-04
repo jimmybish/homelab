@@ -2,3 +2,10 @@
 # Variables for OS configuration role
 # Note: ntp_server and locale_lang are now defined in group_vars/all/vars.yaml
 os_configure_node_exporter_port: 9100
+
+# Dedicated AI-agent / Ansible SSH user provisioned on all managed hosts.
+# The public key is read from the control node at deploy time; the matching
+# private key lives at ~/.ssh/virtuajimmy on the control node (not in vault).
+os_configure_agent_user: virtuajimmy
+os_configure_agent_uid: 2002
+os_configure_agent_pubkey_local: "{{ lookup('env', 'HOME') }}/.ssh/virtuajimmy.pub"

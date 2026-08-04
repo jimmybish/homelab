@@ -12,6 +12,12 @@
   roles:
     - alloy
 
+- name: Deploy auditd
+  hosts: ubuntu:debian
+  become: true
+  roles:
+    - auditd
+
 - name: Install KDE Plasma Desktop and xrdp
   hosts: linux_desktop
   become: true

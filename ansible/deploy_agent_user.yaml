@@ -1,0 +1,18 @@
+---
+# Bootstrap the dedicated virtuajimmy agent user, SSH key and sudo on all
+# managed Ubuntu/Debian hosts. Run this WHILE still connecting as the existing
+# jimmy user, BEFORE flipping ansible_user in group_vars/all/vars.yaml.
+#
+#   ansible-playbook -i inventory.yaml deploy_agent_user.yaml \
+#     --tags agent_user --vault-password-file ~/ansible_key
+#
+# Only the agent_user-tagged tasks in os_configure run (user, key, sudo);
+# the rest of the OS hardening is skipped. Omit --tags to run full os_configure.
+#
+# Prerequisite (one-time, on the control node):
+#   ssh-keygen -t ed25519 -f ~/.ssh/virtuajimmy -C virtuajimmy
+- name: Provision virtuajimmy agent user
+  hosts: ubuntu:debian
+  become: true
+  roles:
+    - os_configure

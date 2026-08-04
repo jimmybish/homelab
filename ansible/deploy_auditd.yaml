@@ -1,0 +1,14 @@
+---
+# Deploy auditd command-level (execve) auditing of every login user, root
+# included, across all managed hosts (Ubuntu/Debian VMs and Proxmox nodes).
+# LXC containers are skipped by the role (no host audit subsystem). Audit
+# events flow to the systemd journal and are shipped to Loki by the existing
+# Alloy journal source.
+#
+#   ansible-playbook -i inventory.yaml deploy_auditd.yaml \
+#     --vault-password-file ~/ansible_key
+- name: Deploy auditd
+  hosts: ubuntu:debian:proxmox_hosts
+  become: true
+  roles:
+    - auditd

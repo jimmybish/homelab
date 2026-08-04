@@ -1,0 +1,10 @@
+---
+# auditd cannot be reloaded/restarted via systemctl (systemd refuses manual
+# control of auditd.service); use augenrules and the service wrapper instead.
+- name: Reload audit rules
+  ansible.builtin.command: augenrules --load
+  changed_when: true
+
+- name: Restart auditd
+  ansible.builtin.command: service auditd restart  # noqa: command-instead-of-module
+  changed_when: true

@@ -121,6 +121,49 @@
         IdentityFile {{ ansible_private_key }}
   when: ansible_os_family == "Debian"
 
+- name: Create agent user {{ os_configure_agent_user }}
+  ansible.builtin.user:
+    name: "{{ os_configure_agent_user }}"
+    uid: "{{ os_configure_agent_uid }}"
+    shell: /bin/bash
+    groups: sudo
+    append: true
+    create_home: true
+    state: present
+  when: ansible_os_family == "Debian"
+  tags: agent_user
+
+- name: Ensure .ssh directory exists for {{ os_configure_agent_user }}
+  ansible.builtin.file:
+    path: "/home/{{ os_configure_agent_user }}/.ssh"
+    state: directory
+    owner: "{{ os_configure_agent_user }}"
+    group: "{{ os_configure_agent_user }}"
+    mode: '0700'
+  when: ansible_os_family == "Debian"
+  tags: agent_user
+
+- name: Install authorized key for {{ os_configure_agent_user }}
+  ansible.builtin.copy:
+    content: "{{ lookup('file', os_configure_agent_pubkey_local) }}\n"
+    dest: "/home/{{ os_configure_agent_user }}/.ssh/authorized_keys"
+    owner: "{{ os_configure_agent_user }}"
+    group: "{{ os_configure_agent_user }}"
+    mode: '0600'
+  when: ansible_os_family == "Debian"
+  tags: agent_user
+
+- name: Grant passwordless sudo to {{ os_configure_agent_user }}
+  ansible.builtin.copy:
+    content: "{{ os_configure_agent_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    dest: "/etc/sudoers.d/{{ os_configure_agent_user }}"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  when: ansible_os_family == "Debian"
+  tags: agent_user
+
 - name: Set timezone
   community.general.timezone:
     name: "{{ timezone }}"

@@ -1,0 +1,47 @@
+---
+# auditd requires the host kernel's audit subsystem, which LXC containers
+# cannot access (auditd.service fails to start). Only run on bare-metal/VMs.
+# On LXC hosts, user sudo/auth activity is still captured via journald and
+# shipped to Loki by Alloy; full execve auditing there would require running
+# auditd on the Proxmox host itself.
+- name: Configure auditd (non-LXC hosts only)
+  when:
+    - ansible_os_family == "Debian"
+    - ansible_virtualization_type != "lxc"
+  block:
+    - name: Install auditd and audit dispatch plugins
+      ansible.builtin.apt:
+        name:
+          - auditd
+          - audispd-plugins
+        state: present
+        update_cache: true
+
+    - name: Remove legacy per-user audit rules file
+      ansible.builtin.file:
+        path: /etc/audit/rules.d/virtuajimmy.rules
+        state: absent
+      notify: Reload audit rules
+
+    - name: Deploy audit rules
+      ansible.builtin.template:
+        src: audit.rules.j2
+        dest: "/etc/audit/rules.d/{{ auditd_rules_file }}"
+        owner: root
+        group: root
+        mode: '0640'
+      notify: Reload audit rules
+
+    - name: Forward audit events to syslog/journald
+      ansible.builtin.lineinfile:
+        path: /etc/audit/plugins.d/syslog.conf
+        regexp: '^active\s*='
+        line: 'active = yes'
+        state: present
+      notify: Restart auditd
+
+    - name: Ensure auditd is started and enabled
+      ansible.builtin.service:
+        name: auditd
+        state: started
+        enabled: true

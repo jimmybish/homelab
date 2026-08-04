@@ -1,0 +1,18 @@
+# Audit rules - Managed by Ansible
+# Loaded from /etc/audit/rules.d/ by augenrules into /etc/audit/audit.rules.
+# See auditctl(8) and audit.rules(7).
+
+# Log every command executed by any login user (root included), for both
+# 64-bit and 32-bit syscall ABIs. auid != unset (4294967295) excludes
+# background daemons that never had a login session, while capturing all real
+# users. auid survives su/sudo so the originating login user is recorded even
+# after privilege escalation.
+-a always,exit -F arch=b64 -S execve -F auid!=4294967295 -k {{ auditd_key }}
+-a always,exit -F arch=b32 -S execve -F auid!=4294967295 -k {{ auditd_key }}
+
+# Watch changes to identity and sudo configuration files.
+-w /etc/sudoers -p wa -k identity_sudoers
+-w /etc/sudoers.d/ -p wa -k identity_sudoers
+-w /etc/passwd -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/shadow -p wa -k identity

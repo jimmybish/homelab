@@ -1,0 +1,12 @@
+---
+# Auditd - Linux audit daemon for command-level (execve) auditing of every
+# login user, root included. Audit events are routed to the systemd journal via
+# the audisp-syslog plugin, where the existing Alloy journal source ships them
+# to Loki. No Alloy configuration change is required.
+# Last Updated: 2026-08-04
+
+# Audit key used to tag execve events (searchable via ausearch -k).
+auditd_key: user_exec
+
+# Filename for the rules dropped into /etc/audit/rules.d/.
+auditd_rules_file: homelab_audit.rules
