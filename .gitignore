@@ -20,6 +20,9 @@ changelogs/
 # Planning docs (local-only)
 planning/
 
+# Rendered helper scripts deployed into the shared tree (template is the source)
+bin/
+
 # User mapping data (contains Discord user IDs)
 .github/skills/discord-plex-user-mapping/user_map.csv
 

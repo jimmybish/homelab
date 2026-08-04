@@ -143,9 +143,9 @@
   when: ansible_os_family == "Debian"
   tags: agent_user
 
-- name: Install authorized key for {{ os_configure_agent_user }}
-  ansible.builtin.copy:
-    content: "{{ lookup('file', os_configure_agent_pubkey_local) }}\n"
+- name: Install authorized keys for {{ os_configure_agent_user }}
+  ansible.builtin.template:
+    src: agent_authorized_keys.j2
     dest: "/home/{{ os_configure_agent_user }}/.ssh/authorized_keys"
     owner: "{{ os_configure_agent_user }}"
     group: "{{ os_configure_agent_user }}"

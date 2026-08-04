@@ -1,7 +1,7 @@
 ---
-management_user: jimmy
-management_user_home: "/home/{{ management_user }}"
-management_bin_dir: "{{ management_user_home }}/bin"
+# Deployed to the shared repo tree so the virtuajimmy agent user can execute it
+# (e.g. the n8n CVE Monitor workflow SSHes into mgmt as virtuajimmy).
+management_bin_dir: "/srv/homelab/bin"
 management_trivy_scan_script_path: "{{ management_bin_dir }}/trivy-scan.sh"
 
 management_trivy_scan_hosts:

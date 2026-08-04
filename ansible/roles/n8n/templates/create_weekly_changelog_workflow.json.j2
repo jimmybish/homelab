@@ -30,7 +30,7 @@
     },
     {
       "parameters": {
-        "command": "=ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 mgmt 'mkdir -p /home/jimmy/homelab/changelogs/{{ '{{' }} $json.folderName {{ '}}' }}/'"
+        "command": "=ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 mgmt 'mkdir -p /srv/homelab/changelogs/{{ '{{' }} $json.folderName {{ '}}' }}/'"
       },
       "id": "create-folder-1",
       "name": "Create Changelog Folder",

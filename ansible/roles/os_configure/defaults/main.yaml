@@ -1,0 +1,5 @@
+---
+# Role defaults (lowest precedence) so they can be overridden per host/group
+# via inventory group_vars. Additional public keys authorised for the agent
+# user on specific hosts (e.g. the n8n copilot key on mgmt).
+os_configure_agent_extra_authorized_keys: []

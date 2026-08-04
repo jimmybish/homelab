@@ -58,19 +58,17 @@
   ansible.builtin.file:
     path: "{{ management_bin_dir }}"
     state: directory
-    mode: '0755'
-    owner: "{{ management_user }}"
-    group: "{{ management_user }}"
-  become: false
+    mode: '2775'
+    owner: "{{ ansible_user }}"
+    group: homelab
 
 - name: Deploy Trivy scan script
   ansible.builtin.template:
     src: trivy_scan.sh.j2
     dest: "{{ management_trivy_scan_script_path }}"
     mode: '0755'
-    owner: "{{ management_user }}"
-    group: "{{ management_user }}"
-  become: false
+    owner: "{{ ansible_user }}"
+    group: homelab
 
 - name: Warm Trivy vulnerability database
   ansible.builtin.command: trivy image --download-db-only

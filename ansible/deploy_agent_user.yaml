@@ -1,7 +1,8 @@
 ---
 # Bootstrap the dedicated virtuajimmy agent user, SSH key and sudo on all
-# managed Ubuntu/Debian hosts. Run this WHILE still connecting as the existing
-# jimmy user, BEFORE flipping ansible_user in group_vars/all/vars.yaml.
+# managed Ubuntu/Debian hosts. For a NEW host, run this while ansible_user still
+# points at a pre-existing account with SSH access (the original build user),
+# BEFORE that host relies on virtuajimmy for the connection.
 #
 #   ansible-playbook -i inventory.yaml deploy_agent_user.yaml \
 #     --tags agent_user --vault-password-file ~/ansible_key

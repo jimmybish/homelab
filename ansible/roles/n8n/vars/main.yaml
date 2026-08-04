@@ -21,5 +21,5 @@ n8n_configure_homepage: true    # ALWAYS true - n8n has web interface
 n8n_configure_proxy: true       # ALWAYS true - n8n has web interface
 n8n_configure_dns: true         # ALWAYS true - n8n has web interface
 
-# Copilot CLI path on mgmt host
-n8n_copilot_path: "/home/jimmy/.local/bin/copilot"
+# Copilot CLI path on mgmt host (virtuajimmy's own install)
+n8n_copilot_path: "/home/virtuajimmy/.local/bin/copilot"

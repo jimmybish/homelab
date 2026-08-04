@@ -1,0 +1,5 @@
+---
+# Extra key authorised for virtuajimmy on the mgmt host: the n8n "copilot" SSH
+# key, so the n8n container can connect to mgmt as virtuajimmy and run Copilot.
+os_configure_agent_extra_authorized_keys:
+  - "{{ n8n_copilot_ssh_pubkey }}"

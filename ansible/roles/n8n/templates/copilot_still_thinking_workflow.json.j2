@@ -20,7 +20,7 @@
     },
     {
       "parameters": {
-        "command": "ssh mgmt 'ps aux | grep \"cd /home/jimmy/homelab && {{ n8n_copilot_path }}\" | grep -v grep || true'"
+        "command": "ssh mgmt 'ps aux | grep \"cd /srv/homelab && {{ n8n_copilot_path }}\" | grep -v grep || true'"
       },
       "id": "exec-ps-1",
       "name": "Check Running Copilot",

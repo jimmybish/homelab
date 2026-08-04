@@ -1,0 +1,7 @@
+# Managed by Ansible - authorized_keys for {{ os_configure_agent_user }}
+# The agent's own key (used for Ansible and inter-host agent SSH).
+{{ lookup('file', os_configure_agent_pubkey_local) }}
+{% for key in os_configure_agent_extra_authorized_keys | default([]) %}
+# Extra authorised key for this host.
+{{ key }}
+{% endfor %}
