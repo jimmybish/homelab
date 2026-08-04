@@ -5,6 +5,7 @@ warn_list:
 # These virtual paths don't exist on disk — they resolve correctly at runtime.
 exclude_paths:
   - roles/arr_suite/tasks/tasks/
+  - roles/bambuddy/tasks/tasks/
   - roles/grafana/tasks/tasks/
   - roles/homepage/tasks/tasks/
   - roles/jellyfin/tasks/tasks/
@@ -14,3 +15,4 @@ exclude_paths:
   - roles/paperless_ngx/tasks/tasks/
   - roles/plex/tasks/tasks/
   - roles/tracearr/tasks/tasks/
+  - roles/tronbyt/tasks/tasks/

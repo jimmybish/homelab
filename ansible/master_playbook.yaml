@@ -27,6 +27,9 @@
 - name: Deploy Bambuddy
   ansible.builtin.import_playbook: deploy_bambuddy.yaml
 
+- name: Deploy Hermes Agent
+  ansible.builtin.import_playbook: deploy_hermes.yaml
+
 - name: Deploy Maintainerr
   ansible.builtin.import_playbook: deploy_maintainerr.yaml
 
@@ -50,6 +53,9 @@
 
 - name: Deploy Paperless
   ansible.builtin.import_playbook: deploy_paperless.yaml
+
+- name: Deploy Tronbyt
+  ansible.builtin.import_playbook: deploy_tronbyt.yaml
 
 - name: Deploy Tracearr
   ansible.builtin.import_playbook: deploy_tracearr.yaml

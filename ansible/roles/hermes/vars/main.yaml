@@ -1,0 +1,38 @@
+---
+# Research Notes - Hermes Agent
+# Official repository: https://github.com/NousResearch/hermes-agent
+# Documentation: https://hermes-agent.nousresearch.com/docs/
+# Install docs: https://github.com/NousResearch/hermes-agent#quick-install
+# Configuration: https://hermes-agent.nousresearch.com/docs/user-guide/configuration
+# Providers: https://hermes-agent.nousresearch.com/docs/integrations/providers
+# Skills: https://hermes-agent.nousresearch.com/docs/user-guide/features/skills
+# Security policy: https://github.com/NousResearch/hermes-agent/blob/main/SECURITY.md
+# Release: https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.20
+# Audited commit: https://github.com/NousResearch/hermes-agent/commit/37a27664cc11a33d36739fafe864d1d084370c47
+# Last researched: 2026-07-26
+#
+# Native user-scoped Git installation managed by the official installer. The
+# dashboard defaults to 127.0.0.1:9119; this audited deployment intentionally
+# binds to 0.0.0.0:9119 with dashboard authentication and UFW enabled. Upstream
+# requires auth for non-loopback binds and recommends OS isolation, non-root
+# execution, tight credential permissions, and review of third-party skills.
+# GitHub listed no published project security advisories on the research date.
+
+hermes_version: "0.19.0"
+hermes_release: "2026.7.20"
+hermes_release_commit: "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
+hermes_install_commit: "37a27664cc11a33d36739fafe864d1d084370c47"
+hermes_installer_url: "https://raw.githubusercontent.com/NousResearch/hermes-agent/{{ hermes_install_commit }}/scripts/install.sh"
+hermes_installer_checksum: "sha256:87167c9a39be30ef5cd0240b228d6e9cac4fd4001389713585f697cb082985f1"
+hermes_installer_path: "/var/tmp/hermes-install-{{ hermes_install_commit }}.sh"
+hermes_required_packages:
+  - build-essential
+  - ca-certificates
+  - curl
+  - ffmpeg
+  - git
+  - libffi-dev
+  - python3-dev
+  - ripgrep
+
+...

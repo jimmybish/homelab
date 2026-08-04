@@ -1,0 +1,117 @@
+---
+# Docker Prerequisites
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+# Directory Setup
+- name: Setup Tronbyt directory
+  ansible.builtin.file:
+    path: "{{ tronbyt_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user_puid }}"
+    group: "{{ docker_user_pgid }}"
+
+# Firewall Configuration (REQUIRED for web interface + Prometheus scraping)
+- name: Allow Tronbyt port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ tronbyt_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+# Deploy Configuration Files
+- name: Deploy Tronbyt using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ tronbyt_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Tronbyt
+
+- name: Run docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ tronbyt_folder }}"
+    state: present
+    remove_orphans: true
+
+# Health Check
+- name: Check if service ports are open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Tronbyt port is listening
+  ansible.builtin.assert:
+    that:
+      - tronbyt_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Tronbyt port is not open and listening!"
+    success_msg: "Tronbyt port is open and listening."
+
+# Configure SWAG Internal Proxy (REQUIRED for web interfaces)
+- name: Resolve service host IP for proxy configuration
+  ansible.builtin.set_fact:
+    tronbyt_proxy_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+  when: tronbyt_configure_proxy | default(true)
+
+- name: Deploy Tronbyt nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: tronbyt.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/tronbyt.subdomain.conf"
+    mode: '0664'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag Internal
+  when: tronbyt_configure_proxy | default(true)
+
+# DNS Configuration (REQUIRED for web interfaces)
+- name: Ensure deployment host DNS override exists
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
+  vars:
+    _dns_configure: "{{ tronbyt_configure_dns | default(true) }}"
+  when: tronbyt_configure_dns | default(true)
+
+- name: Create tronbyt DNS alias
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+  vars:
+    _dns_configure: "{{ tronbyt_configure_dns | default(true) }}"
+    _dns_alias_host: tronbyt
+    _dns_alias_descr: Tidbyt app management server
+    _dns_is_proxied: "{{ tronbyt_is_proxied | default(true) }}"
+  when: tronbyt_configure_dns | default(true)
+
+# Configure Homepage Services (REQUIRED for web interfaces)
+- name: Add Tronbyt to Homepage Smart Home section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: Tronbyt
+    _homepage_marker: tronbyt service
+    _homepage_template: tronbyt_service.yaml.j2
+    _homepage_insertafter: "^- Smart Home:"
+  when: tronbyt_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for tronbyt
+  ansible.builtin.debug:
+    msg: "tronbyt homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify:
+    - Restart Homepage
+  when: tronbyt_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config

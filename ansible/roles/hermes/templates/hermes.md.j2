@@ -1,0 +1,10 @@
+# Project
+
+## Delegation & Parallelism
+- Split complex tasks into parallel substreams. Always use `delegate_task`
+  with the `tasks` array for 2+ independent subtasks rather than sequential
+  steps in a single agent.
+- Prefer batch delegation over chained sequential tool calls.
+- When a task has 3+ independent steps, spawn sub-agents for each.
+- Summarize results from sub-agents at the end; do not wait for one
+  subtask to finish before starting the next.

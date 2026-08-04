@@ -1,0 +1,384 @@
+---
+- name: Look up Hermes account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ hermes_user }}"
+
+- name: Verify audited Hermes account home
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.getent_passwd[hermes_user][4] == hermes_user_home
+    fail_msg: >-
+      Hermes account {{ hermes_user }} has home
+      {{ ansible_facts.getent_passwd[hermes_user][4] }}, expected
+      {{ hermes_user_home }}.
+
+- name: Install Hermes system prerequisites
+  ansible.builtin.apt:
+    name: "{{ hermes_required_packages }}"
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+
+- name: Create Hermes directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ hermes_bin_dir }}"
+      mode: '0775'
+    - path: "{{ hermes_home }}"
+      mode: '0700'
+    - path: "{{ hermes_skills_dir }}"
+      mode: '0700'
+
+- name: Download pinned official Hermes installer
+  ansible.builtin.get_url:
+    url: "{{ hermes_installer_url }}"
+    dest: "{{ hermes_installer_path }}"
+    checksum: "{{ hermes_installer_checksum }}"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Inspect Hermes installation artifacts
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ hermes_bin }}"
+    - "{{ hermes_install_dir }}/venv/bin/python"
+  register: hermes_install_artifacts
+
+- name: Read installed Hermes commit
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ hermes_install_dir }}"
+      - rev-parse
+      - HEAD
+  register: hermes_installed_commit
+  changed_when: false
+  failed_when: false
+
+- name: Install pinned Hermes commit
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - "{{ hermes_installer_path }}"
+      - --commit
+      - "{{ hermes_install_commit }}"
+      - --skip-setup
+      - --non-interactive
+      - --dir
+      - "{{ hermes_install_dir }}"
+      - --hermes-home
+      - "{{ hermes_home }}"
+  become: true
+  become_user: "{{ hermes_user }}"
+  changed_when: true
+  environment:
+    HOME: "{{ hermes_user_home }}"
+    USER: "{{ hermes_user }}"
+  when: >-
+    hermes_installed_commit.rc != 0 or
+    hermes_installed_commit.stdout != hermes_install_commit or
+    not (hermes_install_artifacts.results[0].stat.executable | default(false)) or
+    not (hermes_install_artifacts.results[1].stat.executable | default(false))
+  notify: Restart Hermes dashboard
+
+- name: Verify installed Hermes version and commit
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_bin }}"
+      - --version
+  become: true
+  become_user: "{{ hermes_user }}"
+  environment:
+    HOME: "{{ hermes_user_home }}"
+  register: hermes_version_result
+  changed_when: false
+  failed_when: >-
+    hermes_version_result.rc != 0 or
+    ('Hermes Agent v' + hermes_version) not in hermes_version_result.stdout or
+    hermes_install_commit[:8] not in hermes_version_result.stdout
+
+- name: Deploy Hermes base agent config
+  ansible.builtin.template:
+    src: hermes.md.j2
+    dest: "{{ hermes_agent_config_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  notify: Restart Hermes dashboard
+
+- name: Deploy Hermes config
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ hermes_config_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+    validate: >-
+      {{ hermes_install_dir }}/venv/bin/python -c
+      'import pathlib,sys,yaml; yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))'
+      %s
+  notify: Restart Hermes dashboard
+
+- name: Deploy Hermes environment secrets
+  ansible.builtin.template:
+    src: hermes.env.j2
+    dest: "{{ hermes_env_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  no_log: true
+  notify: Restart Hermes dashboard
+
+- name: Deploy Hermes provider credential store
+  ansible.builtin.template:
+    src: auth.json.j2
+    dest: "{{ hermes_auth_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+    validate: "{{ hermes_install_dir }}/venv/bin/python -m json.tool %s"
+  no_log: true
+  notify: Restart Hermes dashboard
+
+- name: Inspect Hermes configuration paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ hermes_config_file }}"
+    - "{{ hermes_legacy_config_file }}"
+  register: hermes_config_paths
+
+- name: Assert authoritative Hermes configuration path
+  ansible.builtin.assert:
+    that:
+      - hermes_config_paths.results[0].stat.exists
+      - hermes_config_paths.results[0].stat.isreg
+      - hermes_config_paths.results[0].stat.pw_name == hermes_user
+      - hermes_config_paths.results[0].stat.gr_name == hermes_user
+      - hermes_config_paths.results[0].stat.mode == '0600'
+      - not hermes_config_paths.results[1].stat.exists
+    fail_msg: >-
+      Hermes requires {{ hermes_config_file }} at mode 0600 and does not read
+      {{ hermes_legacy_config_file }}.
+    success_msg: "Hermes is using the authoritative config.yaml path."
+
+- name: Deploy managed Hermes custom skills
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: >-
+      {{ hermes_skills_dir }}/{{ item.category | default('custom', true) }}/{{ item.name }}/
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: preserve
+    directory_mode: '0700'
+  loop: "{{ hermes_custom_skills }}"
+  when: hermes_custom_skills | length > 0
+  notify: Restart Hermes dashboard
+
+- name: Allow Hermes dashboard port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ hermes_port | string }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Read UFW status for Hermes dashboard
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - status
+  register: hermes_ufw_status
+  changed_when: false
+  when: ansible_os_family == "Debian"
+
+- name: Assert Hermes dashboard UFW rule is active
+  ansible.builtin.assert:
+    that:
+      - "'Status: active' in hermes_ufw_status.stdout"
+      - "(hermes_port | string) + '/tcp' in hermes_ufw_status.stdout"
+    fail_msg: "UFW is not active with TCP port {{ hermes_port }} allowed."
+    success_msg: "UFW is active with TCP port {{ hermes_port }} allowed."
+  when: ansible_os_family == "Debian"
+
+- name: Deploy Hermes dashboard service source
+  ansible.builtin.template:
+    src: hermes-dashboard.service.j2
+    dest: "{{ hermes_service_source_path }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  notify: Restart Hermes dashboard
+
+- name: Deploy Hermes dashboard systemd unit
+  ansible.builtin.template:
+    src: hermes-dashboard.service.j2
+    dest: "{{ hermes_service_unit_path }}"
+    owner: root
+    group: root
+    mode: '0600'
+  notify: Restart Hermes dashboard
+
+- name: Apply pending Hermes restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start Hermes dashboard
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_service_name }}"
+    state: started
+    enabled: true
+  register: hermes_service_status
+
+- name: Assert Hermes dashboard service state
+  ansible.builtin.assert:
+    that:
+      - hermes_service_status.status.ActiveState == 'active'
+      - hermes_service_status.status.UnitFileState == 'enabled'
+      - hermes_service_status.status.FragmentPath == hermes_service_unit_path
+      - hermes_service_status.status.MainPID | int > 0
+    fail_msg: "Hermes dashboard is not active and enabled from the managed unit."
+    success_msg: "Hermes dashboard is active and enabled at boot."
+
+- name: Wait for Hermes dashboard listener
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ hermes_port }}"
+    state: started
+    timeout: 120
+
+- name: Gather listening port facts
+  community.general.listen_ports_facts:
+
+- name: Select Hermes dashboard listeners
+  ansible.builtin.set_fact:
+    hermes_dashboard_listeners: >-
+      {{ ansible_facts.tcp_listen
+         | selectattr('port', 'equalto', hermes_port | int)
+         | list }}
+
+- name: Assert Hermes dashboard listener identity
+  ansible.builtin.assert:
+    that:
+      - hermes_dashboard_listeners | length > 0
+      - hermes_bind_address in (hermes_dashboard_listeners | map(attribute='address') | list)
+      - hermes_user in (hermes_dashboard_listeners | map(attribute='user') | list)
+      - hermes_dashboard_process_name in (hermes_dashboard_listeners | map(attribute='name') | list)
+      - (hermes_service_status.status.MainPID | int) in (hermes_dashboard_listeners | map(attribute='pid') | list)
+    fail_msg: >-
+      Hermes dashboard is not listening as {{ hermes_user }} process
+      {{ hermes_dashboard_process_name }} on {{ hermes_bind_address }}:{{ hermes_port }}.
+    success_msg: >-
+      Hermes dashboard is listening as {{ hermes_user }} process
+      {{ hermes_dashboard_process_name }} on {{ hermes_bind_address }}:{{ hermes_port }}.
+
+- name: Read Hermes dashboard public status
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hermes_port }}/api/status"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: hermes_dashboard_status
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Assert Hermes dashboard authentication gate
+  ansible.builtin.assert:
+    that:
+      - hermes_dashboard_status.json.auth_required | bool
+      - hermes_dashboard_auth_provider in (hermes_dashboard_status.json.auth_providers | default([]))
+    fail_msg: "Hermes dashboard authentication is not active."
+    success_msg: "Hermes dashboard authentication is active."
+  when: not ansible_check_mode
+
+- name: Verify unauthenticated Hermes dashboard redirect
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hermes_port }}/"
+    method: GET
+    follow_redirects: none
+    status_code: 302
+  register: hermes_dashboard_unauthenticated
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert unauthenticated Hermes dashboard requires login
+  ansible.builtin.assert:
+    that:
+      - "'/login?next=' in hermes_dashboard_unauthenticated.location"
+    fail_msg: "Hermes dashboard did not redirect an unauthenticated request to login."
+    success_msg: "Hermes dashboard redirects unauthenticated requests to login."
+  when: not ansible_check_mode
+
+- name: Authenticate to Hermes dashboard
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hermes_port }}/auth/password-login"
+    method: POST
+    body_format: json
+    body:
+      provider: "{{ hermes_dashboard_auth_provider }}"
+      username: "{{ hermes_dashboard_basic_auth_username }}"
+      password: "{{ hermes_dashboard_basic_auth_password }}"
+      next: /
+    return_content: true
+    status_code: 200
+  register: hermes_dashboard_login
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Verify authenticated Hermes dashboard identity
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hermes_port }}/api/auth/me"
+    method: GET
+    headers:
+      Cookie: "{{ hermes_dashboard_login.cookies_string }}"
+    return_content: true
+    status_code: 200
+  register: hermes_dashboard_identity
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Assert authenticated Hermes dashboard identity
+  ansible.builtin.assert:
+    that:
+      - hermes_dashboard_login.json.ok | bool
+      - hermes_dashboard_login.json.next == '/'
+      - hermes_dashboard_login.cookies_string | length > 0
+      - hermes_dashboard_identity.json.provider == hermes_dashboard_auth_provider
+      - hermes_dashboard_identity.json.user_id == hermes_dashboard_basic_auth_username
+    fail_msg: "Hermes dashboard authentication did not return the expected identity."
+    success_msg: "Hermes dashboard authentication returned the expected identity."
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Verify authenticated Hermes dashboard content
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hermes_port }}/"
+    method: GET
+    headers:
+      Cookie: "{{ hermes_dashboard_login.cookies_string }}"
+    return_content: true
+    status_code: 200
+  register: hermes_dashboard_authenticated
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Assert authenticated Hermes dashboard content
+  ansible.builtin.assert:
+    that:
+      - hermes_dashboard_expected_text in hermes_dashboard_authenticated.content
+    fail_msg: "Authenticated port {{ hermes_port }} did not return the Hermes dashboard."
+    success_msg: "Authenticated Hermes dashboard returned expected content."
+  when: not ansible_check_mode
+
+...

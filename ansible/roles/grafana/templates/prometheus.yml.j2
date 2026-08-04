@@ -21,3 +21,12 @@ scrape_configs:
         - {{ host }}.{{ internal_domain }}:8089
 {% endif %}
 {% endfor %}
+  - job_name: 'tronbyt'
+    metrics_path: /metrics
+    static_configs:
+{% for host in groups.get('tronbyt_host', []) %}
+      - targets:
+        - {{ host }}.{{ internal_domain }}:8010
+        labels:
+          instance: {{ host }}.{{ internal_domain }}
+{% endfor %}

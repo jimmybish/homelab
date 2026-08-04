@@ -1,0 +1,34 @@
+---
+# Research Notes - Tronbyt Server
+# Official Source: https://github.com/tronbyt/server
+# Docker Compose:  https://github.com/tronbyt/server-docker-compose
+# Container Image: ghcr.io/tronbyt/server:2 (latest v2.x.x release tag)
+# Container Port:  8000 (web UI + Prometheus /metrics on the same port)
+# Metrics:         GET /metrics exposes Prometheus-compatible metrics (tronbyt_*,
+#                  GORM DB pool stats, Go runtime metrics). No separate port.
+# Data Volume:     /app/data
+# Last Updated: 2026-08-04
+
+# Version information (2 = latest v2.x.x release tag)
+tronbyt_version: "2"
+
+# Port mappings
+# Container listens on 8000. Host port is 8010 because paperless already uses
+# 8000 on docker-2. Prometheus scrapes {{ host }}:8010/metrics.
+tronbyt_port: 8010          # PRIMARY HOST PORT
+tronbyt_container_port: 8000
+
+# Volume paths (use docker_storage_folder from group_vars)
+# Single-container service
+tronbyt_folder: "{{ docker_storage_folder }}/tronbyt"
+
+# Application configuration
+tronbyt_production: "true"
+tronbyt_enable_user_registration: "false"   # admin-only account creation
+tronbyt_log_level: "INFO"
+
+# Feature flags - Tronbyt has a web interface
+tronbyt_configure_homepage: true    # ALWAYS true if web interface exists
+tronbyt_configure_proxy: true       # ALWAYS true if web interface exists
+tronbyt_configure_dns: true         # ALWAYS true if web interface exists
+tronbyt_is_proxied: true            # Service is behind reverse proxy

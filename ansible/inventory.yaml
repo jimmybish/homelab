@@ -147,6 +147,11 @@ bambuddy_host:
   hosts:
     docker-1:
 
+# Hermes Agent
+hermes_host:
+  hosts:
+    hermes:
+
 # Tracearr
 tracearr_host:
   hosts:
@@ -159,6 +164,11 @@ mcp_tracearr_host:
 
 # JellyPlex-Watched
 jellyplex_watched_host:
+  hosts:
+    docker-2:
+
+# Tronbyt
+tronbyt_host:
   hosts:
     docker-2:
 

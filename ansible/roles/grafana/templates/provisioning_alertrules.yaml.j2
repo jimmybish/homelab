@@ -288,7 +288,7 @@ groups:
         annotations:
           summary: "NVMe drive temperature high on {% raw %}{{ $labels.instance }}{% endraw %}"
           description: "Current NVMe temperature: {% raw %}{{ $value }}{% endraw %}°C (threshold: {{ grafana_alert_nvme_temp_threshold }}°C)"
-          runbook_url: "https://wiki.jimmynrose.id.au/storage#nvme-temperature-management"
+          runbook_url: "https://wiki.{{ internal_domain }}/storage#nvme-temperature-management"
         labels:
           severity: warning
           component: storage
