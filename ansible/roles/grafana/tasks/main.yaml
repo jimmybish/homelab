@@ -183,12 +183,20 @@
     - Start Grafana
 
 - name: Deploy Grafana dashboard JSON files
-  ansible.builtin.copy:
-    src: "dashboards/"
-    dest: "{{ grafana_folder }}/provisioning/dashboards/json/"
+  ansible.builtin.template:
+    src: "templates/dashboards/{{ item }}.json.j2"
+    dest: "{{ grafana_folder }}/provisioning/dashboards/json/{{ item }}.json"
     mode: '0644'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
+    # Custom delimiters avoid clashing with Prometheus legendFormat syntax (e.g. {{ instance }}) baked into the dashboards
+    variable_start_string: "[["
+    variable_end_string: "]]"
+  loop:
+    - docker-monitoring
+    - host-availability
+    - host-monitoring
+    - proxmox-cluster-flux
   notify:
     - Start Grafana
 
