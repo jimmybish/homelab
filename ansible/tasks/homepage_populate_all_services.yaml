@@ -6,6 +6,21 @@
 # into Homepage's services.yaml. Order matters: arr_suite creates the ARR section
 # that maintainerr inserts into, so arr_suite must come first.
 
+# --- Slop section ---
+
+- name: "Homepage config: Open WebUI"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: Open WebUI
+    _homepage_marker: open_webui service
+    _homepage_template: open_webui_service.yaml.j2
+    _homepage_insertafter: "^- Slop:"
+  when: open_webui_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
 # --- Media section ---
 
 - name: "Homepage config: Plex"

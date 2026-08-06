@@ -1,0 +1,26 @@
+## Version 2025/07/18
+# Adapted from LinuxServer reverse-proxy-confs for a cross-host upstream.
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+
+    server_name open-webui.{{ internal_domain }};
+
+    include /config/nginx/ssl.conf;
+
+    client_max_body_size 0;
+
+    location / {
+        include /config/nginx/proxy.conf;
+        include /config/nginx/resolver.conf;
+        set $upstream_app {{ open_webui_proxy_ip }};
+        set $upstream_port {{ open_webui_port }};
+        set $upstream_proto http;
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}

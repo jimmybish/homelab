@@ -1,0 +1,15 @@
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:{{ open_webui_version }}
+    container_name: open-webui
+    environment:
+      TZ: "{{ timezone }}"
+      CORS_ALLOW_ORIGIN: "{{ open_webui_cors_allow_origin }}"
+      ENABLE_OLLAMA_API: "{{ open_webui_enable_ollama_api | string | lower }}"
+      OPENAI_API_BASE_URL: "{{ open_webui_openai_api_base_url }}"
+      WEBUI_SECRET_KEY: "{{ open_webui_secret_key }}"
+    ports:
+      - '{{ open_webui_port }}:{{ open_webui_container_port }}'
+    volumes:
+      - {{ open_webui_data_folder }}:/app/backend/data
+    restart: unless-stopped

@@ -1,0 +1,119 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup Open WebUI directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+  loop:
+    - path: "{{ open_webui_folder }}"
+      owner: "{{ docker_user }}"
+      group: "{{ docker_user }}"
+    - path: "{{ open_webui_data_folder }}"
+      owner: "{{ open_webui_container_uid }}"
+      group: "{{ open_webui_container_gid }}"
+
+- name: Allow Open WebUI port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ open_webui_port | string }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Deploy Open WebUI using Docker Compose
+  ansible.builtin.template:
+    src: templates/docker_compose.yaml.j2
+    dest: "{{ open_webui_folder }}/docker-compose.yaml"
+    mode: '0600'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Restart Open WebUI
+
+- name: Run Open WebUI Docker Compose project
+  community.docker.docker_compose_v2:
+    project_src: "{{ open_webui_folder }}"
+    state: present
+    remove_orphans: true
+    wait: true
+    wait_timeout: 300
+
+- name: Check service listening ports
+  community.general.listen_ports_facts:
+
+- name: Assert Open WebUI port is listening
+  ansible.builtin.assert:
+    that:
+      - open_webui_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Open WebUI port is not open and listening!"
+    success_msg: "Open WebUI port is open and listening."
+
+- name: Resolve Open WebUI host IP for proxy configuration
+  ansible.builtin.set_fact:
+    open_webui_proxy_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+  when: open_webui_configure_proxy | default(true)
+
+- name: Deploy Open WebUI nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: open-webui.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/open-webui.subdomain.conf"
+    mode: '0664'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag Internal
+  when: open_webui_configure_proxy | default(true)
+
+- name: Ensure deployment host DNS override exists
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
+  vars:
+    _dns_configure: "{{ open_webui_configure_dns | default(true) }}"
+  when: open_webui_configure_dns | default(true)
+
+- name: Create Open WebUI DNS alias
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+  vars:
+    _dns_configure: "{{ open_webui_configure_dns | default(true) }}"
+    _dns_alias_host: open-webui
+    _dns_alias_descr: Self-hosted AI interface
+    _dns_is_proxied: "{{ open_webui_is_proxied | default(true) }}"
+  when: open_webui_configure_dns | default(true)
+
+- name: Add Open WebUI to Homepage Slop section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: Open WebUI
+    _homepage_marker: open_webui service
+    _homepage_template: open_webui_service.yaml.j2
+    _homepage_insertafter: "^- Slop:"
+  when: open_webui_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for Open WebUI
+  ansible.builtin.debug:
+    msg: "Open WebUI homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify:
+    - Restart Homepage
+  when: open_webui_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+...

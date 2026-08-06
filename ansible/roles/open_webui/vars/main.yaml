@@ -1,0 +1,33 @@
+---
+# Research Notes - Open WebUI
+# Official Source: https://github.com/open-webui/open-webui
+# Docker quick start: https://docs.openwebui.com/getting-started/quick-start/
+# Example Compose: https://github.com/open-webui/open-webui/blob/main/docker-compose.yaml
+# NGINX Proxy Config: https://github.com/linuxserver/reverse-proxy-confs/blob/master/open-webui.subdomain.conf.sample
+# Homepage Widget: no native widget available
+# Current stable release: v0.11.0 (published 2026-07-27)
+# Last Updated: 2026-08-06
+# The standard image runs as UID/GID 0 and persists application data at /app/backend/data.
+# No Ollama sidecar is required; Open WebUI uses Sparky's unauthenticated vLLM
+# endpoint through the OpenAI-compatible API at port 8000.
+# WebSocket support and a persistent WEBUI_SECRET_KEY are required.
+# v0.11.0 fixes the ten advisories published around 2026-08-02. Although only
+# main is covered by upstream's security policy, production docs recommend a
+# stable version pin; monitor releases and update this pin promptly.
+
+open_webui_version: v0.11.0
+open_webui_port: 3000
+open_webui_container_port: 8080
+open_webui_openai_api_base_url: "http://sparky.{{ internal_domain }}:8000/v1"
+open_webui_enable_ollama_api: false
+open_webui_cors_allow_origin: "{{ internal_open_webui_url }}"
+
+open_webui_folder: "{{ docker_storage_folder }}/open-webui"
+open_webui_data_folder: "{{ open_webui_folder }}/data"
+open_webui_container_uid: 0
+open_webui_container_gid: 0
+
+open_webui_configure_homepage: true
+open_webui_configure_proxy: true
+open_webui_configure_dns: true
+open_webui_is_proxied: true

@@ -36,6 +36,9 @@
 - name: Deploy Hermes Agent
   ansible.builtin.import_playbook: deploy_hermes.yaml
 
+- name: Deploy Open WebUI
+  ansible.builtin.import_playbook: deploy_open_webui.yaml
+
 - name: Deploy Maintainerr
   ansible.builtin.import_playbook: deploy_maintainerr.yaml
 

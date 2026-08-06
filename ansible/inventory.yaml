@@ -156,6 +156,11 @@ hermes_host:
   hosts:
     hermes:
 
+# Open WebUI
+open_webui_host:
+  hosts:
+    hermes:
+
 # Tracearr
 tracearr_host:
   hosts:
