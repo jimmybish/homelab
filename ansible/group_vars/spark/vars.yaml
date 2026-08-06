@@ -1,0 +1,9 @@
+---
+docker_manage_installation: false
+
+docker_daemon_additional_options:
+  default-runtime: nvidia
+  runtimes:
+    nvidia:
+      args: []
+      path: nvidia-container-runtime

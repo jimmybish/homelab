@@ -30,8 +30,9 @@ omada_sdn_host:
 # All Ububtu hosts
 ubuntu:
   vars:
-    ansible_python_interpreter: /usr/bin/python3.10
+    ansible_python_interpreter: /usr/bin/python3
   hosts:
+    sparky:
     mgmt:
     docker-1:
     docker-2:
@@ -49,11 +50,13 @@ docker_vm_hosts:
     proxy:
 
 # All Debian hosts
-# debian:
-#   vars:
-#     ansible_python_interpreter: /usr/bin/python3.11
-#   hosts:
-#    debian-downloader:
+debian:
+  hosts:
+
+# Nvidia Spark
+spark:
+  hosts:
+    sparky:
 
 # Plex Media Server
 plex_host:

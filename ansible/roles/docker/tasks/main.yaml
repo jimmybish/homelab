@@ -7,6 +7,7 @@
         if ansible_distribution == 'Ubuntu'
         else 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian ' ~ ansible_distribution_release ~ ' stable'
       }}
+  when: docker_manage_installation | default(true) | bool
 
 - name: Ensure apt keyring directory exists
   ansible.builtin.file:
@@ -23,6 +24,7 @@
     owner: root
     group: root
     mode: "0644"
+  when: docker_manage_installation | default(true) | bool
 
 - name: Configure Docker apt repository
   ansible.builtin.copy:
@@ -31,6 +33,15 @@
     owner: root
     group: root
     mode: "0644"
+  when: docker_manage_installation | default(true) | bool
+
+- name: Remove role-managed Docker apt repository when installation is externally managed
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/docker.list
+    state: absent
+  when: not (docker_manage_installation | default(true) | bool)
+  tags:
+    - docker_repository_cleanup
 
 - name: Update apt cache
   ansible.builtin.apt:
@@ -74,15 +85,25 @@
     name: docker-ce
     state: present
     update_cache: true
+  when: docker_manage_installation | default(true) | bool
 
 - name: Configure Docker daemon options
-  ansible.builtin.template:
-    src: "templates/docker_daemon.json.j2"
+  ansible.builtin.copy:
+    content: >-
+      {{
+        docker_daemon_options
+        | combine(docker_daemon_additional_options | default({}), recursive=true)
+        | to_nice_json
+      }}
     dest: "/etc/docker/daemon.json"
     owner: 'root'
     group: 'root'
-    mode: '0755'
+    mode: '0644'
+    backup: true
+    validate: "/usr/bin/dockerd --validate --config-file=%s"
   notify: Restart Docker
+  tags:
+    - docker_daemon_config
 
 - name: Ensure Docker service is enabled and running
   ansible.builtin.systemd:

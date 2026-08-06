@@ -97,6 +97,7 @@ echo "==> Bootstrapping virtuajimmy agent user on $HOST"
 ansible-playbook -i inventory.yaml deploy_agent_user.yaml \
   --limit "$HOST" \
   --tags agent_user \
+  --ask-become-pass \
   -e ansible_user="$BUILD_USER" \
   -e ansible_ssh_private_key_file="$KEY_PATH" \
   --vault-password-file "$VAULT_KEY"
