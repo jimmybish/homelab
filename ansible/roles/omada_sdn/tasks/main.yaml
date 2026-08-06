@@ -1,0 +1,134 @@
+---
+# Docker Prerequisites
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+# Directory Setup
+- name: Setup Omada SDN Controller directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  loop:
+    - "{{ omada_sdn_folder }}"
+    - "{{ omada_sdn_data_folder }}"
+    - "{{ omada_sdn_logs_folder }}"
+
+# Firewall Configuration (LAN-only device management/adoption/discovery ports)
+- name: Allow Omada SDN Controller management HTTP port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ omada_sdn_manage_http_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Omada SDN Controller management HTTPS port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ omada_sdn_manage_https_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Omada SDN Controller portal HTTPS port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ omada_sdn_portal_https_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Omada SDN Controller app discovery port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ omada_sdn_app_discovery_port }}"
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Omada SDN Controller device discovery port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ omada_sdn_discovery_port }}"
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Allow Omada SDN Controller device manage/adopt/upgrade port range through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ omada_sdn_tcp_port_range }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+# Deploy Configuration Files & Run Compose
+- name: Deploy Omada SDN Controller using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ omada_sdn_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start Omada SDN Controller
+
+- name: Run Omada SDN Controller docker-compose up
+  community.docker.docker_compose_v2:
+    project_src: "{{ omada_sdn_folder }}"
+    state: present
+    remove_orphans: true
+
+# Health Check
+# The controller takes 30-60s to initialize its embedded MongoDB and Spring Boot
+# app on first start, so retry until the management ports come up.
+- name: Wait for Omada SDN Controller management ports to be listening
+  ansible.builtin.wait_for:
+    port: "{{ item }}"
+    timeout: 120
+  loop:
+    - "{{ omada_sdn_manage_http_port }}"
+    - "{{ omada_sdn_manage_https_port }}"
+
+- name: Check if Omada SDN Controller ports are open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Omada SDN Controller ports are listening
+  ansible.builtin.assert:
+    that:
+      - omada_sdn_manage_http_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - omada_sdn_manage_https_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "One or more Omada SDN Controller ports are not open and listening!"
+    success_msg: "Omada SDN Controller management ports are open and listening."
+
+# Homepage Configuration
+# Not reverse-proxied or DNS-aliased (see vars/main.yaml) - links directly to the host.
+- name: Add Omada SDN Controller to Homepage Infra section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: Omada SDN Controller
+    _homepage_marker: omada_sdn service
+    _homepage_template: omada_sdn_service.yaml.j2
+    _homepage_insertafter: "^- Infra:"
+  when: omada_sdn_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for omada_sdn
+  ansible.builtin.debug:
+    msg: "omada_sdn homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify:
+    - Restart Homepage
+  when: omada_sdn_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config

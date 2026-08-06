@@ -277,7 +277,7 @@ grafana_webhook_secret: !vault |
           30633163323838623562653132323639643933336634316364616631383165326465633437393265
           36646230353832396265336531613638356636616534323430353332386561616630303832356365
           66353466393435326131
-internal_omada_url: "https://tp-oc200.{{ internal_domain }}"
+internal_omada_sdn_url: "https://omada-sdn:8043"
 internal_paperless_url: "https://paperless.{{ internal_domain }}"
 internal_pfsense_url: "https://pfsense.{{ internal_domain }}"
 internal_plex_url: "https://plex.{{ internal_domain }}:32400"

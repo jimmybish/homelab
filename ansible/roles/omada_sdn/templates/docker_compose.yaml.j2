@@ -1,0 +1,18 @@
+services:
+  omada-sdn:
+    image: mbentley/omada-controller:{{ omada_sdn_version }}
+    container_name: omada-sdn
+    restart: unless-stopped
+    network_mode: host
+    stop_grace_period: 60s
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+    environment:
+      - TZ={{ timezone }}
+      - PUID={{ docker_user_puid }}
+      - PGID={{ docker_user_pgid }}
+    volumes:
+      - {{ omada_sdn_data_folder }}:/opt/tplink/EAPController/data
+      - {{ omada_sdn_logs_folder }}:/opt/tplink/EAPController/logs

@@ -24,6 +24,9 @@
 - name: Deploy Homepage
   ansible.builtin.import_playbook: deploy_homepage.yaml
 
+- name: Deploy Omada SDN Controller
+  ansible.builtin.import_playbook: deploy_omada_sdn.yaml
+
 - name: Deploy Bambuddy
   ansible.builtin.import_playbook: deploy_bambuddy.yaml
 

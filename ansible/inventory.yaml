@@ -22,11 +22,10 @@ pfsense_host:
   hosts:
     router:
 
-# TP-Link Omada Controller
-omada_controller:
+# TP-Link Omada SDN Controller (software controller, Docker)
+omada_sdn_host:
   hosts:
     omada-sdn:
-    tp-oc200:
 
 # All Ububtu hosts
 ubuntu:

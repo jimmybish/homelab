@@ -1,0 +1,53 @@
+---
+# Research Notes - TP-Link Omada SDN Controller (software controller, Docker)
+# Official Source: https://www.tp-link.com/en/business-networking/omada-sdn-controller/
+# Image (community-maintained, NOT official TP-Link): mbentley/omada-controller
+# GitHub: https://github.com/mbentley/docker-omada-controller
+# Docker Hub: https://hub.docker.com/r/mbentley/omada-controller
+# Example Compose: https://github.com/mbentley/docker-omada-controller/blob/master/docker-compose.yml
+# Last Updated: 2026-08-06
+#
+# - Pin to a major.minor tag (e.g. "6.2"); DO NOT use "latest" - upstream latest still
+#   points at the old v5 branch and will not be updated.
+# - Use network_mode: host (upstream-recommended) - bridge/port-mapping mode requires
+#   manually informing Omada devices of the controller's IP for adoption to work.
+# - Persistent data: bind-mount data (critical - DB/config) and logs directories.
+# - stop_grace_period: 60s - MongoDB inside the container can corrupt if killed too fast.
+# - No database/cache sidecar required; no initial credentials to change (first-run
+#   wizard - naming, region/timezone, admin account, device adoption - is done manually
+#   via the web UI after the container starts, not automated by Ansible).
+# - No pre-built LinuxServer reverse-proxy-confs sample exists for Omada, and the web UI
+#   relies heavily on WebSockets plus its own self-signed HTTPS on 8043, which makes it
+#   fragile behind a reverse proxy. Per team decision, this is NOT proxied through SWAG;
+#   Homepage links directly to https://omada-sdn:8043 instead.
+# - Known CVEs: none tracked specifically against this community image; keep the pinned
+#   tag updated periodically for upstream Omada Controller security fixes.
+# - Ports (from mbentley README "Optional Environment Variables" table / TP-Link FAQ):
+#   8088/tcp  - management HTTP
+#   8043/tcp  - management HTTPS
+#   8843/tcp  - user portal HTTPS
+#   27001/udp - Omada app discovery
+#   29810/udp - Omada device discovery
+#   29811-29817/tcp - device manage/adopt/upgrade/transfer/rtty/monitor (v1 + v2)
+
+omada_sdn_version: "6.2"
+
+# Ports
+omada_sdn_manage_http_port: 8088
+omada_sdn_manage_https_port: 8043
+omada_sdn_portal_https_port: 8843
+omada_sdn_app_discovery_port: 27001
+omada_sdn_discovery_port: 29810
+omada_sdn_tcp_port_range: "29811:29817"
+
+# Volume paths
+omada_sdn_folder: "{{ docker_storage_folder }}/omada-sdn"
+omada_sdn_data_folder: "{{ omada_sdn_folder }}/data"
+omada_sdn_logs_folder: "{{ omada_sdn_folder }}/logs"
+
+# Feature flags
+omada_sdn_configure_homepage: true
+# Not reverse-proxied or DNS-aliased - fragile WebSocket/self-signed HTTPS combo;
+# Homepage links directly to the host over its own management port instead.
+omada_sdn_configure_proxy: false
+omada_sdn_configure_dns: false

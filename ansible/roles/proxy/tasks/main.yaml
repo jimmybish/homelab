@@ -96,10 +96,6 @@
       {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'pfsense').split(','))[0]) == '127.0.1.1') |
       ternary((lookup('ansible.builtin.inventory_hostnames', 'pfsense').split(','))[0] ~ '.' ~ internal_domain,
       lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'pfsense').split(','))[0])) }}
-    proxy_omada_ip: >-
-      {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'omada_controller').split(','))[0]) == '127.0.1.1') |
-      ternary((lookup('ansible.builtin.inventory_hostnames', 'omada_controller').split(','))[0] ~ '.' ~ internal_domain,
-      lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'omada_controller').split(','))[0])) }}
     proxy_grafana_ip: >-
       {{ (lookup('community.general.dig', (lookup('ansible.builtin.inventory_hostnames', 'grafana_host').split(','))[0]) == '127.0.1.1') |
       ternary((lookup('ansible.builtin.inventory_hostnames', 'grafana_host').split(','))[0] ~ '.' ~ internal_domain,
@@ -124,7 +120,6 @@
       - "- proxy_radarr_ip = {{ proxy_radarr_ip }}"
       - "- proxy_proxmox_ip = {{ proxy_proxmox_ip }}"
       - "- proxy_pfsense_ip = {{ proxy_pfsense_ip }}"
-      - "- proxy_omada_ip = {{ proxy_omada_ip }}"
       - "- proxy_grafana_ip = {{ proxy_grafana_ip }}"
       - "- proxy_lidarr_ip = {{ proxy_lidarr_ip }}"
 
