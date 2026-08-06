@@ -25,6 +25,7 @@ pfsense_host:
 # TP-Link Omada Controller
 omada_controller:
   hosts:
+    omada-sdn:
     tp-oc200:
 
 # All Ububtu hosts
@@ -37,6 +38,7 @@ ubuntu:
     docker-2:
     hermes:
     jellyfin-lxc:
+    omada-sdn:
     plex-lxc:
     proxy:
 
