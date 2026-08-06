@@ -1,0 +1,6 @@
+---
+- name: Configure vLLM firewall
+  hosts: spark
+  become: true
+  roles:
+    - vllm

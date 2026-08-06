@@ -1,0 +1,7 @@
+---
+- name: Allow vLLM port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "8000"
+    proto: tcp
+  when: ansible_os_family == "Debian"
