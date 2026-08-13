@@ -16,7 +16,9 @@ Patterns for adding services to the Homepage dashboard via Ansible, including te
 
 ## Service Template
 
-Create `templates/homepage_service.yaml.j2`:
+Create `ansible/templates/homepage/<service>_service.yaml.j2`. Templates are
+playbook-level because both the service role and the centralized Homepage
+rebuild use them.
 
 Template checklist:
 
@@ -27,46 +29,55 @@ Template checklist:
 **With widget** (only if listed at `https://gethomepage.dev/widgets/`):
 
 ```yaml
-    - <Service Name>:
-        icon: <service>.png
-        href: {{ internal_<service>_url }}
-        description: Service description
-        widget:
-          type: <service>
-          url: {{ internal_<service>_url }}
-          key: {{ homepage_<service>_key }}
+  - <Service Name>:
+      icon: <service>.png
+      href: {{ internal_<service>_url }}
+      description: Service description
+      widget:
+        type: <service>
+        url: {{ internal_<service>_url }}
+        key: {{ homepage_<service>_key }}
 ```
 
 **Without widget** (service not listed on Homepage widgets page):
 
 ```yaml
-    - <Service Name>:
-        icon: <service>.png
-        href: {{ internal_<service>_url }}
-        description: Service description
+  - <Service Name>:
+    icon: <service>.png
+    href: {{ internal_<service>_url }}
+    description: Service description
 ```
 
 ### Indentation Rules
 
-- List items (starting with `-`): 4 spaces under the top-level section
-- Service properties (`icon`, `href`, etc.): 8 spaces
-- Widget properties: 10 spaces
+- List items (starting with `-`): 2 spaces under the top-level section
+- Service properties (`icon`, `href`, etc.): 6 spaces
+- Widget properties: 8 spaces
 - Match the indentation of existing entries in the target section before deploying
 
-## Ansible Task
+## Role Integration Task
 
 Add to `tasks/main.yaml` after DNS configuration:
 
 ```yaml
 # Configure Homepage Services (REQUIRED for web interfaces)
-- name: Add service to Homepage section
-  ansible.builtin.blockinfile:
-    path: "{{ homepage_folder }}/config/services.yaml"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK - <service> service"
-    block: "{{ lookup('template', 'homepage_service.yaml.j2') }}"
-    insertafter: "^- <Section>:"
-    mode: '0644'
-  delegate_to: "{{ groups['homepage_host'][0] }}"
+- name: Add <Service Name> to Homepage <Section> section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: <Service Name>
+    _homepage_marker: <service> service
+    _homepage_template: <service>_service.yaml.j2
+    _homepage_insertafter: "^- <Section>:"
+  when: <service>_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for <service>
+  ansible.builtin.debug:
+    msg: "<service> homepage entry updated"
+  changed_when: _homepage_service_result is changed
   notify:
     - Restart Homepage
   when: <service>_configure_homepage | default(true)
@@ -75,12 +86,40 @@ Add to `tasks/main.yaml` after DNS configuration:
     - homepage_config
 ```
 
+## Centralized Rebuild Registration
+
+Every service integration MUST also be registered in
+`ansible/tasks/homepage_populate_all_services.yaml`. Homepage can replace its
+base `services.yaml` during deployment; this registry restores all managed
+service blocks afterward. A role-only integration will disappear after such a
+rebuild.
+
+Add the service under its target section using the same marker, template,
+insertion point, condition, and tags as the role task:
+
+```yaml
+- name: "Homepage config: <Service Name>"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: <Service Name>
+    _homepage_marker: <service> service
+    _homepage_template: <service>_service.yaml.j2
+    _homepage_insertafter: "^- <Section>:"
+  when: <service>_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+```
+
 ## Important Notes
 
-- **DO** add `notify: Restart Homepage` — ensures Homepage restarts when deploying a single service
-- **DO NOT** add a check to skip if the block already exists — `blockinfile` will automatically update the block if the content changes
+- **DO** use `homepage_add_service.yaml` in both the role and rebuild registry
+- **DO** keep marker, template, insertion point, condition, and tags identical in both locations
+- **DO** add the bridge notification task — ensures Homepage restarts when deploying a single service
+- **DO NOT** add a check to skip if the block already exists — the shared `blockinfile` task updates it idempotently
 - This allows the role to update Homepage entries when you add new services or modify descriptions
-- The `blockinfile` module is idempotent and will only trigger changes when the block content actually differs
+- The shared task's `blockinfile` operation only triggers changes when the block content differs
 - All web interfaces MUST appear on Homepage for easy access
 - When running `master_playbook.yaml --tags homepage_config`, handlers are flushed and one final restart occurs
 
