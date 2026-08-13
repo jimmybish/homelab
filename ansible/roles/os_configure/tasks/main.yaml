@@ -6,6 +6,28 @@
     cache_valid_time: 3600
   become: true
 
+- name: Check for incomplete package configuration
+  ansible.builtin.command:
+    cmd: dpkg --audit
+  register: os_configure_dpkg_audit
+  changed_when: false
+  check_mode: false
+  when: ansible_os_family == "Debian"
+
+- name: Repair broken apt dependencies # noqa command-instead-of-module
+  ansible.builtin.command:
+    cmd: >-
+      apt-get -y
+      -o Dpkg::Options::=--force-confdef
+      -o Dpkg::Options::=--force-confold
+      --fix-broken install
+  changed_when: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when:
+    - ansible_os_family == "Debian"
+    - os_configure_dpkg_audit.stdout | trim | length > 0
+
 - name: Ensure UFW is installed
   ansible.builtin.apt:
     name: ufw

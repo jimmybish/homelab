@@ -32,7 +32,9 @@ ubuntu:
   vars:
     ansible_python_interpreter: /usr/bin/python3
   hosts:
+    nova.jimmynrose.id.au:
     sparky:
+    nova:
     mgmt:
     docker-1:
     docker-2:
@@ -57,6 +59,7 @@ debian:
 spark:
   hosts:
     sparky:
+    nova:
 
 # Plex Media Server
 plex_host:
