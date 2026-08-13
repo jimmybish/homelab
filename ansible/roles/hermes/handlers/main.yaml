@@ -5,4 +5,10 @@
     state: restarted
     daemon_reload: true
 
+- name: Restart Hermes gateway
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_gateway_service_name }}"
+    state: restarted
+    daemon_reload: true
+
 ...

@@ -116,9 +116,20 @@ loki.write "default" {
 }
 
 // ============================================================
-// Node exporter metrics (built-in)
+// Node exporter metrics
 // ============================================================
 
+{% if alloy_node_exporter_mode == "standalone" %}
+// Standalone prometheus-node-exporter process, scraped over loopback so a
+// stalled/busy Alloy process can't block collection.
+prometheus.scrape "node_exporter" {
+  targets         = [{"__address__" = "127.0.0.1:9100"}]
+  forward_to      = [prometheus.relabel.node_exporter.receiver]
+  job_name        = "node_exporter"
+  scrape_interval = "30s"
+  scrape_timeout  = "25s"
+}
+{% else %}
 prometheus.exporter.unix "local" {
 }
 
@@ -126,8 +137,10 @@ prometheus.scrape "node_exporter" {
   targets         = prometheus.exporter.unix.local.targets
   forward_to      = [prometheus.relabel.node_exporter.receiver]
   job_name        = "node_exporter"
-  scrape_interval = "15s"
+  scrape_interval = "30s"
+  scrape_timeout  = "25s"
 }
+{% endif %}
 
 prometheus.relabel "node_exporter" {
   forward_to = [prometheus.remote_write.default.receiver]

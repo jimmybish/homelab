@@ -137,7 +137,9 @@
     proto: tcp
   when:
     - ansible_os_family == "Debian"
-    - ansible_virtualization_type != "lxc"
+    - inventory_hostname in groups.get('docker_vm_hosts', [])
+  tags:
+    - cadvisor
 
 - name: Run cAdvisor container
   community.docker.docker_container:
@@ -153,4 +155,19 @@
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
-  when: ansible_virtualization_type != "lxc"
+  when: inventory_hostname in groups.get('docker_vm_hosts', [])
+  tags:
+    - cadvisor
+
+- name: Verify cAdvisor metrics endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ docker_cadvisor_port }}/metrics"
+    return_content: true
+    status_code: 200
+  register: docker_cadvisor_metrics
+  retries: 5
+  delay: 2
+  until: "'container_last_seen' in docker_cadvisor_metrics.content"
+  when: inventory_hostname in groups.get('docker_vm_hosts', [])
+  tags:
+    - cadvisor

@@ -4,6 +4,36 @@ Quick-reference runbook for recurring issues. When responding to an alert or tro
 
 ---
 
+## Sparky "Node Exporter Scrape Failing" (formerly "Host Down")
+
+**Alert:** `Node Exporter Scrape Failing` (Grafana, uid `host-down-1`, severity: critical) and `Sparky Unreachable (No Logs)` (uid `sparky-unreachable-1`, severity: critical)
+**Symptoms:** Repeated flapping firing/resolving of the scrape-failure alert for `sparky.jimmynrose.id.au:9100` / `job=node_exporter`, often many times per hour, while Sparky remains reachable over SSH and its Docker workloads keep running.
+
+**Root cause:** Alloy on Sparky embeds `prometheus.exporter.unix` and self-scrapes it, then relabels the result to look like an external `<host>:9100` target — there is no actual listener being probed. Under Sparky's vLLM workload (which by design uses most of the host's memory), Alloy's own process periodically stalls long enough that it can't service its internal scrape request before the timeout, producing `up=0` with zero samples. Successful scrapes complete in ~35ms; failed ones return nothing after exactly the configured `scrape_timeout` — that bimodal pattern is the signature of this issue (as opposed to a real network/host outage, which produces sustained connection failures, not alternating fast/timeout results).
+
+**A Discord-linked "fix" that did NOT work:** an earlier response diagnosed this as a missing `node_exporter` systemd unit/package and installed the Ubuntu `prometheus-node-exporter` apt package standalone. This did not help, because Alloy was never scraping that package — it was always scraping its own embedded exporter. Prometheus/Grafana evidence (raw `scrape_duration_seconds`, `node_exporter_build_info` build tags) directly disproved that diagnosis: alerts kept firing identically after the package install. Don't repeat this fix — check the actual Alloy config (`ansible/roles/alloy/templates/alloy_config.alloy.j2`) and `alloy_node_exporter_mode` before assuming a missing package.
+
+### Fix (already applied for Sparky)
+
+Sparky is configured (via `ansible/group_vars/spark/vars.yaml` → `alloy_node_exporter_mode: "standalone"`) to run the Ubuntu `prometheus-node-exporter` package as its own systemd service, with Alloy scraping it over loopback (`127.0.0.1:9100`) instead of running the exporter embedded in its own process. This means a stalled/busy Alloy process can no longer block metrics collection. The `job`/`instance` relabeling is unchanged, so the alert rule and dashboards required no changes.
+
+If this recurs on Sparky (or starts on another host), redeploy with:
+```
+ansible-playbook -i inventory.yaml os_setup.yaml --vault-password-file ~/ansible_key --limit <host>
+```
+after setting `alloy_node_exporter_mode: "standalone"` in that host's `group_vars`.
+
+### Alert design — two separate signals
+
+Because a scrape failure doesn't necessarily mean the host is down, this alert space is split into two rules:
+
+- **`Node Exporter Scrape Failing`** (`host-down-1`) — fires when Prometheus can't scrape any non-cAdvisor job/instance. This can mean the host is unreachable, *or* that the exporter/agent on that host is too busy to respond in time. Treat it as "metrics collection is broken here", not "the host is down".
+- **`Sparky Unreachable (No Logs)`** (`sparky-unreachable-1`) — Loki-based, fires only if Sparky sends zero log lines (journal or Docker) in 5 minutes (`absent_over_time({host="sparky"}[5m])`). Log shipping kept working throughout every occurrence of the scrape-failure issue, so this is a much stronger true host-down signal for Sparky specifically. It's intentionally scoped to Sparky only (the one host that has shown this failure mode) rather than generalized fleet-wide.
+
+**Triage:** if `Node Exporter Scrape Failing` fires for Sparky but `Sparky Unreachable (No Logs)` stays Normal, the host is alive and it's a scrape/agent issue, not an outage.
+
+---
+
 ## N8N Discord Trigger Reconnect Loop
 
 **Alert:** `N8N Discord Trigger Reconnect Loop` (Grafana, severity: warning)

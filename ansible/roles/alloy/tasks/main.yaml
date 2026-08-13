@@ -28,6 +28,19 @@
     state: present
     update_cache: true
 
+- name: Install standalone node_exporter package
+  ansible.builtin.apt:
+    name: prometheus-node-exporter
+    state: present
+  when: alloy_node_exporter_mode == "standalone"
+
+- name: Enable and start standalone node_exporter service
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter
+    state: started
+    enabled: true
+  when: alloy_node_exporter_mode == "standalone"
+
 - name: Check if docker group exists
   ansible.builtin.getent:
     database: group

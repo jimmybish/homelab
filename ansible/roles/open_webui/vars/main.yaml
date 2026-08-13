@@ -8,8 +8,12 @@
 # Current stable release: v0.11.0 (published 2026-07-27)
 # Last Updated: 2026-08-06
 # The standard image runs as UID/GID 0 and persists application data at /app/backend/data.
-# No Ollama sidecar is required; Open WebUI uses Sparky's unauthenticated vLLM
-# endpoint through the OpenAI-compatible API at port 8000.
+# No Ollama sidecar is required. Open WebUI connects directly to Sparky and to
+# Hermes through their OpenAI-compatible APIs. Existing installations are
+# reseeded once whenever the fingerprint of Ansible-managed persistent settings
+# changes; new installations initialize directly from the managed environment.
+# WEBUI_ADMIN_* is intentionally unset because it only bootstraps an admin when
+# no users exist and does not manage the existing administrator's password.
 # WebSocket support and a persistent WEBUI_SECRET_KEY are required.
 # v0.11.0 fixes the ten advisories published around 2026-08-02. Although only
 # main is covered by upstream's security policy, production docs recommend a
@@ -18,12 +22,40 @@
 open_webui_version: v0.11.0
 open_webui_port: 3000
 open_webui_container_port: 8080
-open_webui_openai_api_base_url: "http://sparky.{{ internal_domain }}:8000/v1"
+open_webui_openai_api_base_urls:
+  - "http://sparky.{{ internal_domain }}:8000/v1"
+  - "{{ internal_hermes_api_url }}"
+open_webui_openai_api_configs:
+  "0":
+    enable: true
+    prefix_id: sparky
+  "1":
+    enable: true
+    prefix_id: hermes
 open_webui_enable_ollama_api: false
+open_webui_enable_persistent_config: true
+open_webui_reset_config_on_start: false
+open_webui_enable_signup: false
 open_webui_cors_allow_origin: "{{ internal_open_webui_url }}"
 
 open_webui_folder: "{{ docker_storage_folder }}/open-webui"
 open_webui_data_folder: "{{ open_webui_folder }}/data"
+open_webui_database_path: "{{ open_webui_data_folder }}/webui.db"
+open_webui_backup_folder: "{{ open_webui_folder }}/backups"
+open_webui_managed_config_fingerprint: >-
+  {{ {
+       'enable_ollama_api': open_webui_enable_ollama_api,
+       'enable_signup': open_webui_enable_signup,
+       'openai_api_base_urls': open_webui_openai_api_base_urls,
+       'openai_api_configs': open_webui_openai_api_configs,
+       'openai_api_keys': ['', hermes_api_server_key]
+     } | to_json | hash('sha256') }}
+open_webui_config_migration_marker: >-
+  {{ open_webui_data_folder }}/.ansible-managed-config-{{ open_webui_managed_config_fingerprint }}
+open_webui_config_backup_path: >-
+  {{ open_webui_backup_folder }}/webui.db.pre-{{ open_webui_managed_config_fingerprint }}.bak
+open_webui_config_reset_override_path: >-
+  {{ open_webui_folder }}/docker-compose.config-reset.yaml
 open_webui_container_uid: 0
 open_webui_container_gid: 0
 

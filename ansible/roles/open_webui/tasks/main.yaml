@@ -1,4 +1,26 @@
 ---
+- name: Check whether Open WebUI is already installed
+  ansible.builtin.stat:
+    path: "{{ open_webui_database_path }}"
+  register: open_webui_database_stat
+
+- name: Assert Open WebUI installation state
+  ansible.builtin.assert:
+    that:
+      - >-
+        not open_webui_database_stat.stat.exists or
+        open_webui_database_stat.stat.isreg
+    fail_msg: >-
+      Open WebUI database path {{ open_webui_database_path }} exists but is not
+      a regular file.
+    success_msg: >-
+      Open WebUI is {{ 'already installed' if open_webui_database_stat.stat.exists
+      else 'not installed; a new deployment will be initialized' }}.
+
+- name: Record Open WebUI installation state
+  ansible.builtin.set_fact:
+    open_webui_is_installed: "{{ open_webui_database_stat.stat.exists }}"
+
 - name: Ensure docker-compose is installed
   ansible.builtin.package:
     name: docker-compose
@@ -25,6 +47,77 @@
       owner: "{{ open_webui_container_uid }}"
       group: "{{ open_webui_container_gid }}"
 
+- name: Check Open WebUI config migration marker
+  ansible.builtin.stat:
+    path: "{{ open_webui_config_migration_marker }}"
+  register: open_webui_config_migration_marker_stat
+
+- name: Prepare Open WebUI config migration
+  when:
+    - open_webui_is_installed
+    - not open_webui_config_migration_marker_stat.stat.exists
+    - not ansible_check_mode
+  block:
+    - name: Setup protected Open WebUI backup directory
+      ansible.builtin.file:
+        path: "{{ open_webui_backup_folder }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Find managed Open WebUI database backups
+      ansible.builtin.find:
+        paths: "{{ open_webui_backup_folder }}"
+        patterns: 'webui.db.pre-*.bak'
+        file_type: file
+        recurse: false
+      register: open_webui_database_backups
+
+    - name: Remove older Open WebUI database backups
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: >-
+        {{ (open_webui_database_backups.files
+            | sort(attribute='mtime', reverse=true))[1:] }}
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Backup Open WebUI database before config migration
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |-
+            import os
+            import sqlite3
+            import sys
+
+            temporary_path = f'{sys.argv[2]}.tmp'
+            try:
+              os.unlink(temporary_path)
+            except FileNotFoundError:
+              pass
+            with sqlite3.connect(sys.argv[1]) as source:
+              with sqlite3.connect(temporary_path) as destination:
+                    source.backup(destination)
+                    result = destination.execute('PRAGMA integrity_check').fetchone()[0]
+                    if result != 'ok':
+                        raise RuntimeError(f'Backup integrity check failed: {result}')
+            os.replace(temporary_path, sys.argv[2])
+          - "{{ open_webui_database_path }}"
+          - "{{ open_webui_config_backup_path }}"
+        creates: "{{ open_webui_config_backup_path }}"
+
+    - name: Protect Open WebUI config backup
+      ansible.builtin.file:
+        path: "{{ open_webui_config_backup_path }}"
+        state: file
+        owner: root
+        group: root
+        mode: '0600'
+
 - name: Allow Open WebUI port through UFW
   community.general.ufw:
     rule: allow
@@ -40,6 +133,7 @@
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  no_log: true
   notify:
     - Restart Open WebUI
 
@@ -50,6 +144,148 @@
     remove_orphans: true
     wait: true
     wait_timeout: 300
+
+- name: Reseed Open WebUI config once from managed environment
+  when:
+    - open_webui_is_installed
+    - not open_webui_config_migration_marker_stat.stat.exists
+    - not ansible_check_mode
+  block:
+    - name: Deploy temporary Open WebUI config reset override
+      ansible.builtin.copy:
+        dest: "{{ open_webui_config_reset_override_path }}"
+        owner: "{{ docker_user }}"
+        group: "{{ docker_user }}"
+        mode: '0600'
+        content: |
+          services:
+            open-webui:
+              environment:
+                RESET_CONFIG_ON_START: "true"
+
+    - name: Start Open WebUI once with config reset enabled
+      community.docker.docker_compose_v2:
+        project_src: "{{ open_webui_folder }}"
+        files:
+          - docker-compose.yaml
+          - "{{ open_webui_config_reset_override_path | basename }}"
+        state: present
+        recreate: always
+        remove_orphans: true
+        wait: true
+        wait_timeout: 300
+
+    - name: Verify reset-started Open WebUI is healthy
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ open_webui_port }}/health"
+        status_code: 200
+      register: open_webui_reset_health
+      until: open_webui_reset_health.status == 200
+      retries: 12
+      delay: 5
+  always:
+    - name: Remove temporary Open WebUI config reset override
+      ansible.builtin.file:
+        path: "{{ open_webui_config_reset_override_path }}"
+        state: absent
+
+    - name: Converge Open WebUI to config reset disabled
+      community.docker.docker_compose_v2:
+        project_src: "{{ open_webui_folder }}"
+        state: present
+        recreate: always
+        remove_orphans: true
+        wait: true
+        wait_timeout: 300
+
+- name: Read persisted Open WebUI provider config
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - open-webui
+      - python
+      - -c
+      - |2-
+        import json
+        import sqlite3
+
+        connection = sqlite3.connect('/app/backend/data/webui.db')
+        keys = (
+          'openai.api_base_urls',
+          'openai.api_keys',
+          'openai.api_configs',
+          'ui.enable_signup',
+        )
+        config = {
+          key: json.loads(
+            connection.execute(
+              'SELECT value FROM config WHERE key = ?', (key,)
+            ).fetchone()[0]
+          )
+          for key in keys
+        }
+        print(json.dumps(config))
+  register: open_webui_persisted_config_raw
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Store persisted Open WebUI provider config
+  ansible.builtin.set_fact:
+    open_webui_persisted_config: "{{ open_webui_persisted_config_raw.stdout | from_json }}"
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Assert persisted Open WebUI provider config
+  ansible.builtin.assert:
+    that:
+      - open_webui_persisted_config['openai.api_base_urls'] == open_webui_openai_api_base_urls
+      - open_webui_persisted_config['openai.api_keys'] | length == 2
+      - open_webui_persisted_config['openai.api_keys'][0] == ''
+      - open_webui_persisted_config['openai.api_keys'][1] == hermes_api_server_key
+      - open_webui_persisted_config['openai.api_configs']['0']['enable'] | bool
+      - open_webui_persisted_config['openai.api_configs']['0']['prefix_id'] == 'sparky'
+      - open_webui_persisted_config['openai.api_configs']['1']['enable'] | bool
+      - open_webui_persisted_config['openai.api_configs']['1']['prefix_id'] == 'hermes'
+      - not (open_webui_persisted_config['ui.enable_signup'] | bool)
+    fail_msg: Open WebUI did not persist the managed dual-provider configuration.
+    success_msg: Open WebUI persisted both managed prefixed providers with signup disabled.
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Record completed Open WebUI config migration
+  when:
+    - not open_webui_config_migration_marker_stat.stat.exists
+    - not ansible_check_mode
+  ansible.builtin.file:
+    path: "{{ open_webui_config_migration_marker }}"
+    state: touch
+    owner: "{{ open_webui_container_uid }}"
+    group: "{{ open_webui_container_gid }}"
+    mode: '0600'
+
+- name: Find stale Open WebUI config migration markers
+  ansible.builtin.find:
+    paths: "{{ open_webui_data_folder }}"
+    patterns:
+      - '.ansible-managed-config-*'
+      - '.ansible-dual-openai-providers-v1'
+    file_type: file
+    recurse: false
+    hidden: true
+    excludes: "{{ open_webui_config_migration_marker | basename }}"
+  register: open_webui_stale_config_migration_markers
+  when: not ansible_check_mode
+
+- name: Remove stale Open WebUI config migration markers
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ open_webui_stale_config_migration_markers.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: not ansible_check_mode
 
 - name: Check service listening ports
   community.general.listen_ports_facts:

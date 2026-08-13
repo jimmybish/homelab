@@ -230,6 +230,26 @@ ansible-playbook -i inventory.yaml deploy_grafana.yaml --vault-password-file ~/a
 
 ### Troubleshooting
 
+#### First-run systemd assertions
+
+Do not assert post-change properties such as `UnitFileState` from the same
+`ansible.builtin.systemd_service` result that first enables a unit. Its returned
+`status` can reflect properties gathered before the enable operation. Manage the
+unit first, then query it again before asserting:
+
+```yaml
+- name: Enable and start service
+   ansible.builtin.systemd_service:
+      name: example.service
+      state: started
+      enabled: true
+
+- name: Read current service status
+   ansible.builtin.systemd_service:
+      name: example.service
+   register: example_service_status
+```
+
 ```bash
 # Dry run to preview changes
 ansible-playbook -i inventory.yaml deploy_grafana.yaml --vault-password-file ~/ansible_key --check --diff

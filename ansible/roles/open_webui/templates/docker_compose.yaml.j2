@@ -6,8 +6,15 @@ services:
       TZ: "{{ timezone }}"
       CORS_ALLOW_ORIGIN: "{{ open_webui_cors_allow_origin }}"
       ENABLE_OLLAMA_API: "{{ open_webui_enable_ollama_api | string | lower }}"
-      OPENAI_API_BASE_URL: "{{ open_webui_openai_api_base_url }}"
+      ENABLE_PERSISTENT_CONFIG: "{{ open_webui_enable_persistent_config | string | lower }}"
+      RESET_CONFIG_ON_START: "{{ open_webui_reset_config_on_start | string | lower }}"
+      ENABLE_SIGNUP: "{{ open_webui_enable_signup | string | lower }}"
+      OPENAI_API_BASE_URLS: "{{ open_webui_openai_api_base_urls | join(';') }}"
+      OPENAI_API_KEYS: ";{{ hermes_api_server_key }}"
+      OPENAI_API_CONFIGS: '{{ open_webui_openai_api_configs | to_json }}'
       WEBUI_SECRET_KEY: "{{ open_webui_secret_key }}"
+    extra_hosts:
+      - "hermes.{{ internal_domain }}:host-gateway"
     ports:
       - '{{ open_webui_port }}:{{ open_webui_container_port }}'
     volumes:

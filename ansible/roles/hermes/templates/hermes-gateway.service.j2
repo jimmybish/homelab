@@ -1,0 +1,15 @@
+[Unit]
+Description=Hermes Agent Gateway
+After=network.target
+
+[Service]
+Type=simple
+User={{ hermes_user }}
+WorkingDirectory={{ hermes_user_home }}
+EnvironmentFile={{ hermes_env_file }}
+ExecStart={{ hermes_bin }} gateway
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

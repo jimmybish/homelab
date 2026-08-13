@@ -7,9 +7,9 @@
 # Providers: https://hermes-agent.nousresearch.com/docs/integrations/providers
 # Skills: https://hermes-agent.nousresearch.com/docs/user-guide/features/skills
 # Security policy: https://github.com/NousResearch/hermes-agent/blob/main/SECURITY.md
-# Release: https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.20
-# Audited commit: https://github.com/NousResearch/hermes-agent/commit/37a27664cc11a33d36739fafe864d1d084370c47
-# Last researched: 2026-07-26
+# Release: https://github.com/NousResearch/hermes-agent/releases/tag/v2026.8.3
+# Audited commit: https://github.com/NousResearch/hermes-agent/commit/b3aa561faffd64f05436e429a6415d175e534ec9
+# Last researched: 2026-08-08
 #
 # Native user-scoped Git installation managed by the official installer. The
 # dashboard defaults to 127.0.0.1:9119; this audited deployment intentionally
@@ -18,14 +18,15 @@
 # execution, tight credential permissions, and review of third-party skills.
 # GitHub listed no published project security advisories on the research date.
 
-hermes_version: "0.19.0"
-hermes_release: "2026.7.20"
-hermes_release_commit: "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
-hermes_install_commit: "37a27664cc11a33d36739fafe864d1d084370c47"
+hermes_version: "0.20.0"
+hermes_release: "2026.8.3"
+hermes_release_commit: "b3aa561faffd64f05436e429a6415d175e534ec9"
+hermes_install_commit: "b3aa561faffd64f05436e429a6415d175e534ec9"
 hermes_installer_url: "https://raw.githubusercontent.com/NousResearch/hermes-agent/{{ hermes_install_commit }}/scripts/install.sh"
-hermes_installer_checksum: "sha256:87167c9a39be30ef5cd0240b228d6e9cac4fd4001389713585f697cb082985f1"
+hermes_installer_checksum: "sha256:45f589461248c7a6ec3aecd7522a69dd49c5c8dbf4798ba1296af5c0c5e7ccd3"
 hermes_installer_path: "/var/tmp/hermes-install-{{ hermes_install_commit }}.sh"
 hermes_required_packages:
+  - acl
   - build-essential
   - ca-certificates
   - curl

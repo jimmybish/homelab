@@ -1,4 +1,9 @@
 ---
+# Sparky's Alloy process stalls under heavy vLLM memory pressure, which can
+# block its embedded node_exporter collector and cause false Host Down alerts.
+# Run node_exporter as a separate process instead (see ansible/roles/alloy).
+alloy_node_exporter_mode: "standalone"
+
 docker_manage_installation: false
 
 docker_daemon_additional_options:

@@ -60,6 +60,10 @@
       - "{{ hermes_install_dir }}"
       - rev-parse
       - HEAD
+  become: true
+  become_user: "{{ hermes_user }}"
+  environment:
+    HOME: "{{ hermes_user_home }}"
   register: hermes_installed_commit
   changed_when: false
   failed_when: false
@@ -88,9 +92,11 @@
     hermes_installed_commit.stdout != hermes_install_commit or
     not (hermes_install_artifacts.results[0].stat.executable | default(false)) or
     not (hermes_install_artifacts.results[1].stat.executable | default(false))
-  notify: Restart Hermes dashboard
+  notify:
+    - Restart Hermes dashboard
+    - Restart Hermes gateway
 
-- name: Verify installed Hermes version and commit
+- name: Verify installed Hermes version
   ansible.builtin.command:
     argv:
       - "{{ hermes_bin }}"
@@ -104,7 +110,25 @@
   failed_when: >-
     hermes_version_result.rc != 0 or
     ('Hermes Agent v' + hermes_version) not in hermes_version_result.stdout or
-    hermes_install_commit[:8] not in hermes_version_result.stdout
+    ('(' + hermes_release + ')') not in hermes_version_result.stdout
+
+- name: Verify installed Hermes commit
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ hermes_install_dir }}"
+      - rev-parse
+      - HEAD
+  become: true
+  become_user: "{{ hermes_user }}"
+  environment:
+    HOME: "{{ hermes_user_home }}"
+  register: hermes_verified_commit
+  changed_when: false
+  failed_when: >-
+    hermes_verified_commit.rc != 0 or
+    hermes_verified_commit.stdout != hermes_install_commit
 
 - name: Deploy Hermes base agent config
   ansible.builtin.template:
@@ -113,7 +137,9 @@
     owner: "{{ hermes_user }}"
     group: "{{ hermes_user }}"
     mode: '0600'
-  notify: Restart Hermes dashboard
+  notify:
+    - Restart Hermes dashboard
+    - Restart Hermes gateway
 
 - name: Deploy Hermes config
   ansible.builtin.template:
@@ -126,7 +152,9 @@
       {{ hermes_install_dir }}/venv/bin/python -c
       'import pathlib,sys,yaml; yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))'
       %s
-  notify: Restart Hermes dashboard
+  notify:
+    - Restart Hermes dashboard
+    - Restart Hermes gateway
 
 - name: Deploy Hermes environment secrets
   ansible.builtin.template:
@@ -136,7 +164,9 @@
     group: "{{ hermes_user }}"
     mode: '0600'
   no_log: true
-  notify: Restart Hermes dashboard
+  notify:
+    - Restart Hermes dashboard
+    - Restart Hermes gateway
 
 - name: Deploy Hermes provider credential store
   ansible.builtin.template:
@@ -147,7 +177,9 @@
     mode: '0600'
     validate: "{{ hermes_install_dir }}/venv/bin/python -m json.tool %s"
   no_log: true
-  notify: Restart Hermes dashboard
+  notify:
+    - Restart Hermes dashboard
+    - Restart Hermes gateway
 
 - name: Inspect Hermes configuration paths
   ansible.builtin.stat:
@@ -182,16 +214,21 @@
     directory_mode: '0700'
   loop: "{{ hermes_custom_skills }}"
   when: hermes_custom_skills | length > 0
-  notify: Restart Hermes dashboard
+  notify:
+    - Restart Hermes dashboard
+    - Restart Hermes gateway
 
-- name: Allow Hermes dashboard port through UFW
+- name: Allow Hermes service ports through UFW
   community.general.ufw:
     rule: allow
-    port: "{{ hermes_port | string }}"
+    port: "{{ item | string }}"
     proto: tcp
+  loop:
+    - "{{ hermes_port }}"
+    - "{{ hermes_api_server_port }}"
   when: ansible_os_family == "Debian"
 
-- name: Read UFW status for Hermes dashboard
+- name: Read UFW status for Hermes services
   ansible.builtin.command:
     argv:
       - ufw
@@ -205,8 +242,13 @@
     that:
       - "'Status: active' in hermes_ufw_status.stdout"
       - "(hermes_port | string) + '/tcp' in hermes_ufw_status.stdout"
-    fail_msg: "UFW is not active with TCP port {{ hermes_port }} allowed."
-    success_msg: "UFW is active with TCP port {{ hermes_port }} allowed."
+      - "(hermes_api_server_port | string) + '/tcp' in hermes_ufw_status.stdout"
+    fail_msg: >-
+      UFW is not active with TCP ports {{ hermes_port }} and
+      {{ hermes_api_server_port }} allowed.
+    success_msg: >-
+      UFW is active with TCP ports {{ hermes_port }} and
+      {{ hermes_api_server_port }} allowed.
   when: ansible_os_family == "Debian"
 
 - name: Deploy Hermes dashboard service source
@@ -227,6 +269,24 @@
     mode: '0600'
   notify: Restart Hermes dashboard
 
+- name: Deploy Hermes gateway service source
+  ansible.builtin.template:
+    src: hermes-gateway.service.j2
+    dest: "{{ hermes_gateway_service_source_path }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  notify: Restart Hermes gateway
+
+- name: Deploy Hermes gateway systemd unit
+  ansible.builtin.template:
+    src: hermes-gateway.service.j2
+    dest: "{{ hermes_gateway_service_unit_path }}"
+    owner: root
+    group: root
+    mode: '0600'
+  notify: Restart Hermes gateway
+
 - name: Apply pending Hermes restart
   ansible.builtin.meta: flush_handlers
 
@@ -235,7 +295,22 @@
     name: "{{ hermes_service_name }}"
     state: started
     enabled: true
+
+- name: Enable and start Hermes gateway
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_gateway_service_name }}"
+    state: started
+    enabled: true
+
+- name: Read Hermes dashboard service status
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_service_name }}"
   register: hermes_service_status
+
+- name: Read Hermes gateway service status
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_gateway_service_name }}"
+  register: hermes_gateway_service_status
 
 - name: Assert Hermes dashboard service state
   ansible.builtin.assert:
@@ -247,10 +322,27 @@
     fail_msg: "Hermes dashboard is not active and enabled from the managed unit."
     success_msg: "Hermes dashboard is active and enabled at boot."
 
+- name: Assert Hermes gateway service state
+  ansible.builtin.assert:
+    that:
+      - hermes_gateway_service_status.status.ActiveState == 'active'
+      - hermes_gateway_service_status.status.UnitFileState == 'enabled'
+      - hermes_gateway_service_status.status.FragmentPath == hermes_gateway_service_unit_path
+      - hermes_gateway_service_status.status.MainPID | int > 0
+    fail_msg: "Hermes gateway is not active and enabled from the managed unit."
+    success_msg: "Hermes gateway is active and enabled at boot."
+
 - name: Wait for Hermes dashboard listener
   ansible.builtin.wait_for:
     host: 127.0.0.1
     port: "{{ hermes_port }}"
+    state: started
+    timeout: 120
+
+- name: Wait for Hermes API server listener
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ hermes_api_server_port }}"
     state: started
     timeout: 120
 
@@ -262,6 +354,13 @@
     hermes_dashboard_listeners: >-
       {{ ansible_facts.tcp_listen
          | selectattr('port', 'equalto', hermes_port | int)
+         | list }}
+
+- name: Select Hermes API server listeners
+  ansible.builtin.set_fact:
+    hermes_api_server_listeners: >-
+      {{ ansible_facts.tcp_listen
+         | selectattr('port', 'equalto', hermes_api_server_port | int)
          | list }}
 
 - name: Assert Hermes dashboard listener identity
@@ -278,6 +377,23 @@
     success_msg: >-
       Hermes dashboard is listening as {{ hermes_user }} process
       {{ hermes_dashboard_process_name }} on {{ hermes_bind_address }}:{{ hermes_port }}.
+
+- name: Assert Hermes API server listener identity
+  ansible.builtin.assert:
+    that:
+      - hermes_api_server_listeners | length > 0
+      - hermes_api_server_bind_address in (hermes_api_server_listeners | map(attribute='address') | list)
+      - hermes_user in (hermes_api_server_listeners | map(attribute='user') | list)
+      - hermes_gateway_process_name in (hermes_api_server_listeners | map(attribute='name') | list)
+      - (hermes_gateway_service_status.status.MainPID | int) in (hermes_api_server_listeners | map(attribute='pid') | list)
+    fail_msg: >-
+      Hermes API server is not listening as {{ hermes_user }} process
+      {{ hermes_gateway_process_name }} on
+      {{ hermes_api_server_bind_address }}:{{ hermes_api_server_port }}.
+    success_msg: >-
+      Hermes API server is listening as {{ hermes_user }} process
+      {{ hermes_gateway_process_name }} on
+      {{ hermes_api_server_bind_address }}:{{ hermes_api_server_port }}.
 
 - name: Read Hermes dashboard public status
   ansible.builtin.uri:

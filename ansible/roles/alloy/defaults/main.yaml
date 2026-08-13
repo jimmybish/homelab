@@ -1,0 +1,6 @@
+---
+# node_exporter mode: "embedded" runs prometheus.exporter.unix inside the Alloy
+# process (default); "standalone" scrapes a separate prometheus-node-exporter
+# service on 127.0.0.1:9100 so a stalled/busy Alloy process can't block metrics
+# collection (see group_vars/spark for the host that needs this).
+alloy_node_exporter_mode: "embedded"

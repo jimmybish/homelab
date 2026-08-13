@@ -1,21 +1,26 @@
 apiVersion: 1
 
 groups:
-  # Host Down - fires when any scrape target is unreachable
+  # Node Exporter Scrape Failing - fires when a non-cAdvisor scrape target is
+  # unreachable. NOTE: this means Prometheus can't scrape that job/instance -
+  # it does NOT by itself mean the host is down (a busy agent process can also
+  # cause this). See "Sparky Unreachable (No Logs)" below for a true
+  # host-down signal on Sparky specifically, and ansible/docs/known-issues.md
+  # for the incident that prompted this split.
   - orgId: 1
     name: host_down
     folder: Infrastructure
     interval: 1m
     rules:
       - uid: host-down-1
-        title: Host Down
+        title: Node Exporter Scrape Failing
         condition: C
         for: 2m
         noDataState: "OK"
         execErrState: "OK"
         annotations:
-          summary: "Host {% raw %}{{ $labels.instance }}{% endraw %} is down"
-          description: "The target {% raw %}{{ $labels.instance }}{% endraw %} (job: {% raw %}{{ $labels.job }}{% endraw %}) has been unreachable for more than 2 minutes."
+          summary: "Metrics scrape failing for {% raw %}{{ $labels.job }}{% endraw %} on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "Prometheus has been unable to scrape {% raw %}{{ $labels.instance }}{% endraw %} (job: {% raw %}{{ $labels.job }}{% endraw %}) for more than 2 minutes. This can mean the host is unreachable, or that the exporter/agent process on that host is too busy to respond in time - check Loki log ingestion from the host to tell the two apart before assuming an outage."
         labels:
           severity: critical
         data:
@@ -26,7 +31,117 @@ groups:
             datasourceUid: {{ grafana_prometheus_uid }}
             model:
               refId: A
-              expr: "up == 0"
+              expr: "up{job!=\"cadvisor\"} == bool 0"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0.5
+
+  # Sparky Unreachable (No Logs) - true host-down signal for Sparky, based on
+  # Loki log ingestion rather than the node_exporter scrape above. Scoped to
+  # Sparky only because it's the one host that has shown scrape flapping
+  # under memory pressure while remaining fully reachable and logging
+  # normally (see ansible/docs/known-issues.md).
+  - orgId: 1
+    name: sparky_unreachable
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: sparky-unreachable-1
+        title: Sparky Unreachable (No Logs)
+        condition: C
+        for: 2m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "No logs received from sparky in 5 minutes"
+          description: "Sparky has sent no journal/docker log lines to Loki in the last 5 minutes. Unlike the node_exporter scrape check, this does not depend on the host's own metrics agent responding in time, so it is a stronger signal that the host itself is actually unreachable."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: {{ grafana_loki_uid }}
+            model:
+              refId: A
+              expr: "absent_over_time({host=\"sparky\"}[5m])"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0.5
+
+  # cAdvisor Down - fires when a configured cAdvisor target is unreachable
+  - orgId: 1
+    name: cadvisor_down
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: cadvisor-down-1
+        title: cAdvisor Down
+        condition: C
+        for: 2m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "cAdvisor is down on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "The cAdvisor target {% raw %}{{ $labels.instance }}{% endraw %} has been unreachable for more than 2 minutes."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: {{ grafana_prometheus_uid }}
+            model:
+              refId: A
+              expr: "up{job=\"cadvisor\"} == bool 0"
               intervalMs: 1000
               maxDataPoints: 43200
           - refId: B

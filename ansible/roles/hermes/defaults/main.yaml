@@ -1,5 +1,6 @@
 ---
-hermes_user: "{{ ansible_user }}"
+# Keep the application account independent from the Ansible transport user.
+hermes_user: jimmy
 hermes_user_home: "/home/{{ hermes_user }}"
 hermes_home: "{{ hermes_user_home }}/.hermes"
 hermes_install_dir: "{{ hermes_home }}/hermes-agent"
@@ -15,10 +16,15 @@ hermes_agent_config_file: "{{ hermes_user_home }}/.hermes.md"
 hermes_service_name: hermes-dashboard.service
 hermes_service_unit_path: "/etc/systemd/system/{{ hermes_service_name }}"
 hermes_service_source_path: "{{ hermes_home }}/{{ hermes_service_name }}"
+hermes_gateway_service_name: hermes-gateway.service
+hermes_gateway_service_unit_path: "/etc/systemd/system/{{ hermes_gateway_service_name }}"
+hermes_gateway_service_source_path: "{{ hermes_home }}/{{ hermes_gateway_service_name }}"
 hermes_bind_address: "0.0.0.0"
 hermes_port: 9119
+hermes_api_server_bind_address: "0.0.0.0"
 hermes_dashboard_auth_provider: basic
 hermes_dashboard_process_name: hermes
+hermes_gateway_process_name: hermes
 
 hermes_model:
   default: Qwen/Qwen3.6-35B-A3B-FP8
