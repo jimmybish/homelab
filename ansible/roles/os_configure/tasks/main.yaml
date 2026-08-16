@@ -122,8 +122,8 @@
 
 - name: Copy Ansible SSH private key
   ansible.builtin.copy:
-    src: "{{ lookup('env', 'HOME') }}{{ ansible_private_key | regex_replace('^~', '') }}"
-    dest: "/home/{{ ansible_user }}{{ ansible_private_key | regex_replace('^~', '') }}"
+    src: "{{ lookup('env', 'HOME') }}{{ ansible_ssh_private_key_file | regex_replace('^~', '') }}"
+    dest: "/home/{{ ansible_user }}{{ ansible_ssh_private_key_file | regex_replace('^~', '') }}"
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: '0600'
@@ -140,7 +140,7 @@
       Host *
         User {{ ansible_user }}
         AddKeysToAgent yes
-        IdentityFile {{ ansible_private_key }}
+        IdentityFile {{ ansible_ssh_private_key_file }}
   when: ansible_os_family == "Debian"
 
 - name: Create agent user {{ os_configure_agent_user }}

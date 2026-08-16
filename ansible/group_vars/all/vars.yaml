@@ -6,7 +6,6 @@ owning_user: "jimmy"
 
 # Default SSH user for all hosts
 ansible_user: "virtuajimmy"
-ansible_private_key: "~/.ssh/virtuajimmy"
 ansible_ssh_private_key_file: "~/.ssh/virtuajimmy"
 
 # Time and location
