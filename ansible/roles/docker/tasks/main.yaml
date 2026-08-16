@@ -111,6 +111,20 @@
     enabled: true
     state: started
 
+- name: Add managed users to Docker service groups
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups:
+      - docker
+      - "{{ docker_user }}"
+    append: true
+  loop: "{{ [os_configure_agent_user, owning_user] | unique }}"
+  loop_control:
+    label: "managed Docker user"
+  throttle: 1
+  tags:
+    - agent_docker_groups
+
 - name: Deploy Docker image cleanup script
   ansible.builtin.template:
     src: "templates/docker_image_cleanup.sh.j2"
@@ -142,6 +156,7 @@
     - cadvisor
 
 - name: Run cAdvisor container
+  become: false
   community.docker.docker_container:
     name: cadvisor
     image: gcr.io/cadvisor/cadvisor:latest

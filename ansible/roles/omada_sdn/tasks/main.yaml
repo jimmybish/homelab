@@ -80,6 +80,7 @@
     - Start Omada SDN Controller
 
 - name: Run Omada SDN Controller docker-compose up
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ omada_sdn_folder }}"
     state: present

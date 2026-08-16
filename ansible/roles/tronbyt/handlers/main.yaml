@@ -1,17 +1,20 @@
 ---
 - name: Start Tronbyt
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ tronbyt_folder }}"
     state: restarted
     remove_orphans: true
 
 - name: Restart Homepage
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ homepage_folder }}"
     state: restarted
   delegate_to: "{{ groups['homepage_host'][0] }}"
 
 - name: Restart Swag Internal
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ proxy_folder }}"
     services:

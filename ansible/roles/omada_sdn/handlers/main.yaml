@@ -1,11 +1,13 @@
 ---
 - name: Start Omada SDN Controller
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ omada_sdn_folder }}"
     state: restarted
     remove_orphans: true
 
 - name: Restart Homepage
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ homepage_folder }}"
     state: restarted

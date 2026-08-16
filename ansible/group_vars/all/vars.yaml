@@ -1,6 +1,9 @@
 ---
 # ansible-vault encrypt_string --vault-password-file ~/ansible_key 'value' --name 'key_name'
 
+# My linux account, created as part of cloud-init.
+owning_user: "jimmy"
+
 # Default SSH user for all hosts
 ansible_user: "virtuajimmy"
 ansible_private_key: "~/.ssh/virtuajimmy"

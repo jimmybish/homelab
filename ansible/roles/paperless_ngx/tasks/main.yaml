@@ -45,6 +45,7 @@
     - Start Paperless
 
 - name: Run Paperless docker-compose up
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ paperless_ngx_folder }}"
     state: present

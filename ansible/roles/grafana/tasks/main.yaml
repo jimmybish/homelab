@@ -213,6 +213,7 @@
     - Start Grafana
 
 - name: Run docker-compose up
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ grafana_parent_folder }}"
     state: present

@@ -1,11 +1,13 @@
 ---
 - name: Start n8n
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ n8n_folder }}"
     state: restarted
     remove_orphans: true
 
 - name: Restart Swag Internal
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ proxy_folder }}"
     services:
@@ -14,6 +16,7 @@
   delegate_to: "{{ groups['proxy_host'][0] }}"
 
 - name: Restart Homepage
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ homepage_folder }}"
     state: restarted

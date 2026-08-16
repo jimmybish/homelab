@@ -63,6 +63,7 @@
     - Start mcp_radarr
 
 - name: Build and run mcp-radarr
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ mcp_radarr_folder }}"
     state: present

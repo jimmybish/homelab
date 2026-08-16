@@ -131,6 +131,7 @@
     - Start Containers
 
 - name: Run *Arr docker-compose up
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ arr_suite_parent_folder }}"
     state: present

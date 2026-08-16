@@ -63,6 +63,7 @@
     - Start mcp_tracearr
 
 - name: Build and run mcp-tracearr
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ mcp_tracearr_folder }}"
     state: present

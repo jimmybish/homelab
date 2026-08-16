@@ -63,6 +63,7 @@
     - Start mcp_sonarr
 
 - name: Build and run mcp-sonarr
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ mcp_sonarr_folder }}"
     state: present

@@ -1,5 +1,6 @@
 ---
 - name: Start Swag
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ proxy_folder }}"
     state: restarted

@@ -14,7 +14,7 @@
   ansible.builtin.file:
     path: "{{ proxy_folder }}"
     state: directory
-    mode: '0644'
+    mode: '0755'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
@@ -139,6 +139,7 @@
     - Start Swag
 
 - name: Run Swag docker-compose up
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ proxy_folder }}"
     state: present

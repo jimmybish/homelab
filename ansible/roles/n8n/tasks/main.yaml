@@ -84,6 +84,7 @@
     - Start n8n
 
 - name: Run n8n docker-compose up
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ n8n_folder }}"
     state: present
@@ -91,6 +92,7 @@
 
 # Install community nodes
 - name: Install n8n-nodes-discord-trigger community node
+  become: false
   community.docker.docker_container_exec:
     container: n8n
     command: npm install n8n-nodes-discord-trigger --prefix /home/node/.n8n/nodes
@@ -98,6 +100,7 @@
   changed_when: "'added' in discord_node_install.stdout"
 
 - name: Restart n8n if community node was installed
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ n8n_folder }}"
     state: restarted

@@ -1,5 +1,6 @@
 ---
 - name: Start mcp_radarr
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ mcp_radarr_folder }}"
     state: restarted

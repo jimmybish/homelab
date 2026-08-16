@@ -47,6 +47,7 @@
     - Start JellyPlex-Watched
 
 - name: Run docker-compose up
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ jellyplex_watched_folder }}"
     state: present

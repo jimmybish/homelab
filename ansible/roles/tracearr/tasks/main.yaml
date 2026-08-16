@@ -73,6 +73,7 @@
     - Start tracearr
 
 - name: Run tracearr docker-compose up
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ tracearr_folder }}"
     state: present

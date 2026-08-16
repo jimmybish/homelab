@@ -18,6 +18,7 @@
         - homepage_config
 
     - name: Restart Homepage to apply service entries
+      become: false
       community.docker.docker_compose_v2:
         project_src: "{{ homepage_folder }}"
         state: restarted

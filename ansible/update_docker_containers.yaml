@@ -28,11 +28,13 @@
         valid_compose_projects: "{{ compose_files.files | map(attribute='path') | map('dirname') | unique | list }}"
 
     - name: Remove stopped containers for each project
+      become: false
       community.docker.docker_prune:
         containers: true
       failed_when: false
 
     - name: Pull latest images (docker compose v2)
+      become: false
       community.docker.docker_compose_v2_pull:
         project_src: "{{ item }}"
       loop: "{{ valid_compose_projects }}"
@@ -40,6 +42,7 @@
       register: pull_results
 
     - name: Bring up containers (docker compose v2)
+      become: false
       community.docker.docker_compose_v2:
         project_src: "{{ item }}"
         state: present

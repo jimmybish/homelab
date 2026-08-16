@@ -37,6 +37,7 @@
     - Start Jellyseerr
 
 - name: Run docker-compose up
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ jellyseerr_folder }}"
     state: present

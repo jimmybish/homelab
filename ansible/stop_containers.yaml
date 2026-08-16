@@ -36,7 +36,8 @@
   hosts: hosts_list
   become: true
   tasks:
-    - name: Get containers
+    - name: Preflight unprivileged Docker access and get containers
+      become: false
       community.docker.docker_host_info:
         containers: true
       register: docker_info
@@ -46,12 +47,14 @@
         var: docker_info.containers
 
     - name: Stop running containers
+      become: false
       community.docker.docker_container:
         name: "{{ item }}"
         state: stopped
       loop: "{{ docker_info.containers | map(attribute='Id') | list }}"
 
     - name: Verify containers
+      become: false
       community.docker.docker_host_info:
         containers: true
       register: docker_info

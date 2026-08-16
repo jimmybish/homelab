@@ -129,7 +129,7 @@
   ansible.builtin.template:
     src: templates/docker_compose.yaml.j2
     dest: "{{ open_webui_folder }}/docker-compose.yaml"
-    mode: '0600'
+    mode: '0640'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
@@ -138,6 +138,7 @@
     - Restart Open WebUI
 
 - name: Run Open WebUI Docker Compose project
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ open_webui_folder }}"
     state: present
@@ -156,7 +157,7 @@
         dest: "{{ open_webui_config_reset_override_path }}"
         owner: "{{ docker_user }}"
         group: "{{ docker_user }}"
-        mode: '0600'
+        mode: '0640'
         content: |
           services:
             open-webui:
@@ -164,6 +165,7 @@
                 RESET_CONFIG_ON_START: "true"
 
     - name: Start Open WebUI once with config reset enabled
+      become: false
       community.docker.docker_compose_v2:
         project_src: "{{ open_webui_folder }}"
         files:
@@ -190,6 +192,7 @@
         state: absent
 
     - name: Converge Open WebUI to config reset disabled
+      become: false
       community.docker.docker_compose_v2:
         project_src: "{{ open_webui_folder }}"
         state: present
@@ -199,6 +202,7 @@
         wait_timeout: 300
 
 - name: Read persisted Open WebUI provider config
+  become: false
   ansible.builtin.command:
     argv:
       - docker

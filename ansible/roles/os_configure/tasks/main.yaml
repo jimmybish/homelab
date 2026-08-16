@@ -148,7 +148,7 @@
     name: "{{ os_configure_agent_user }}"
     uid: "{{ os_configure_agent_uid }}"
     shell: /bin/bash
-    groups: sudo,docker
+    groups: sudo
     append: true
     create_home: true
     state: present

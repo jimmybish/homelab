@@ -171,6 +171,7 @@
     - homepage
 
 - name: Run Homepage docker-compose up
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ homepage_folder }}"
     state: present
@@ -241,6 +242,7 @@
     - homepage
 
 - name: Restart Homepage to apply all configurations
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ homepage_folder }}"
     state: restarted

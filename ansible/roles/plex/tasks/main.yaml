@@ -101,6 +101,7 @@
     - Start Plex
 
 - name: Run Plex docker-compose up
+  become: false
   community.docker.docker_compose_v2:
     project_src: "{{ plex_folder }}"
     state: present
