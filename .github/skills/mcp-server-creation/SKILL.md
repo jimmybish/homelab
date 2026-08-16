@@ -29,8 +29,8 @@ ansible/roles/mcp_<service>/   ← Ansible role
   └── templates/docker_compose.yaml.j2
 ```
 
-Transport: **SSE** (HTTP-based, Docker container on homelab host).
-Clients connect via `http://<host>:<port>/sse`.
+Transport: **Streamable HTTP** (Docker container on homelab host).
+Clients connect via `http://<host>:<port>/mcp`.
 
 ## Step 1: Research the Target API
 
@@ -86,7 +86,7 @@ async def get_example(some_param: Optional[str] = None) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+  mcp.run(transport="streamable-http")
 ```
 
 ### Critical API Notes (MCP SDK v1.27.0+)
@@ -94,7 +94,7 @@ if __name__ == "__main__":
 - **`host` and `port` go in the `FastMCP()` constructor**, NOT in `run()`
 - `run()` only accepts `transport` and `mount_path`
 - Always use `host="0.0.0.0"` for Docker containers (bind to all interfaces)
-- Always use `transport="sse"` for remote Docker deployments
+- Always use `transport="streamable-http"` for remote Docker deployments
 
 ### Tool Design Guidelines
 
@@ -121,7 +121,7 @@ if __name__ == "__main__":
 ### `requirements.txt`
 
 ```
-mcp[cli]>=1.0.0
+mcp[cli]>=1.27.0,<2
 httpx>=0.27.0
 uvicorn>=0.30.0
 ```
@@ -321,8 +321,8 @@ After deploying, register the MCP server in **both** config files:
 Add to the `servers` object:
 ```json
 "<service>": {
-    "type": "sse",
-    "url": "http://<host>:<mcp_port>/sse"
+  "type": "http",
+  "url": "http://<host>:<mcp_port>/mcp"
 }
 ```
 
@@ -331,8 +331,8 @@ Add to the `servers` object:
 Add to the `mcpServers` object:
 ```json
 "<service>": {
-    "type": "sse",
-    "url": "http://<host>:<mcp_port>/sse"
+  "type": "http",
+  "url": "http://<host>:<mcp_port>/mcp"
 }
 ```
 
@@ -416,7 +416,7 @@ The Ansible role's `build: always` flag handles normal rebuilds, but BuildKit ca
 ### FastMCP API (v1.27.0+)
 
 - `host` and `port` are **constructor parameters**: `FastMCP("Name", host="0.0.0.0", port=8850)`
-- `run()` only takes `transport` and `mount_path`: `mcp.run(transport="sse")`
+- Use `mcp.run(transport="streamable-http")`; clients connect to the default `/mcp` endpoint
 - Passing `host`/`port` to `run()` raises `TypeError: FastMCP.run() got an unexpected keyword argument`
 - Context7 docs may show a different API — always verify against the installed version
 

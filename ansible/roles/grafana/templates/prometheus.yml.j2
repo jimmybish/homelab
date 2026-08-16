@@ -30,3 +30,10 @@ scrape_configs:
         labels:
           instance: {{ host }}.{{ internal_domain }}
 {% endfor %}
+  - job_name: 'vllm'
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+        - sparky.{{ internal_domain }}:8000
+        labels:
+          instance: sparky.{{ internal_domain }}:8000

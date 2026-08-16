@@ -20,11 +20,16 @@ def _headers() -> dict[str, str]:
 
 async def _get(path: str, params: dict[str, Any] | None = None) -> str:
     """Make a GET request to the Tracearr API and return the JSON response as a string."""
+    return json.dumps(await _get_json(path, params), indent=2)
+
+
+async def _get_json(path: str, params: dict[str, Any] | None = None) -> Any:
+    """Make a GET request to the Tracearr API and return the decoded JSON response."""
     clean_params = {k: v for k, v in (params or {}).items() if v is not None}
     async with httpx.AsyncClient(base_url=TRACEARR_BASE_URL, timeout=30) as client:
         resp = await client.get(f"{API_PREFIX}{path}", headers=_headers(), params=clean_params)
         resp.raise_for_status()
-        return json.dumps(resp.json(), indent=2)
+        return resp.json()
 
 
 @mcp.tool()
@@ -103,27 +108,81 @@ async def get_history(
     server_id: Optional[str] = None,
     state: Optional[str] = None,
     media_type: Optional[str] = None,
+    media_title: Optional[str] = None,
+    username: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     timezone: Optional[str] = None,
     page: Optional[int] = None,
     page_size: Optional[int] = None,
 ) -> str:
-    """Session history with full codec and quality details. Pause/resume cycles are aggregated into single entries. Filter by state ('playing','paused','stopped'), media_type ('movie','episode','track','live'), and date range (YYYY-MM-DD). Each entry includes user, media, device, stream quality, and watch progress."""
-    return await _get(
-        "/history",
+    """Session history with full codec and quality details. Filter by state ('playing','paused','stopped'), media_type ('movie','episode','track','live'), date range (YYYY-MM-DD), media_title, or username. media_title and username use case-insensitive substring matching; media_title also searches an episode's show title."""
+    params = {
+        "serverId": server_id,
+        "state": state,
+        "mediaType": media_type,
+        "startDate": start_date,
+        "endDate": end_date,
+        "timezone": timezone,
+    }
+
+    if media_title is None and username is None:
+        return await _get(
+            "/history",
+            {**params, "page": page, "pageSize": page_size},
+        )
+
+    result_page = page or 1
+    result_page_size = page_size or 25
+    if result_page < 1:
+        raise ValueError("page must be greater than 0")
+    if not 1 <= result_page_size <= 100:
+        raise ValueError("page_size must be between 1 and 100")
+
+    history: list[dict[str, Any]] = []
+    source_page = 1
+    total = 0
+    while source_page == 1 or len(history) < total:
+        response = await _get_json(
+            "/history",
+            {**params, "page": source_page, "pageSize": 100},
+        )
+        history.extend(response["data"])
+        total = response["meta"]["total"]
+        source_page += 1
+
+    title_filter = media_title.casefold() if media_title is not None else None
+    username_filter = username.casefold() if username is not None else None
+    filtered_history = [
+        item
+        for item in history
+        if (
+            title_filter is None
+            or any(
+                title_filter in (item.get(field) or "").casefold()
+                for field in ("mediaTitle", "showTitle")
+            )
+        )
+        and (
+            username_filter is None
+            or username_filter
+            in ((item.get("user") or {}).get("username") or "").casefold()
+        )
+    ]
+
+    start = (result_page - 1) * result_page_size
+    return json.dumps(
         {
-            "serverId": server_id,
-            "state": state,
-            "mediaType": media_type,
-            "startDate": start_date,
-            "endDate": end_date,
-            "timezone": timezone,
-            "page": page,
-            "pageSize": page_size,
+            "data": filtered_history[start : start + result_page_size],
+            "meta": {
+                "total": len(filtered_history),
+                "page": result_page,
+                "pageSize": result_page_size,
+            },
         },
+        indent=2,
     )
 
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    mcp.run(transport="streamable-http")

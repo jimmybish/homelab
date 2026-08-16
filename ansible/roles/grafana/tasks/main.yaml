@@ -194,6 +194,7 @@
     variable_end_string: "]]"
   loop:
     - docker-monitoring
+    - dgx-spark-vllm
     - host-availability
     - host-monitoring
     - proxmox-cluster-flux
