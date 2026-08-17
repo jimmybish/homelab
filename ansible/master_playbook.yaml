@@ -39,6 +39,9 @@
 - name: Deploy Open WebUI
   ansible.builtin.import_playbook: deploy_open_webui.yaml
 
+- name: Deploy SearXNG
+  ansible.builtin.import_playbook: deploy_searxng.yaml
+
 - name: Deploy Maintainerr
   ansible.builtin.import_playbook: deploy_maintainerr.yaml
 

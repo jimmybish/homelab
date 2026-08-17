@@ -1,0 +1,19 @@
+use_default_settings:
+  engines:
+    remove:
+      - ahmia
+      - torch
+      - wikidata
+
+server:
+  secret_key: "{{ searxng_secret }}"
+  base_url: "{{ internal_searxng_url }}/"
+  limiter: true
+
+search:
+  formats:
+    - html
+    - json
+
+valkey:
+  url: valkey://valkey:6379/0

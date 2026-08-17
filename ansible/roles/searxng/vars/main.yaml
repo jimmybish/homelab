@@ -1,0 +1,27 @@
+---
+# Research Notes - SearXNG
+# Official documentation: https://docs.searxng.org/admin/installation-docker.html
+# Official compose: https://github.com/searxng/searxng/blob/master/container/docker-compose.yml
+# NGINX proxy config: no LinuxServer sample available
+# Homepage widget: no native widget available
+# Security advisories: none published by GitHub as of 2026-08-17
+# SearXNG uses Valkey for limiter state and trusts the internal SWAG proxy headers.
+
+searxng_version: "latest"
+searxng_valkey_version: "9-alpine"
+searxng_port: 8080
+searxng_container_port: 8080
+searxng_trusted_proxy: "192.168.0.200/32"
+searxng_api_clients:
+  - "192.168.0.20/32"
+
+searxng_folder: "{{ docker_storage_folder }}/searxng"
+searxng_config_folder: "{{ searxng_folder }}/config"
+searxng_cache_folder: "{{ searxng_folder }}/cache"
+searxng_valkey_folder: "{{ searxng_folder }}/valkey"
+
+searxng_configure_homepage: true
+searxng_configure_proxy: true
+searxng_configure_dns: true
+searxng_is_proxied: true
+...

@@ -1,0 +1,11 @@
+[botdetection]
+trusted_proxies = [
+  '{{ searxng_trusted_proxy }}',
+]
+
+[botdetection.ip_lists]
+pass_ip = [
+{% for client in searxng_api_clients %}
+  '{{ client }}',
+{% endfor %}
+]

@@ -164,6 +164,11 @@ open_webui_host:
   hosts:
     hermes:
 
+# SearXNG
+searxng_host:
+  hosts:
+    hermes:
+
 # Tracearr
 tracearr_host:
   hosts:

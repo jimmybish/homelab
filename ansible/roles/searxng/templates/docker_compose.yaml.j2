@@ -1,0 +1,33 @@
+services:
+  searxng:
+    image: docker.io/searxng/searxng:{{ searxng_version }}
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "{{ searxng_port }}:{{ searxng_container_port }}"
+    environment:
+      - SEARXNG_SECRET={{ searxng_secret }}
+      - SEARXNG_BASE_URL={{ internal_searxng_url }}/
+      - SEARXNG_LIMITER=true
+      - SEARXNG_VALKEY_URL=valkey://valkey:6379/0
+    volumes:
+      - {{ searxng_config_folder }}:/etc/searxng
+      - {{ searxng_cache_folder }}:/var/cache/searxng
+    networks:
+      - searxng
+    depends_on:
+      - valkey
+
+  valkey:
+    image: docker.io/valkey/valkey:{{ searxng_valkey_version }}
+    container_name: searxng-valkey
+    command: valkey-server --save 30 1 --loglevel warning
+    restart: unless-stopped
+    volumes:
+      - {{ searxng_valkey_folder }}:/data
+    networks:
+      - searxng
+
+networks:
+  searxng:
+    driver: bridge

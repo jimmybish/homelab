@@ -1,0 +1,6 @@
+---
+- name: Install SearXNG
+  hosts: searxng_host
+  become: true
+  roles:
+    - searxng

@@ -1,0 +1,163 @@
+---
+# 1. Docker Prerequisites
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Enable memory overcommit for Valkey persistence
+  ansible.posix.sysctl:
+    name: vm.overcommit_memory
+    value: '1'
+    sysctl_set: true
+    state: present
+    reload: true
+
+# 2. Directory Setup
+- name: Setup SearXNG stack directory
+  ansible.builtin.file:
+    path: "{{ searxng_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup SearXNG application directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: '977'
+    group: '977'
+  loop:
+    - "{{ searxng_config_folder }}"
+    - "{{ searxng_cache_folder }}"
+
+- name: Setup SearXNG Valkey directory
+  ansible.builtin.file:
+    path: "{{ searxng_valkey_folder }}"
+    state: directory
+    mode: '0755'
+    owner: '999'
+    group: '1000'
+
+# 3. Firewall Configuration
+- name: Allow SearXNG port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ searxng_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+# 4. Deploy Configuration Files & Run Compose
+- name: Deploy SearXNG settings
+  ansible.builtin.template:
+    src: settings.yml.j2
+    dest: "{{ searxng_config_folder }}/settings.yml"
+    mode: '0640'
+    owner: '977'
+    group: '977'
+  no_log: true
+  notify: Start SearXNG
+
+- name: Deploy SearXNG limiter configuration
+  ansible.builtin.template:
+    src: limiter.toml.j2
+    dest: "{{ searxng_config_folder }}/limiter.toml"
+    mode: '0644'
+    owner: '977'
+    group: '977'
+  notify: Start SearXNG
+
+- name: Deploy SearXNG using Docker Compose
+  ansible.builtin.template:
+    src: templates/docker_compose.yaml.j2
+    dest: "{{ searxng_folder }}/docker-compose.yaml"
+    mode: '0640'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  no_log: true
+  notify: Start SearXNG
+
+- name: Run SearXNG docker-compose up
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ searxng_folder }}"
+    state: present
+    remove_orphans: true
+
+# 5. Health Check
+- name: Check if SearXNG port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert SearXNG port is listening
+  ansible.builtin.assert:
+    that:
+      - searxng_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "SearXNG port {{ searxng_port }} is not open and listening!"
+    success_msg: "SearXNG port {{ searxng_port }} is open and listening."
+
+# 6. Proxy Configuration
+- name: Configure internal nginx proxy for SearXNG
+  when: searxng_configure_proxy | default(true)
+  block:
+    - name: Get SearXNG host IP for proxy
+      ansible.builtin.set_fact:
+        searxng_proxy_ip: "{{ ansible_default_ipv4.address }}"
+
+    - name: Deploy SearXNG nginx config to SWAG Internal
+      ansible.builtin.template:
+        src: searxng.subdomain.conf.j2
+        dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/searxng.subdomain.conf"
+        mode: '0664'
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      notify: Restart Swag Internal
+
+# 7. DNS Configuration
+- name: Ensure deployment host DNS override exists
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
+  vars:
+    _dns_configure: "{{ searxng_configure_dns | default(true) }}"
+  when: searxng_configure_dns | default(true)
+
+- name: Create SearXNG DNS alias
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+  vars:
+    _dns_configure: "{{ searxng_configure_dns | default(true) }}"
+    _dns_alias_host: searxng
+    _dns_alias_descr: Private metasearch engine
+    _dns_is_proxied: "{{ searxng_is_proxied | default(true) }}"
+  when: searxng_configure_dns | default(true)
+
+# 8. Homepage Integration
+- name: Add SearXNG service to Homepage Slop section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: SearXNG
+    _homepage_marker: searxng service
+    _homepage_template: searxng_service.yaml.j2
+    _homepage_insertafter: "^- Slop:"
+  when: searxng_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+- name: Notify Homepage restart for SearXNG
+  ansible.builtin.debug:
+    msg: "SearXNG homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify: Restart Homepage
+  when: searxng_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+...
