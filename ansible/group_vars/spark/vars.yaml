@@ -6,6 +6,15 @@ alloy_node_exporter_mode: "standalone"
 
 docker_manage_installation: false
 
+vllm_sparkrun_inter_node_addresses:
+  sparky: "192.168.0.21"
+  nova: "192.168.0.22"
+vllm_sparkrun_inter_node_ports:
+  - "25000"
+  - "46379"
+  - "32768:60999"
+vllm_sparkrun_proxy_port: "4000"
+
 docker_daemon_additional_options:
   default-runtime: nvidia
   runtimes:

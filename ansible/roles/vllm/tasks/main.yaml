@@ -5,3 +5,25 @@
     port: "8000"
     proto: tcp
   when: ansible_os_family == "Debian"
+
+- name: Allow Sparkrun inter-node ports through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.1 }}"
+    proto: tcp
+    from_ip: "{{ item.0.value }}"
+    interface: "{{ ansible_default_ipv4.interface }}"
+    direction: in
+  loop: "{{ vllm_sparkrun_inter_node_addresses | dict2items | product(vllm_sparkrun_inter_node_ports) | list }}"
+  loop_control:
+    label: "{{ item.0.key }} TCP {{ item.1 }}"
+  when:
+    - ansible_os_family == "Debian"
+    - item.0.key != inventory_hostname
+
+- name: Allow Sparkrun proxy port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ vllm_sparkrun_proxy_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
