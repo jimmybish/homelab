@@ -61,6 +61,11 @@ spark:
     sparky:
     nova:
 
+# ComfyUI - Nova only
+comfyui_host:
+  hosts:
+    nova:
+
 # Plex Media Server
 plex_host:
   hosts:
@@ -68,6 +73,11 @@ plex_host:
 
 # Jellyseerr
 jellyseerr_host:
+  hosts:
+    proxy:
+
+# wg-easy (WireGuard VPN management)
+wg_easy_host:
   hosts:
     proxy:
 
@@ -138,6 +148,11 @@ grafana_host:
 paperless_host:
   hosts:
     docker-2:
+
+# Guacamole
+guacamole_host:
+  hosts:
+    proxy:
 
 # n8n
 n8n_host:

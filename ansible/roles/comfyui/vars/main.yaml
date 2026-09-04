@@ -1,0 +1,38 @@
+---
+# Research Notes - ComfyUI
+# NVIDIA quick start: https://build.nvidia.com/spark/comfyui/image-gen-quick-start
+# Official source: https://github.com/Comfy-Org/ComfyUI
+# NVIDIA PyTorch image: https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch
+# Security advisories: https://github.com/Comfy-Org/ComfyUI/security/advisories
+# Last reviewed: 2026-08-18
+#
+# NVIDIA's quick start is a host Python install, not an image or Compose example.
+# This role packages the same official source and dependency install in NVIDIA's
+# signed, scanned, multi-arch, DGX Spark-supported PyTorch container.
+# Port: 8188/TCP. Dependencies: NVIDIA driver/container toolkit; no sidecars.
+# Persistent mounts: models, input, output, user, and custom_nodes.
+# Environment: no required ComfyUI variables; TZ is operational only.
+# UID/GID: neither ComfyUI nor the NVIDIA image exposes PUID/PGID; image defaults
+# to root. Persistent directories are restricted to the Docker service account.
+# Proxy: no LinuxServer reverse-proxy-confs sample exists; DNS resolves directly
+# to Nova and Homepage uses HTTP with the port. Homepage has no ComfyUI widget.
+# Security: ComfyUI assumes trusted local URL users and has no built-in auth.
+# Four high advisories were published 2026-07-16; use a current stable release,
+# keep access LAN-only, and do not install untrusted custom nodes or workflows.
+# Model/checkpoint and workflow download/configuration is intentionally omitted.
+
+comfyui_version: "v0.33.1"
+comfyui_pytorch_image_version: "25.10-py3"
+comfyui_port: 8188
+comfyui_folder: "{{ docker_storage_folder }}/comfyui"
+comfyui_build_folder: "{{ comfyui_folder }}/build"
+comfyui_data_directories:
+  - models
+  - input
+  - output
+  - user
+  - custom_nodes
+comfyui_configure_dns: true
+comfyui_configure_homepage: true
+comfyui_configure_proxy: false
+comfyui_is_proxied: false

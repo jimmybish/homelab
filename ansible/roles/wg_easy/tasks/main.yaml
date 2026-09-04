@@ -1,0 +1,130 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup wg-easy directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  loop:
+    - "{{ wg_easy_folder }}"
+    - "{{ wg_easy_folder }}/etc_wireguard"
+
+- name: Allow wg-easy web UI port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ wg_easy_web_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+- name: Allow wg-easy WireGuard VPN port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ wg_easy_vpn_port }}"
+    proto: udp
+  when: ansible_os_family == "Debian"
+
+- name: Ensure IPv4 forwarding is enabled on the host
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    sysctl_set: true
+    state: present
+    reload: true
+
+- name: Deploy wg-easy using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ wg_easy_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Start wg-easy
+
+- name: Run docker-compose up
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ wg_easy_folder }}"
+    state: present
+    remove_orphans: true
+
+- name: Check if wg-easy ports are open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert wg-easy web UI port is listening
+  ansible.builtin.assert:
+    that:
+      - wg_easy_web_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "wg-easy web UI port is not open and listening!"
+    success_msg: "wg-easy web UI port is open and listening."
+
+# Configure SWAG Internal Proxy
+- name: Resolve wg-easy host IP for proxy configuration
+  ansible.builtin.set_fact:
+    wg_easy_proxy_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+
+- name: Deploy wg-easy nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: wg-easy.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/wg-easy.subdomain.conf"
+    mode: '0664'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag Internal
+  when: wg_easy_configure_proxy | default(true)
+
+# DNS Configuration
+- name: Ensure deployment host DNS override exists
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
+  vars:
+    _dns_configure: "{{ wg_easy_configure_dns | default(true) }}"
+  when: wg_easy_configure_dns | default(true)
+
+- name: Create wg-easy DNS alias
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+  vars:
+    _dns_configure: "{{ wg_easy_configure_dns | default(true) }}"
+    _dns_alias_host: wg
+    _dns_alias_descr: "wg-easy (WireGuard VPN management)"
+    _dns_is_proxied: "{{ wg_easy_is_proxied | default(true) }}"
+  when: wg_easy_configure_dns | default(true)
+
+# Configure Homepage
+- name: Add wg-easy to Homepage Infrastructure section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: wg-easy
+    _homepage_marker: wg_easy service
+    _homepage_template: wg_easy_service.yaml.j2
+    _homepage_insertafter: "^- Infra:"
+  when: wg_easy_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for wg-easy
+  ansible.builtin.debug:
+    msg: "wg-easy homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify:
+    - Restart Homepage
+  when: wg_easy_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config

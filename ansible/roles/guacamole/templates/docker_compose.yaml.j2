@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: docker.io/library/postgres:{{ guacamole_postgres_version }}
+    container_name: guacamole-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "{{ guacamole_db_name }}"
+      POSTGRES_USER: "{{ guacamole_db_user }}"
+      POSTGRES_PASSWORD: "{{ guacamole_db_password }}"
+    volumes:
+      - {{ guacamole_postgres_data }}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ guacamole_db_user }} -d {{ guacamole_db_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - guacamole_net
+
+  guacd:
+    image: guacamole/guacd:{{ guacamole_guacd_version }}
+    container_name: guacamole-guacd
+    restart: unless-stopped
+    networks:
+      - guacamole_net
+
+  guacamole:
+    image: guacamole/guacamole:{{ guacamole_webapp_version }}
+    container_name: guacamole
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      guacd:
+        condition: service_started
+    environment:
+      GUACD_HOSTNAME: guacd
+      GUACD_PORT: "4822"
+      POSTGRESQL_HOSTNAME: postgres
+      POSTGRESQL_PORT: "5432"
+      POSTGRESQL_DATABASE: "{{ guacamole_db_name }}"
+      POSTGRESQL_USERNAME: "{{ guacamole_db_user }}"
+      POSTGRESQL_PASSWORD: "{{ guacamole_db_password }}"
+      POSTGRESQL_AUTO_CREATE_ACCOUNTS: "false"
+    ports:
+      - "{{ guacamole_web_port }}:8080"
+    networks:
+      - guacamole_net
+
+networks:
+  guacamole_net:
+    name: guacamole_net
+    driver: bridge

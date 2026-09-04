@@ -1,0 +1,34 @@
+---
+# Research and Documentation
+# Apache Guacamole: https://guacamole.apache.org/doc/gug/guacamole-docker.html
+# - Clientless remote desktop gateway (SSH, RDP, VNC) served via browser.
+# - Three containers:
+#     * postgres          — persistent DB backend (auth + connections)
+#     * guacd             — connection proxy daemon (protocol translation)
+#     * guacamole         — Tomcat webapp listening on :8080, served at /guacamole/
+# - Postgres schema is generated at deploy time via:
+#     docker exec guacamole /opt/guacamole/bin/initdb.sh --postgresql
+
+# Image versions
+guacamole_postgres_version: "15"
+guacamole_guacd_version: "latest"
+guacamole_webapp_version: "latest"
+
+# Web port (Tomcat) — published on host for SWAG to reach.
+guacamole_web_port: 8080
+
+# Postgres DB details (internal to the compose stack)
+guacamole_db_name: "guacamole_db"
+guacamole_db_user: "guacamole_user"
+
+# Volume paths
+guacamole_folder: "{{ docker_storage_folder }}/guacamole"
+guacamole_postgres_data: "{{ guacamole_folder }}/postgres"
+guacamole_drivers_folder: "{{ guacamole_folder }}/drivers"
+guacamole_seed_marker: "{{ guacamole_folder }}/.db_seeded"
+
+# Feature flags
+guacamole_configure_dns: true
+guacamole_configure_proxy: true
+guacamole_configure_external_proxy: true
+guacamole_configure_homepage: true

@@ -50,10 +50,38 @@ Template checklist:
 
 ### Indentation Rules
 
-- List items (starting with `-`): 2 spaces under the top-level section
-- Service properties (`icon`, `href`, etc.): 6 spaces
-- Widget properties: 8 spaces
-- Match the indentation of existing entries in the target section before deploying
+**CRITICAL: Each Homepage section (Slop, Media, Smart Home, Infra, ARR, etc.) must use ONE consistent indentation style throughout. Mixing 2-space and 4-space list items in the same section triggers `bad indentation of a sequence entry` and prevents `services.yaml` from loading at all — Homepage shows no services.**
+
+Before creating a new template, check the target section's existing entries and match them exactly:
+
+- **Media section** currently uses 2-space list items / 6-space properties
+- **Slop, Smart Home, Infra, ARR sections** currently use 4-space list items / 8-space properties
+
+Both styles are valid YAML; the requirement is consistency within a section.
+
+**2-space style** (for the Media section):
+
+```yaml
+  - <Service Name>:
+      icon: <service>.png
+      href: {{ internal_<service>_url }}
+      description: Service description
+      widget:
+        type: <service>
+        url: {{ internal_<service>_url }}
+        key: {{ homepage_<service>_key }}
+```
+
+**4-space style** (for Slop, Smart Home, Infra, ARR):
+
+```yaml
+    - <Service Name>:
+        icon: <service>.png
+        href: {{ internal_<service>_url }}
+        description: Service description
+```
+
+After adding a new service, verify the merged `services.yaml` on the Homepage host and check `docker logs homepage --tail 20` for `YAMLException` errors.
 
 ## Role Integration Task
 

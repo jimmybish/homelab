@@ -1,0 +1,241 @@
+---
+# --------------------------------------------------------------------------- #
+# Apache Guacamole — remote access gateway
+# --------------------------------------------------------------------------- #
+
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Set guacamole proxy IP (host address for SWAG upstream)
+  ansible.builtin.set_fact:
+    guacamole_proxy_ip: "{{ ansible_default_ipv4.address }}"
+
+# --------------------------------------------------------------------------- #
+# Directory setup — postgres runs as UID 999 inside the container, but the
+# official image chowns the data dir on first startup provided the parent is
+# writable, so root:root on the parent is fine.
+# --------------------------------------------------------------------------- #
+- name: Create guacamole base directory
+  ansible.builtin.file:
+    path: "{{ guacamole_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Create guacamole postgres data directory
+  ansible.builtin.file:
+    path: "{{ guacamole_postgres_data }}"
+    state: directory
+    mode: '0755'
+
+- name: Create guacamole drivers directory
+  ansible.builtin.file:
+    path: "{{ guacamole_drivers_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+# --------------------------------------------------------------------------- #
+# Firewall
+# --------------------------------------------------------------------------- #
+- name: Allow Guacamole web port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ guacamole_web_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+# --------------------------------------------------------------------------- #
+# Deploy compose stack
+# --------------------------------------------------------------------------- #
+- name: Deploy Guacamole docker-compose.yaml
+  ansible.builtin.template:
+    src: "docker_compose.yaml.j2"
+    dest: "{{ guacamole_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  notify:
+    - Restart Guacamole
+
+- name: Pull and start Guacamole stack
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ guacamole_folder }}"
+    state: present
+    pull: missing
+    remove_orphans: true
+
+# --------------------------------------------------------------------------- #
+# Database schema initialisation (first deploy only)
+# --------------------------------------------------------------------------- #
+- name: Check for DB seed marker
+  ansible.builtin.stat:
+    path: "{{ guacamole_seed_marker }}"
+  register: guacamole_seed_stat
+
+- name: Wait for postgres to accept connections
+  ansible.builtin.command:
+    cmd: docker exec guacamole-postgres pg_isready -U {{ guacamole_db_user }} -d {{ guacamole_db_name }}
+  register: guacamole_pg_ready
+  retries: 30
+  delay: 2
+  until: guacamole_pg_ready.rc == 0
+  changed_when: false
+  when: not guacamole_seed_stat.stat.exists
+
+- name: Generate Guacamole schema SQL from webapp image
+  ansible.builtin.shell: >
+    docker exec guacamole /opt/guacamole/bin/initdb.sh --postgresql
+    > {{ guacamole_folder }}/initdb.sql
+  args:
+    creates: "{{ guacamole_folder }}/initdb.sql"
+  when: not guacamole_seed_stat.stat.exists
+
+- name: Load Guacamole schema into postgres
+  ansible.builtin.shell: |
+    set -o pipefail
+    cat {{ guacamole_folder }}/initdb.sql \
+      | docker exec -i guacamole-postgres psql -v ON_ERROR_STOP=1 \
+          -U {{ guacamole_db_user }} -d {{ guacamole_db_name }}
+  args:
+    executable: /bin/bash
+  when: not guacamole_seed_stat.stat.exists
+  register: guacamole_schema_load
+
+- name: Mark DB as seeded
+  ansible.builtin.file:
+    path: "{{ guacamole_seed_marker }}"
+    state: touch
+    mode: '0644'
+  when:
+    - not guacamole_seed_stat.stat.exists
+    - guacamole_schema_load is succeeded
+
+- name: Restart Guacamole webapp to pick up new schema
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ guacamole_folder }}"
+    services:
+      - guacamole
+    state: restarted
+  when:
+    - not guacamole_seed_stat.stat.exists
+    - guacamole_schema_load is succeeded
+
+# --------------------------------------------------------------------------- #
+# Remove sensitive artifacts from the retired custom admin seeding workflow
+# --------------------------------------------------------------------------- #
+- name: Remove legacy admin seed SQL (contains password)
+  ansible.builtin.file:
+    path: "{{ guacamole_folder }}/seed_admin.sql"
+    state: absent
+
+# --------------------------------------------------------------------------- #
+# Health check
+# --------------------------------------------------------------------------- #
+- name: Wait for Guacamole port to listen
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ guacamole_web_port }}"
+    timeout: 60
+
+- name: Verify Guacamole webapp responds locally
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ guacamole_web_port }}/guacamole/"
+    return_content: true
+    status_code: [200, 302]
+  register: guacamole_local_check
+  retries: 10
+  delay: 3
+  until: guacamole_local_check.status in [200, 302] and (guacamole_local_check.content | default('') is search('guacamole-common-js'))
+
+- name: Assert Guacamole content is served locally
+  ansible.builtin.assert:
+    that:
+      - guacamole_local_check.status in [200, 302]
+      - guacamole_local_check.content is search('guacamole-common-js')
+    fail_msg: "Guacamole did not return expected content on port {{ guacamole_web_port }}"
+    success_msg: "Guacamole responded successfully on port {{ guacamole_web_port }}"
+
+# --------------------------------------------------------------------------- #
+# SWAG proxy configuration (internal + external)
+# --------------------------------------------------------------------------- #
+- name: Configure SWAG Internal proxy for Guacamole
+  when: guacamole_configure_proxy | default(true)
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/roles/proxy/templates/internal/guacamole.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/guacamole.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify: Restart Swag Internal
+
+- name: Configure SWAG External proxy for Guacamole
+  when: guacamole_configure_external_proxy | default(true)
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/roles/proxy/templates/external/guacamole.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/external/nginx/proxy-confs/guacamole.subdomain.conf"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify: Restart Swag External
+
+# --------------------------------------------------------------------------- #
+# DNS
+# --------------------------------------------------------------------------- #
+- name: Ensure deployment host DNS override exists
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
+  vars:
+    _dns_configure: "{{ guacamole_configure_dns | default(true) }}"
+  when: guacamole_configure_dns | default(true)
+
+- name: Create guacamole DNS alias
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+  vars:
+    _dns_configure: "{{ guacamole_configure_dns | default(true) }}"
+    _dns_alias_host: guacamole
+    _dns_alias_descr: Apache Guacamole remote access gateway
+    _dns_is_proxied: true
+  when: guacamole_configure_dns | default(true)
+
+# --------------------------------------------------------------------------- #
+# Homepage
+# --------------------------------------------------------------------------- #
+- name: Add guacamole service to Homepage Infra section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: Apache Guacamole
+    _homepage_marker: guacamole service
+    _homepage_template: guacamole_service.yaml.j2
+    _homepage_insertafter: "^- Infra:"
+  when: guacamole_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for guacamole
+  ansible.builtin.debug:
+    msg: "guacamole homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify: Restart Homepage
+  when: guacamole_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config

@@ -154,3 +154,46 @@ When the issue is active, collect the following before power-cycling if possible
    - Look for config changes, failed updates, or resource exhaustion.
    - Check `docker logs --tail 100 <container>` on the host for full context.
    - Restart the container if the errors suggest a stuck state.
+
+---
+
+## WireGuard (wg-easy) Handshake Fails on Mobile Carriers
+
+**Alert / Symptom:** WireGuard client on iOS/Android connects fine from home Wi-Fi but from cellular data (LTE/5G) it loops handshake timeouts. Pings and browsing over the tunnel all fail. `docker exec wg-easy wg show wg0` shows the peer with no `endpoint`, no `latest handshake`, and no `transfer` counters. `tcpdump -i wg0` inside the container shows zero packets.
+
+### Root Cause
+
+Australian mobile carriers (Telstra confirmed, likely others) run their LTE/5G APN as **IPv6-only with 464XLAT/NAT64**. The phone wraps the WireGuard endpoint's IPv4 address into an IPv6 address using the carrier's PLAT prefix (e.g. `2001:8004::/32` for Telstra), sends the UDP packet over v6, and the carrier's PLAT gateway translates it back to v4 at the edge.
+
+The PLAT gateway silently drops UDP traffic on non-standard ports. WireGuard's default **UDP 51820 is blocked**. Only well-known UDP ports (`53`, `443`, `500`, `4500`) survive translation.
+
+### Fix
+
+Move the client-facing WireGuard port to **UDP 4500** (IPsec NAT-T port, always allowed by carrier PLATs) while keeping the container's internal listen port at 51820.
+
+**pfSense NAT Port Forward:**
+- Interface: WAN
+- Protocol: UDP
+- Destination: WAN address
+- Destination port: `4500`
+- Redirect target IP: proxy host (e.g. `192.168.0.200`)
+- Redirect target port: **`51820`** (translate external 4500 → internal 51820)
+- Description: `wg-easy WireGuard (carrier-friendly)`
+
+**wg-easy admin UI:**
+- WireGuard Host: `vpn.<domain>` (unchanged)
+- WireGuard Port: `4500` — this only changes the `Endpoint =` line in generated client configs. The container keeps `ListenPort = 51820` internally.
+
+**iOS client:** Delete the old tunnel, download the new profile from wg-easy (endpoint should read `:4500`), scan the QR code, connect. Handshake completes within seconds.
+
+### Verification
+
+- On pfSense (via API): `firewall/states` should show a UDP flow to `<proxy>:4500` with `bytes_out > 0` (bidirectional traffic)
+- On the proxy host: `docker exec wg-easy wg show wg0` shows peer with recent `latest handshake` and non-zero `transfer`
+- Inside the container: `tcpdump -i wg0` shows client traffic when you use apps on the phone
+
+### Notes
+
+- The **existing role does not automate this**. The pfSense NAT rule and the wg-easy UI port setting are manual steps. If we ever add multi-carrier VPN support, bake `wg_easy_client_port: 4500` into the role and drive both the container's `WG_PORT` and a shared NAT task.
+- Home Wi-Fi over IPv4 works on either port, so home users won't notice — this only bites when a client uses cellular data.
+- Also check DNS: iOS on carrier IPv6 will refuse to use a bare IPv4 DNS server if `Allowed IPs` is a split tunnel. Use full tunnel (`0.0.0.0/0, ::/0`) plus `DNS = 192.168.0.1` in the client config.

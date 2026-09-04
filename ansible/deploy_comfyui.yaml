@@ -1,0 +1,6 @@
+---
+- name: Install ComfyUI on Nova
+  hosts: comfyui_host
+  become: true
+  roles:
+    - comfyui

@@ -1,0 +1,26 @@
+---
+# Research Notes - wg-easy
+# Official Source: https://github.com/wg-easy/wg-easy
+# Docker Image: ghcr.io/wg-easy/wg-easy
+# Example Compose: https://github.com/wg-easy/wg-easy/blob/master/docker-compose.yml
+# Ports:
+#   - 51820/udp: WireGuard VPN tunnel (must be reachable from the internet)
+#   - 51821/tcp: Web UI (LAN only, behind SWAG internal)
+# Auth: v14+ removed WEBUI_PASSWORD env var; admin account is created via
+#       the web UI on first launch.
+# Last Updated: 2026-08-21
+
+wg_easy_version: "15"
+
+# Ports
+wg_easy_vpn_port: 51820   # UDP - WireGuard tunnel
+wg_easy_web_port: 51821   # TCP - Web UI
+
+# Volume paths
+wg_easy_folder: "{{ docker_storage_folder }}/wg-easy"
+
+# Feature flags
+wg_easy_configure_homepage: true
+wg_easy_configure_proxy: true
+wg_easy_configure_dns: true
+wg_easy_is_proxied: true

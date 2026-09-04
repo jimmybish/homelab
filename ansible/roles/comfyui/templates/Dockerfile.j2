@@ -1,0 +1,21 @@
+FROM nvcr.io/nvidia/pytorch:{{ comfyui_pytorch_image_version }}
+
+ARG COMFYUI_VERSION
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes libx11-6 libxext6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && git clone --branch "${COMFYUI_VERSION}" --depth 1 \
+        https://github.com/Comfy-Org/ComfyUI.git /opt/ComfyUI \
+    && grep -Eiv '^(torch|torchvision|torchaudio)([<>=~! ]|$)' \
+        /opt/ComfyUI/requirements.txt > /tmp/comfyui-requirements.txt \
+    && pip install --no-cache-dir -r /tmp/comfyui-requirements.txt \
+    && pip install --no-cache-dir --no-deps \
+        --index-url https://download.pytorch.org/whl/cu130 torchaudio==2.9.0 \
+    && rm /tmp/comfyui-requirements.txt
+
+WORKDIR /opt/ComfyUI
+
+EXPOSE 8188
+
+CMD ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188", "--disable-api-nodes"]

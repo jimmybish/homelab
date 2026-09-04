@@ -107,6 +107,7 @@ grafana_silence_duration_minutes: 30
 internal_homeassistant_url: "https://homeassistant.{{ internal_domain }}"
 internal_jellyfin_url: "https://jellyfin.{{ internal_domain }}"
 internal_jellyseerr_url: "https://request.{{ internal_domain }}"
+internal_wg_easy_url: "https://wg.{{ internal_domain }}"
 internal_n8n_url: "https://n8n.{{ internal_domain }}"
 n8n_api_key: !vault |
           $ANSIBLE_VAULT;1.1;AES256
@@ -281,6 +282,8 @@ grafana_webhook_secret: !vault |
           66353466393435326131
 internal_omada_sdn_url: "https://omada-sdn:8043"
 internal_paperless_url: "https://paperless.{{ internal_domain }}"
+internal_guacamole_url: "https://guacamole.{{ internal_domain }}"
+external_guacamole_url: "https://guacamole.{{ external_domain }}"
 internal_pfsense_url: "https://pfsense.{{ internal_domain }}"
 internal_plex_url: "https://plex.{{ internal_domain }}:32400"
 internal_radarr_url: "https://radarr.{{ internal_domain }}"
@@ -306,6 +309,7 @@ searxng_secret: !vault |
 internal_hermes_url: "http://hermes.{{ internal_domain }}:9119"
 hermes_api_server_port: 8642
 internal_hermes_api_url: "http://hermes.{{ internal_domain }}:{{ hermes_api_server_port }}/v1"
+internal_comfyui_url: "http://comfyui.{{ internal_domain }}:8188"
 internal_open_webui_url: "https://open-webui.{{ internal_domain }}"
 open_webui_secret_key: !vault |
           $ANSIBLE_VAULT;1.1;AES256
@@ -616,3 +620,13 @@ grafana_influxdb_admin_token: !vault |
 scrypted_folder: "/share/nvr/scrypted"
 arr_suite_downloads_folder: "/downloads"
 grafana_downloads_folder: "/downloads"
+
+# Guacamole Postgres password (generated at role scaffold time)
+guacamole_db_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          31656363393534333530333932343335313431303166333266633766643838613839313636396163
+          6435383061623263633739616363643430363637663630310a343565363836373266653937326333
+          64613038346335323335373063326538383535336166356133333662313634656265643864653534
+          6632653232353835350a613534656365323738633131356334303332363533313265633762363632
+          38653262376630613465306135353934343038396437646638663465376262326438376639396134
+          3438326534646335323266616464643263303866303362313765

@@ -8,6 +8,19 @@
 
 # --- Slop section ---
 
+- name: "Homepage config: ComfyUI"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: ComfyUI
+    _homepage_marker: comfyui service
+    _homepage_template: comfyui_service.yaml.j2
+    _homepage_insertafter: "^- Slop:"
+  when: comfyui_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
 - name: "Homepage config: Open WebUI"
   ansible.builtin.include_tasks:
     file: homepage_add_service.yaml
@@ -194,6 +207,32 @@
     _homepage_template: omada_sdn_service.yaml.j2
     _homepage_insertafter: "^- Infra:"
   when: omada_sdn_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: "Homepage config: Apache Guacamole"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: Apache Guacamole
+    _homepage_marker: guacamole service
+    _homepage_template: guacamole_service.yaml.j2
+    _homepage_insertafter: "^- Infra:"
+  when: guacamole_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: "Homepage config: wg-easy"
+  ansible.builtin.include_tasks:
+    file: homepage_add_service.yaml
+  vars:
+    _homepage_service_name: wg-easy
+    _homepage_marker: wg_easy service
+    _homepage_template: wg_easy_service.yaml.j2
+    _homepage_insertafter: "^- Infra:"
+  when: wg_easy_configure_homepage | default(true)
   tags:
     - homepage
     - homepage_config

@@ -1,0 +1,23 @@
+services:
+  comfyui:
+    build:
+      context: {{ comfyui_build_folder }}
+      dockerfile: Dockerfile
+      args:
+        COMFYUI_VERSION: {{ comfyui_version }}
+    image: comfyui:{{ comfyui_version }}
+    container_name: comfyui
+    restart: unless-stopped
+    gpus: all
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    environment:
+      TZ: {{ timezone }}
+    ports:
+      - "{{ comfyui_port }}:8188"
+    volumes:
+{% for directory in comfyui_data_directories %}
+      - {{ comfyui_folder }}/{{ directory }}:/opt/ComfyUI/{{ directory }}
+{% endfor %}

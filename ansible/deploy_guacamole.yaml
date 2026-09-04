@@ -1,0 +1,64 @@
+---
+- name: Install Guacamole
+  hosts: guacamole_host
+  become: true
+  pre_tasks:
+    - name: Silence Grafana alerts
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Deploying Guacamole"
+      when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
+  roles:
+    - guacamole
+  post_tasks:
+    - name: Remove Grafana alert silence
+      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+      when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
+
+# --------------------------------------------------------------------------- #
+# End-to-end proxy verification (run from proxy host — control host may lack
+# access to internal DNS / VLAN).
+# --------------------------------------------------------------------------- #
+- name: Verify Guacamole via SWAG proxies
+  hosts: guacamole_host
+  gather_facts: false
+  tasks:
+    - name: Verify internal SWAG URL serves Guacamole
+      ansible.builtin.uri:
+        url: "{{ internal_guacamole_url }}/guacamole/"
+        return_content: true
+        validate_certs: false
+        status_code: [200, 302]
+      register: guacamole_internal_check
+      retries: 10
+      delay: 5
+      until: >-
+        guacamole_internal_check.status in [200, 302]
+        and (guacamole_internal_check.content | default('') is search('guacamole-common-js'))
+
+    - name: Assert internal URL content
+      ansible.builtin.assert:
+        that:
+          - guacamole_internal_check.content is search('guacamole-common-js')
+        success_msg: "Internal proxy serves Apache Guacamole ({{ internal_guacamole_url }})"
+        fail_msg: "Internal proxy did NOT serve Apache Guacamole content"
+
+    - name: Verify external SWAG URL serves Guacamole
+      ansible.builtin.uri:
+        url: "{{ external_guacamole_url }}/guacamole/"
+        return_content: true
+        validate_certs: false
+        status_code: [200, 302]
+      register: guacamole_external_check
+      retries: 10
+      delay: 5
+      until: >-
+        guacamole_external_check.status in [200, 302]
+        and (guacamole_external_check.content | default('') is search('guacamole-common-js'))
+
+    - name: Assert external URL content
+      ansible.builtin.assert:
+        that:
+          - guacamole_external_check.content is search('guacamole-common-js')
+        success_msg: "External proxy serves Apache Guacamole ({{ external_guacamole_url }})"
+        fail_msg: "External proxy did NOT serve Apache Guacamole content"

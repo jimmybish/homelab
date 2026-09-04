@@ -1,0 +1,32 @@
+## Apache Guacamole (external)
+# Uses the shared external SWAG gateway IP to reach the guacamole host.
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+
+    server_name guacamole.*;
+
+    include /config/nginx/ssl.conf;
+
+    client_max_body_size 0;
+
+    location / {
+        return 301 $scheme://$host/guacamole/;
+    }
+
+    location /guacamole/ {
+        include /config/nginx/proxy.conf;
+        include /config/nginx/resolver.conf;
+        set $upstream_app {{ guacamole_proxy_ip }};
+        set $upstream_port {{ guacamole_web_port }};
+        set $upstream_proto http;
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+
+        # WebSocket tunnel for interactive sessions
+        proxy_buffering off;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $http_connection;
+        access_log off;
+    }
+}

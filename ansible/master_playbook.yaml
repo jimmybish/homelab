@@ -27,6 +27,12 @@
 - name: Configure vLLM firewall
   ansible.builtin.import_playbook: deploy_vllm.yaml
 
+- name: Deploy ComfyUI
+  ansible.builtin.import_playbook: deploy_comfyui.yaml
+
+- name: Deploy wg-easy
+  ansible.builtin.import_playbook: deploy_wg_easy.yaml
+
 - name: Deploy Omada SDN Controller
   ansible.builtin.import_playbook: deploy_omada_sdn.yaml
 
@@ -65,6 +71,9 @@
 
 - name: Deploy Paperless
   ansible.builtin.import_playbook: deploy_paperless.yaml
+
+- name: Deploy Guacamole
+  ansible.builtin.import_playbook: deploy_guacamole.yaml
 
 - name: Deploy Tronbyt
   ansible.builtin.import_playbook: deploy_tronbyt.yaml

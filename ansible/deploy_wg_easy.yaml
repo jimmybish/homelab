@@ -1,0 +1,16 @@
+---
+- name: Install wg-easy
+  hosts: wg_easy_host
+  become: true
+  pre_tasks:
+    - name: Silence Grafana alerts
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Deploying wg-easy"
+      when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
+  roles:
+    - wg_easy
+  post_tasks:
+    - name: Remove Grafana alert silence
+      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+      when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
