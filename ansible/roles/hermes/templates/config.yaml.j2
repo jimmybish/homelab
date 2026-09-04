@@ -49,8 +49,11 @@ terminal:
   lifetime_seconds: 300
 browser:
   inactivity_timeout: 120
-  cloud_provider: local
+  cloud_provider: firecrawl
   use_gateway: false
+web:
+  search_backend: firecrawl
+  extract_backend: firecrawl
 tool_loop_guardrails:
   warnings_enabled: true
   hard_stop_enabled: false

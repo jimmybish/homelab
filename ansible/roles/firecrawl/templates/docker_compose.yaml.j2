@@ -1,0 +1,194 @@
+---
+name: firecrawl
+
+x-common-environment: &common-environment
+  REDIS_URL: redis://redis:6379
+  REDIS_RATE_LIMIT_URL: redis://redis:6379
+  PLAYWRIGHT_MICROSERVICE_URL: http://playwright-service:3000/scrape
+  POSTGRES_USER: {{ firecrawl_postgres_user }}
+  POSTGRES_PASSWORD: "{{ firecrawl_postgres_password }}"
+  POSTGRES_DB: {{ firecrawl_postgres_database }}
+  POSTGRES_HOST: nuq-postgres
+  POSTGRES_PORT: "5432"
+  USE_DB_AUTHENTICATION: "{{ firecrawl_use_db_authentication | string | lower }}"
+  NUM_WORKERS_PER_QUEUE: "{{ firecrawl_num_workers_per_queue }}"
+  CRAWL_CONCURRENT_REQUESTS: "{{ firecrawl_crawl_concurrent_requests }}"
+  MAX_CONCURRENT_JOBS: "{{ firecrawl_max_concurrent_jobs }}"
+  BROWSER_POOL_SIZE: "{{ firecrawl_browser_pool_size }}"
+  NUQ_RABBITMQ_URL: amqp://rabbitmq:5672
+  SEARXNG_ENDPOINT: {{ firecrawl_searxng_url }}
+  LOGGING_LEVEL: INFO
+
+x-common-service: &common-service
+  image: local/firecrawl-api:{{ firecrawl_version }}
+  build:
+    context: {{ firecrawl_source_folder }}/apps/api
+    args:
+      GIT_SHA: {{ firecrawl_source_commit }}
+  restart: unless-stopped
+  ulimits:
+    nofile:
+      soft: 65535
+      hard: 65535
+  networks:
+    - backend
+  extra_hosts:
+    - host.docker.internal:host-gateway
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+      compress: "true"
+
+services:
+  playwright-service:
+    image: local/firecrawl-playwright:{{ firecrawl_version }}
+    build:
+      context: {{ firecrawl_source_folder }}/apps/playwright-service-ts
+      args:
+        PORT: "3000"
+    container_name: firecrawl-playwright
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      MAX_CONCURRENT_PAGES: "{{ firecrawl_crawl_concurrent_requests }}"
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp/.cache:noexec,nosuid,size=1g
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+        compress: "true"
+
+  api:
+    <<: *common-service
+    container_name: firecrawl-api
+    environment:
+      <<: *common-environment
+      HOST: 0.0.0.0
+      PORT: "3002"
+      EXTRACT_WORKER_PORT: "3004"
+      WORKER_PORT: "3005"
+      HARNESS_STARTUP_TIMEOUT_MS: "120000"
+      ENV: local
+    depends_on:
+      redis:
+        condition: service_healthy
+      playwright-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      nuq-postgres:
+        condition: service_healthy
+    ports:
+      - "{{ firecrawl_bind_address }}:{{ firecrawl_port }}:3002"
+    command: node dist/src/harness.js --start-docker
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - http://127.0.0.1:3002/v0/health/readiness
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  redis:
+    image: {{ firecrawl_redis_image }}
+    container_name: firecrawl-redis
+    restart: unless-stopped
+    command: redis-server --bind 0.0.0.0
+    networks:
+      - backend
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+        compress: "true"
+
+  rabbitmq:
+    image: {{ firecrawl_rabbitmq_image }}
+    container_name: firecrawl-rabbitmq
+    restart: unless-stopped
+    command: rabbitmq-server
+    networks:
+      - backend
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test:
+        - CMD
+        - rabbitmq-diagnostics
+        - -q
+        - check_running
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+        compress: "true"
+
+  nuq-postgres:
+    image: local/firecrawl-nuq-postgres:{{ firecrawl_version }}
+    build:
+      context: {{ firecrawl_source_folder }}/apps/nuq-postgres
+      args:
+        PG_MAJOR: "17"
+    container_name: firecrawl-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: {{ firecrawl_postgres_user }}
+      POSTGRES_PASSWORD: "{{ firecrawl_postgres_password }}"
+      POSTGRES_DB: {{ firecrawl_postgres_database }}
+    networks:
+      - backend
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U {{ firecrawl_postgres_user }} -d {{ firecrawl_postgres_database }}
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+        compress: "true"
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  rabbitmq-data:

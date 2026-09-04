@@ -1,0 +1,10 @@
+---
+- name: Restart Firecrawl
+  community.docker.docker_compose_v2:
+    project_src: "{{ firecrawl_folder }}"
+    build: never
+    state: restarted
+    remove_orphans: true
+    wait: true
+    wait_timeout: 600
+  no_log: true

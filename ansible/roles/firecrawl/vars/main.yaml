@@ -1,0 +1,54 @@
+---
+# Research Notes - Firecrawl
+# Official repository: https://github.com/firecrawl/firecrawl
+# Self-host docs: https://docs.firecrawl.dev/contributing/self-host
+# Release source: https://github.com/firecrawl/firecrawl/tree/v2.11.162
+# Official compose: https://github.com/firecrawl/firecrawl/blob/v2.11.162/docker-compose.yaml
+# Security advisories: https://github.com/firecrawl/firecrawl/security/advisories
+# Last researched: 2026-09-04
+#
+# Firecrawl v2.11.162 is newer than the fixes for all four published project
+# advisories as of the research date. The Playwright SSRF advisory still
+# recommends an egress-filtering proxy; this trusted, loopback-only deployment
+# mitigates API access but does not provide a dedicated egress proxy.
+#
+# The official multi-container stack builds the API, Playwright service, and
+# nuq-postgres from release source and uses Redis and RabbitMQ sidecars. The API
+# listens on 3002. PostgreSQL, Redis, and RabbitMQ remain Docker-network-only and
+# use durable named volumes. API authentication is intentionally disabled for
+# keyless trusted-host access. No SWAG, DNS, or Homepage integration is used for
+# this internal API-only service.
+
+firecrawl_version: "2.11.162"
+firecrawl_release: "v{{ firecrawl_version }}"
+firecrawl_source_repo: "https://github.com/firecrawl/firecrawl.git"
+firecrawl_source_commit: "7666c1f9ae8720a6bba271e0f60b6a217f8a5210"
+firecrawl_redis_image: "docker.io/library/redis:7.4.2-alpine"
+firecrawl_rabbitmq_image: "docker.io/library/rabbitmq:3.13.7-management"
+
+firecrawl_port: 3002
+firecrawl_bind_address: "127.0.0.1"
+firecrawl_folder: "{{ docker_storage_folder }}/firecrawl"
+firecrawl_source_folder: "{{ firecrawl_folder }}/source"
+firecrawl_compose_file: "{{ firecrawl_folder }}/docker-compose.yaml"
+firecrawl_api_url: "{{ internal_firecrawl_url }}"
+
+firecrawl_postgres_user: firecrawl
+firecrawl_postgres_database: postgres
+firecrawl_use_db_authentication: false
+firecrawl_searxng_url: "http://host.docker.internal:8080"
+firecrawl_num_workers_per_queue: 2
+firecrawl_crawl_concurrent_requests: 2
+firecrawl_max_concurrent_jobs: 2
+firecrawl_browser_pool_size: 2
+firecrawl_build_timeout: 3600
+firecrawl_readiness_retries: 60
+firecrawl_readiness_delay: 10
+firecrawl_scrape_retries: 6
+firecrawl_scrape_delay: 10
+firecrawl_search_retries: 6
+firecrawl_search_delay: 10
+
+firecrawl_configure_proxy: false
+firecrawl_configure_dns: false
+firecrawl_configure_homepage: false

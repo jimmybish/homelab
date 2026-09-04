@@ -45,6 +45,10 @@ Follow this order in `tasks/main.yaml`. Use the linked skill only when you reach
 
 ## 2. Directory Setup
 
+When a role checks out build source with `become_user: "{{ docker_user }}"`,
+run subsequent Git inspection commands as the same user. Running `git rev-parse`
+as root against that checkout triggers Git's dubious-ownership protection.
+
 **For single-container services:**
 
 ```yaml

@@ -1,0 +1,203 @@
+---
+- name: Install Firecrawl prerequisites
+  ansible.builtin.package:
+    name:
+      - ca-certificates
+      - curl
+      - git
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Create Firecrawl deployment directory
+  ansible.builtin.file:
+    path: "{{ firecrawl_folder }}"
+    state: directory
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0750'
+
+- name: Check out pinned Firecrawl release source
+  ansible.builtin.git:
+    repo: "{{ firecrawl_source_repo }}"
+    dest: "{{ firecrawl_source_folder }}"
+    version: "{{ firecrawl_source_commit }}"
+    update: false
+  become: true
+  become_user: "{{ docker_user }}"
+  register: firecrawl_source_checkout
+  notify: Restart Firecrawl
+
+- name: Read checked-out Firecrawl commit
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ firecrawl_source_folder }}"
+      - rev-parse
+      - HEAD
+  become: true
+  become_user: "{{ docker_user }}"
+  register: firecrawl_source_head
+  changed_when: false
+
+- name: Assert pinned Firecrawl source is checked out
+  ansible.builtin.assert:
+    that:
+      - firecrawl_source_head.stdout == firecrawl_source_commit
+    fail_msg: "Firecrawl source does not match the audited release commit."
+    success_msg: "Firecrawl source matches the audited v{{ firecrawl_version }} commit."
+
+- name: Assert Firecrawl API remains loopback-only
+  ansible.builtin.assert:
+    that:
+      - firecrawl_bind_address in ['127.0.0.1', '::1']
+    fail_msg: "Firecrawl must remain bound to host loopback; no UFW exposure is permitted."
+    success_msg: "Firecrawl is loopback-only and requires no UFW allow rule."
+
+- name: Deploy Firecrawl Docker Compose definition
+  ansible.builtin.template:
+    src: docker_compose.yaml.j2
+    dest: "{{ firecrawl_compose_file }}"
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0600'
+  register: firecrawl_compose_template
+  no_log: true
+  notify: Restart Firecrawl
+
+- name: Inspect pinned local Firecrawl images
+  community.docker.docker_image_info:
+    name:
+      - "local/firecrawl-api:{{ firecrawl_version }}"
+      - "local/firecrawl-playwright:{{ firecrawl_version }}"
+      - "local/firecrawl-nuq-postgres:{{ firecrawl_version }}"
+  register: firecrawl_image_info
+
+- name: Build changed or missing Firecrawl release images
+  community.docker.docker_compose_v2:
+    project_src: "{{ firecrawl_folder }}"
+    build: always
+    state: present
+    remove_orphans: true
+    wait: true
+    wait_timeout: "{{ firecrawl_build_timeout }}"
+  when: >-
+    firecrawl_source_checkout is changed or
+    firecrawl_compose_template is changed or
+    firecrawl_image_info.images | length < 3
+  no_log: true
+
+- name: Ensure Firecrawl stack is running
+  community.docker.docker_compose_v2:
+    project_src: "{{ firecrawl_folder }}"
+    build: never
+    state: present
+    remove_orphans: true
+    wait: true
+    wait_timeout: 600
+  no_log: true
+
+- name: Apply pending Firecrawl restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for Firecrawl loopback listener
+  ansible.builtin.wait_for:
+    host: "{{ firecrawl_bind_address }}"
+    port: "{{ firecrawl_port }}"
+    state: started
+    timeout: 600
+
+- name: Gather Firecrawl listening port facts
+  community.general.listen_ports_facts:
+
+- name: Select Firecrawl API listeners
+  ansible.builtin.set_fact:
+    firecrawl_api_listeners: >-
+      {{ ansible_facts.tcp_listen
+         | selectattr('port', 'equalto', firecrawl_port | int)
+         | list }}
+
+- name: Assert Firecrawl API is only listening on loopback
+  ansible.builtin.assert:
+    that:
+      - firecrawl_api_listeners | length > 0
+      - firecrawl_api_listeners | map(attribute='address') | unique | list == [firecrawl_bind_address]
+    fail_msg: "Firecrawl port {{ firecrawl_port }} is not restricted to {{ firecrawl_bind_address }}."
+    success_msg: "Firecrawl port {{ firecrawl_port }} is restricted to host loopback."
+
+- name: Wait for Firecrawl readiness endpoint
+  ansible.builtin.uri:
+    url: "{{ firecrawl_api_url }}/v0/health/readiness"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: firecrawl_readiness
+  until: firecrawl_readiness.status == 200
+  retries: "{{ firecrawl_readiness_retries }}"
+  delay: "{{ firecrawl_readiness_delay }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Functionally validate Firecrawl scrape pipeline
+  ansible.builtin.uri:
+    url: "{{ firecrawl_api_url }}/v2/scrape"
+    method: POST
+    body_format: json
+    body:
+      url: https://example.com
+      formats:
+        - markdown
+    return_content: true
+    status_code: 200
+  register: firecrawl_scrape_test
+  until: >-
+    firecrawl_scrape_test.status == 200 and
+    firecrawl_scrape_test.json.success | default(false) | bool and
+    'Example Domain' in (firecrawl_scrape_test.json.data.markdown | default(''))
+  retries: "{{ firecrawl_scrape_retries }}"
+  delay: "{{ firecrawl_scrape_delay }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert Firecrawl functional scrape result
+  ansible.builtin.assert:
+    that:
+      - firecrawl_scrape_test.json.success | bool
+      - "'Example Domain' in firecrawl_scrape_test.json.data.markdown"
+    fail_msg: "Firecrawl could not scrape example.com through the complete local pipeline."
+    success_msg: "Firecrawl successfully scraped example.com."
+  when: not ansible_check_mode
+
+- name: Functionally validate Firecrawl search pipeline
+  ansible.builtin.uri:
+    url: "{{ firecrawl_api_url }}/v2/search"
+    method: POST
+    body_format: json
+    body:
+      query: Firecrawl
+      limit: 3
+    return_content: true
+    status_code: 200
+  register: firecrawl_search_test
+  until: >-
+    firecrawl_search_test.status == 200 and
+    firecrawl_search_test.json.success | default(false) | bool and
+    firecrawl_search_test.json.data.web | default([]) | length > 0
+  retries: "{{ firecrawl_search_retries }}"
+  delay: "{{ firecrawl_search_delay }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert Firecrawl functional search result
+  ansible.builtin.assert:
+    that:
+      - firecrawl_search_test.json.success | bool
+      - firecrawl_search_test.json.data.web | length > 0
+    fail_msg: "Firecrawl could not search through the local SearXNG backend."
+    success_msg: "Firecrawl successfully searched through the local SearXNG backend."
+  when: not ansible_check_mode
