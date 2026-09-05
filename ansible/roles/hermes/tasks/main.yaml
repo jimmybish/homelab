@@ -13,6 +13,19 @@
       {{ ansible_facts.getent_passwd[hermes_user][4] }}, expected
       {{ hermes_user_home }}.
 
+- name: Enable lingering for the Hermes account
+  ansible.builtin.command:
+    argv:
+      - loginctl
+      - enable-linger
+      - "{{ hermes_user }}"
+    creates: "/var/lib/systemd/linger/{{ hermes_user }}"
+
+- name: Ensure the Hermes user service manager is running
+  ansible.builtin.systemd_service:
+    name: "user@{{ ansible_facts.getent_passwd[hermes_user][1] }}.service"
+    state: started
+
 - name: Install Hermes system prerequisites
   ansible.builtin.apt:
     name: "{{ hermes_required_packages }}"
@@ -34,6 +47,67 @@
       mode: '0700'
     - path: "{{ hermes_skills_dir }}"
       mode: '0700'
+    - path: "{{ hermes_secrets_dir }}"
+      mode: '0700'
+    - path: "{{ hermes_mcp_grafana_install_dir }}"
+      mode: '0755'
+    - path: "{{ hermes_user_systemd_dir }}"
+      mode: '0755'
+
+- name: Download pinned Grafana MCP server archive
+  ansible.builtin.get_url:
+    url: "{{ hermes_mcp_grafana_archive_url }}"
+    dest: "{{ hermes_mcp_grafana_archive_path }}"
+    checksum: "{{ hermes_mcp_grafana_archive_checksum }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install pinned Grafana MCP server
+  ansible.builtin.unarchive:
+    src: "{{ hermes_mcp_grafana_archive_path }}"
+    dest: "{{ hermes_mcp_grafana_install_dir }}"
+    remote_src: true
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0755'
+    creates: "{{ hermes_mcp_grafana_install_dir }}/mcp-grafana"
+  notify: Restart Hermes Plexibot gateway
+
+- name: Link Grafana MCP server into the Hermes executable path
+  ansible.builtin.file:
+    src: "{{ hermes_mcp_grafana_install_dir }}/mcp-grafana"
+    dest: "{{ hermes_mcp_grafana_bin }}"
+    state: link
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    force: true
+  notify: Restart Hermes Plexibot gateway
+
+- name: Verify Grafana MCP server version
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_mcp_grafana_bin }}"
+      - --version
+  become: true
+  become_user: "{{ hermes_user }}"
+  register: hermes_mcp_grafana_version_result
+  changed_when: false
+  failed_when: >-
+    hermes_mcp_grafana_version_result.rc != 0 or
+    hermes_mcp_grafana_version not in
+    (hermes_mcp_grafana_version_result.stdout + hermes_mcp_grafana_version_result.stderr)
+
+- name: Create managed Hermes profile directories
+  ansible.builtin.file:
+    path: "{{ hermes_profiles_dir }}/{{ item.name }}"
+    state: directory
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0700'
+  loop: "{{ hermes_managed_profiles }}"
+  loop_control:
+    label: "{{ item.name }}"
 
 - name: Download pinned official Hermes installer
   ansible.builtin.get_url:
@@ -95,6 +169,7 @@
   notify:
     - Restart Hermes dashboard
     - Restart Hermes gateway
+    - Restart Hermes Plexibot gateway
 
 - name: Verify installed Hermes version
   ansible.builtin.command:
@@ -155,6 +230,48 @@
   notify:
     - Restart Hermes dashboard
     - Restart Hermes gateway
+
+- name: Deploy Plexibot Grafana service-account token
+  ansible.builtin.copy:
+    content: "{{ hermes_plexibot_grafana_api_token }}{{ '\n' }}"
+    dest: "{{ hermes_plexibot_grafana_token_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  no_log: true
+  diff: false
+  notify: Restart Hermes Plexibot gateway
+
+- name: Deploy managed Hermes non-gateway profile configs
+  ansible.builtin.template:
+    src: "{{ item.config_template }}"
+    dest: "{{ hermes_profiles_dir }}/{{ item.name }}/config.yaml"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+    validate: >-
+      {{ hermes_install_dir }}/venv/bin/python -c
+      'import pathlib,sys,yaml; yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))'
+      %s
+  loop: >-
+    {{ hermes_managed_profiles
+       | rejectattr('name', 'equalto', 'plexibot')
+       | list }}
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Deploy Plexibot Hermes profile config
+  ansible.builtin.template:
+    src: profile-plexibot-config.yaml.j2
+    dest: "{{ hermes_profiles_dir }}/plexibot/config.yaml"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+    validate: >-
+      {{ hermes_install_dir }}/venv/bin/python -c
+      'import pathlib,sys,yaml; yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))'
+      %s
+  notify: Restart Hermes Plexibot gateway
 
 - name: Deploy Hermes environment secrets
   ansible.builtin.template:
@@ -249,7 +366,9 @@
     success_msg: >-
       UFW is active with TCP ports {{ hermes_port }} and
       {{ hermes_api_server_port }} allowed.
-  when: ansible_os_family == "Debian"
+  when:
+    - ansible_os_family == "Debian"
+    - not ansible_check_mode
 
 - name: Deploy Hermes dashboard service source
   ansible.builtin.template:
@@ -267,7 +386,9 @@
     owner: root
     group: root
     mode: '0600'
-  notify: Restart Hermes dashboard
+  notify:
+    - Reload Hermes system systemd
+    - Restart Hermes dashboard
 
 - name: Deploy Hermes gateway service source
   ansible.builtin.template:
@@ -285,7 +406,20 @@
     owner: root
     group: root
     mode: '0600'
-  notify: Restart Hermes gateway
+  notify:
+    - Reload Hermes system systemd
+    - Restart Hermes gateway
+
+- name: Deploy Hermes Plexibot gateway user unit
+  ansible.builtin.template:
+    src: hermes-gateway-plexibot.service.j2
+    dest: "{{ hermes_plexibot_gateway_service_unit_path }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0644'
+  notify:
+    - Reload Hermes user systemd
+    - Restart Hermes Plexibot gateway
 
 - name: Apply pending Hermes restart
   ansible.builtin.meta: flush_handlers
@@ -302,6 +436,19 @@
     state: started
     enabled: true
 
+- name: Enable and start Hermes Plexibot gateway
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_plexibot_gateway_service_name }}"
+    scope: user
+    state: started
+    enabled: true
+  become: true
+  become_user: "{{ hermes_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}"
+    DBUS_SESSION_BUS_ADDRESS: >-
+      unix:path=/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}/bus
+
 - name: Read Hermes dashboard service status
   ansible.builtin.systemd_service:
     name: "{{ hermes_service_name }}"
@@ -311,6 +458,18 @@
   ansible.builtin.systemd_service:
     name: "{{ hermes_gateway_service_name }}"
   register: hermes_gateway_service_status
+
+- name: Read Hermes Plexibot gateway service status
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_plexibot_gateway_service_name }}"
+    scope: user
+  become: true
+  become_user: "{{ hermes_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}"
+    DBUS_SESSION_BUS_ADDRESS: >-
+      unix:path=/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}/bus
+  register: hermes_plexibot_gateway_service_status
 
 - name: Assert Hermes dashboard service state
   ansible.builtin.assert:
@@ -331,6 +490,49 @@
       - hermes_gateway_service_status.status.MainPID | int > 0
     fail_msg: "Hermes gateway is not active and enabled from the managed unit."
     success_msg: "Hermes gateway is active and enabled at boot."
+
+- name: Assert Hermes Plexibot gateway service state
+  ansible.builtin.assert:
+    that:
+      - hermes_plexibot_gateway_service_status.status.ActiveState == 'active'
+      - hermes_plexibot_gateway_service_status.status.UnitFileState == 'enabled'
+      - >-
+        hermes_plexibot_gateway_service_status.status.FragmentPath ==
+        hermes_plexibot_gateway_service_unit_path
+      - hermes_plexibot_gateway_service_status.status.MainPID | int > 0
+    fail_msg: >-
+      Hermes Plexibot gateway is not active and enabled from the managed user unit.
+    success_msg: "Hermes Plexibot gateway is active and enabled at boot."
+
+- name: Read Hermes Plexibot gateway process identity
+  ansible.builtin.command:
+    argv:
+      - ps
+      - -p
+      - "{{ hermes_plexibot_gateway_service_status.status.MainPID }}"
+      - -o
+      - user=
+      - -o
+      - args=
+  register: hermes_plexibot_gateway_process
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert Hermes Plexibot gateway process identity
+  ansible.builtin.assert:
+    that:
+      - >-
+        hermes_plexibot_gateway_process.stdout is match(
+          '^' + hermes_user + '\\s+'
+        )
+      - "'--profile plexibot gateway run' in hermes_plexibot_gateway_process.stdout"
+    fail_msg: >-
+      Hermes Plexibot gateway is not running as {{ hermes_user }} with the
+      plexibot profile.
+    success_msg: >-
+      Hermes Plexibot gateway is running as {{ hermes_user }} with the
+      plexibot profile.
+  when: not ansible_check_mode
 
 - name: Wait for Hermes dashboard listener
   ansible.builtin.wait_for:

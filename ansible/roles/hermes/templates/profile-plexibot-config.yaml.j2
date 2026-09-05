@@ -1,0 +1,176 @@
+model:
+{{ hermes_model | to_nice_yaml(indent=2, sort_keys=false, width=4096) | indent(2, true) }}
+agent:
+  max_turns: 90
+  disabled_toolsets:
+    - computer_use
+    - feishu_doc
+    - feishu_drive
+    - kanban
+    - project
+    - search
+    - spotify
+    - tts
+    - video
+    - video_gen
+    - x_search
+    - yuanbao
+    - code_execution
+    - file
+    - delegation
+    - cronjob
+  verbose: false
+  reasoning_effort: medium
+terminal:
+  enabled: true
+browser:
+  enabled: false
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: false
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 5
+    same_tool_failure: 8
+    idempotent_no_progress: 5
+compression:
+  enabled: false
+  threshold: 0.5
+  target_ratio: 0.2
+  protect_last_n: 20
+  protect_first_n: 3
+prompt_caching:
+  cache_ttl: 5m
+display:
+  compact: false
+  busy_input_mode: interrupt
+  bell_on_complete: false
+  show_reasoning: false
+  streaming: true
+  skin: default
+  interim_assistant_messages: true
+  tool_progress: false
+  cleanup_progress: false
+  long_running_notifications: true
+  busy_ack_detail: true
+  background_process_notifications: all
+dashboard:
+  theme: cyberpunk
+stt:
+  enabled: false
+memory:
+  memory_enabled: true
+  user_profile_enabled: false
+  memory_char_limit: 2200
+  user_char_limit: 1375
+  nudge_interval: 10
+  flush_min_turns: 6
+delegation:
+  max_iterations: 50
+skills:
+  creation_nudge_interval: 15
+discord:
+  require_mention: true
+  auto_thread: true
+  thread_require_mention: false
+  history_backfill: true
+  missed_message_backfill:
+    enabled: false
+code_execution:
+  timeout: 300
+  max_tool_calls: 50
+streaming:
+  enabled: false
+onboarding:
+  seen:
+    tool_progress_prompt: true
+    busy_input_prompt: true
+    profile_build_offered: true
+updates:
+  pre_update_backup: false
+  backup_keep: 5
+  non_interactive_local_changes: stash
+_config_version: 33
+session_reset:
+  mode: none
+  idle_minutes: 1440
+  at_hour: 4
+group_sessions_per_user: true
+platform_toolsets:
+  web:
+    - web
+    - memory
+    - session_search
+    - skills
+    - clarify
+    - todo
+  cli:
+    - bfl
+    - browser
+    - clarify
+    - image_gen
+    - memory
+    - session_search
+    - skills
+    - terminal
+    - todo
+    - vision
+    - web
+custom_providers:
+{{ hermes_custom_providers | to_nice_yaml(indent=2, sort_keys=false, width=4096) | indent(2, true) }}
+mcp_servers:
+  grafana:
+    command: "{{ hermes_mcp_grafana_bin }}"
+    args:
+      - --enabled-tools
+      - datasource,prometheus,loki
+      - --disable-write
+      - --disable-proxied
+    env:
+      GRAFANA_URL: "{{ internal_grafana_url }}"
+      GRAFANA_SERVICE_ACCOUNT_TOKEN_FILE: "{{ hermes_plexibot_grafana_token_file }}"
+    enabled: true
+  tracearr:
+    url: "{{ hermes_plexibot_mcp_tracearr_url }}/mcp"
+    enabled: true
+  sonarr:
+    url: "{{ hermes_plexibot_mcp_sonarr_url }}/mcp"
+    enabled: true
+  radarr:
+    url: "{{ hermes_plexibot_mcp_radarr_url }}/mcp"
+    enabled: true
+known_plugin_toolsets:
+  cli:
+    - spotify
+known_builtin_toolsets:
+  cli:
+    - bfl
+    - browser
+    - clarify
+    - code_execution
+    - computer_use
+    - context_engine
+    - cronjob
+    - delegation
+    - discord
+    - discord_admin
+    - file
+    - homeassistant
+    - image_gen
+    - memory
+    - session_search
+    - skills
+    - spotify
+    - stt
+    - terminal
+    - todo
+    - tts
+    - video
+    - video_gen
+    - vision
+    - web
+    - x_search
+    - yuanbao

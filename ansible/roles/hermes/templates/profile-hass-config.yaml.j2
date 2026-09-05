@@ -1,0 +1,111 @@
+model:
+{{ hermes_model | to_nice_yaml(indent=2, sort_keys=false, width=4096) | indent(2, true) }}
+agent:
+  max_turns: 90
+  disabled_toolsets:
+    - computer_use
+    - discord
+    - discord_admin
+    - feishu_doc
+    - feishu_drive
+    - image_gen
+    - kanban
+    - project
+    - search
+    - spotify
+    - tts
+    - video
+    - video_gen
+    - vision
+    - x_search
+    - yuanbao
+    - terminal
+    - code_execution
+    - file
+    - browser
+    - delegation
+    - cronjob
+  verbose: false
+  reasoning_effort: medium
+terminal:
+  enabled: false
+browser:
+  enabled: false
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: false
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 5
+    same_tool_failure: 8
+    idempotent_no_progress: 5
+compression:
+  enabled: false
+  threshold: 0.5
+  target_ratio: 0.2
+  protect_last_n: 20
+  protect_first_n: 3
+prompt_caching:
+  cache_ttl: 5m
+display:
+  compact: false
+  busy_input_mode: interrupt
+  bell_on_complete: false
+  show_reasoning: false
+  streaming: true
+  skin: default
+  interim_assistant_messages: true
+  tool_progress: all
+  cleanup_progress: false
+  long_running_notifications: true
+  busy_ack_detail: true
+  background_process_notifications: all
+dashboard:
+  theme: cyberpunk
+stt:
+  enabled: false
+memory:
+  memory_enabled: true
+  user_profile_enabled: false
+  memory_char_limit: 2200
+  user_char_limit: 1375
+  nudge_interval: 10
+  flush_min_turns: 6
+delegation:
+  max_iterations: 50
+skills:
+  creation_nudge_interval: 15
+  disabled: []
+code_execution:
+  timeout: 300
+  max_tool_calls: 50
+streaming:
+  enabled: false
+onboarding:
+  seen:
+    tool_progress_prompt: true
+    busy_input_prompt: true
+updates:
+  pre_update_backup: false
+  backup_keep: 5
+  non_interactive_local_changes: stash
+_config_version: 33
+session_reset:
+  mode: none
+  idle_minutes: 1440
+  at_hour: 4
+group_sessions_per_user: true
+platform_toolsets:
+  homeassistant:
+    - homeassistant
+    - web
+    - memory
+    - session_search
+    - skills
+    - todo
+    - clarify
+custom_providers:
+{{ hermes_custom_providers | to_nice_yaml(indent=2, sort_keys=false, width=4096) | indent(2, true) }}

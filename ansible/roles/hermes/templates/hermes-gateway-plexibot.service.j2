@@ -1,0 +1,27 @@
+[Unit]
+Description=Hermes Agent Gateway - Messaging Platform Integration
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart={{ hermes_install_dir }}/venv/bin/python -m hermes_cli.main --profile plexibot gateway run
+WorkingDirectory={{ hermes_profiles_dir }}/plexibot
+Environment="PATH={{ hermes_install_dir }}/venv/bin:{{ hermes_install_dir }}/node_modules/.bin:{{ hermes_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="VIRTUAL_ENV={{ hermes_install_dir }}/venv"
+Environment="HERMES_HOME={{ hermes_profiles_dir }}/plexibot"
+Restart=always
+RestartSec=5
+RestartForceExitStatus=75
+RestartPreventExitStatus=78
+KillMode=mixed
+KillSignal=SIGTERM
+ExecReload=/bin/kill -USR1 $MAINPID
+ExecStopPost=-{{ hermes_install_dir }}/venv/bin/python -m gateway.cgroup_cleanup
+TimeoutStopSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

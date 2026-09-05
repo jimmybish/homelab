@@ -90,3 +90,23 @@ grafana_vault_password_file: "{{ lookup('env', 'HOME') }}/ansible_key"
 # vaulted token only, per the current homelab setup).
 grafana_admin_user: ""
 grafana_admin_password: ""
+
+# ---------------------------------------------------------------------------
+# Hermes Plexibot read-only service account automation
+# ---------------------------------------------------------------------------
+# This account is intentionally separate from the Copilot Admin account. Token
+# lifecycle operations always use grafana_api_token as the management
+# credential; the Viewer token is used only for authentication/permission
+# validation and, later, by Hermes Plexibot.
+grafana_configure_plexibot_service_account: true
+grafana_plexibot_service_account_name: "Hermes Plexibot"
+grafana_plexibot_service_account_role: "Viewer"
+grafana_plexibot_service_account_token_name: "Hermes Plexibot"
+
+# The create request omits secondsToLive, whose documented default is zero (no
+# expiry). A bounded 90-day lifetime is not used because this repository has no
+# scheduled rotation guaranteed to run before expiration.
+
+# Rotation is explicit to prevent accidental duplicate token creation when a
+# token secret is unavailable (Grafana only returns it once at creation).
+grafana_rotate_plexibot_token: false

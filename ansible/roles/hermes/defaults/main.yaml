@@ -12,6 +12,19 @@ hermes_legacy_config_file: "{{ hermes_home }}/config.yml"
 hermes_env_file: "{{ hermes_home }}/.env"
 hermes_auth_file: "{{ hermes_home }}/auth.json"
 hermes_agent_config_file: "{{ hermes_user_home }}/.hermes.md"
+hermes_profiles_dir: "{{ hermes_home }}/profiles"
+hermes_secrets_dir: "{{ hermes_home }}/secrets"
+hermes_plexibot_grafana_token_file: "{{ hermes_secrets_dir }}/plexibot-grafana-token"
+hermes_mcp_grafana_install_root: "{{ hermes_user_home }}/.local/lib/mcp-grafana"
+hermes_mcp_grafana_bin: "{{ hermes_bin_dir }}/mcp-grafana"
+hermes_plexibot_mcp_tracearr_url: "http://{{ groups['mcp_tracearr_host'][0] }}:8850"
+hermes_plexibot_mcp_sonarr_url: "http://{{ groups['mcp_sonarr_host'][0] }}:8851"
+hermes_plexibot_mcp_radarr_url: "http://{{ groups['mcp_radarr_host'][0] }}:8852"
+hermes_managed_profiles:
+  - name: hass
+    config_template: profile-hass-config.yaml.j2
+  - name: plexibot
+    config_template: profile-plexibot-config.yaml.j2
 
 hermes_service_name: hermes-dashboard.service
 hermes_service_unit_path: "/etc/systemd/system/{{ hermes_service_name }}"
@@ -19,6 +32,10 @@ hermes_service_source_path: "{{ hermes_home }}/{{ hermes_service_name }}"
 hermes_gateway_service_name: hermes-gateway.service
 hermes_gateway_service_unit_path: "/etc/systemd/system/{{ hermes_gateway_service_name }}"
 hermes_gateway_service_source_path: "{{ hermes_home }}/{{ hermes_gateway_service_name }}"
+hermes_user_systemd_dir: "{{ hermes_user_home }}/.config/systemd/user"
+hermes_plexibot_gateway_service_name: hermes-gateway-plexibot.service
+hermes_plexibot_gateway_service_unit_path: >-
+  {{ hermes_user_systemd_dir }}/{{ hermes_plexibot_gateway_service_name }}
 hermes_bind_address: "0.0.0.0"
 hermes_port: 9119
 hermes_api_server_bind_address: "0.0.0.0"
@@ -29,8 +46,8 @@ hermes_gateway_process_name: hermes
 hermes_model:
   default: qwen38-flash-next-nvfp4
   provider: custom
-  base_url: "http://sparky.{{ internal_domain }}:8000/v1"
-  context_length: 256000
+  base_url: "http://sparky.{{ internal_domain }}:4000"
+  context_length: 262144
 
 hermes_custom_providers:
   - name: Qwen 3.8 Flash Next NVFP4
@@ -40,11 +57,6 @@ hermes_custom_providers:
     models:
       qwen38-flash-next-nvfp4:
         context_length: 262144
-  - name: "Sparky.{{ internal_domain }}:8000"
-    base_url: "http://sparky.{{ internal_domain }}:8000/v1"
-    model: qwen38-flash-next-nvfp4
-    models:
-      - qwen38-flash-next-nvfp4
 
 hermes_hass_url: "{{ internal_homeassistant_url }}"
 hermes_dashboard_expected_text: Hermes

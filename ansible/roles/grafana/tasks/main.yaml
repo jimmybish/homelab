@@ -241,6 +241,20 @@
   tags:
     - service_account
 
+# Ensure the dedicated Hermes Plexibot Viewer identity without changing or
+# reusing the Copilot Admin service account/token.
+- name: Ensure Hermes Plexibot Grafana service account and token
+  ansible.builtin.include_tasks:
+    file: plexibot_service_account.yaml
+    apply:
+      tags:
+        - service_account
+        - plexibot_service_account
+  when: grafana_configure_plexibot_service_account | default(true)
+  tags:
+    - service_account
+    - plexibot_service_account
+
 # Configure SWAG Internal Proxy
 - name: Resolve grafana host IP for proxy configuration
   ansible.builtin.set_fact:
@@ -251,7 +265,9 @@
   ansible.builtin.template:
     src: grafana.subdomain.conf.j2
     dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/grafana.subdomain.conf"
-    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0664'
   delegate_to: "{{ groups['proxy_host'][0] }}"
   notify:
     - Restart Swag Internal

@@ -36,4 +36,20 @@ hermes_required_packages:
   - python3-dev
   - ripgrep
 
+# Grafana MCP server: https://github.com/grafana/mcp-grafana/releases/tag/v1.3.0
+hermes_mcp_grafana_version: "1.3.0"
+hermes_mcp_grafana_archive_arch: >-
+  {{ {'x86_64': 'x86_64', 'aarch64': 'arm64'}[ansible_architecture] }}
+hermes_mcp_grafana_archive_url: >-
+  https://github.com/grafana/mcp-grafana/releases/download/v{{ hermes_mcp_grafana_version }}/mcp-grafana_Linux_{{ hermes_mcp_grafana_archive_arch }}.tar.gz
+hermes_mcp_grafana_archive_checksums:
+  x86_64: b9fc66e0613a4def86253627cb71b094ca35cf213ab18fa09a8d8bd578c197b1
+  aarch64: c70c3d15514f1351cb5fb3e81b7e80e19fab229dda30b7ac1bce3cc812f838ec
+hermes_mcp_grafana_archive_checksum: >-
+  sha256:{{ hermes_mcp_grafana_archive_checksums[ansible_architecture] }}
+hermes_mcp_grafana_archive_path: >-
+  /var/tmp/mcp-grafana-{{ hermes_mcp_grafana_version }}-linux-{{ hermes_mcp_grafana_archive_arch }}.tar.gz
+hermes_mcp_grafana_install_dir: >-
+  {{ hermes_mcp_grafana_install_root }}/{{ hermes_mcp_grafana_version }}
+
 ...
