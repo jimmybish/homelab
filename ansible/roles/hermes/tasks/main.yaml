@@ -260,6 +260,31 @@
   loop_control:
     label: "{{ item.name }}"
 
+- name: Read deployed HASS profile config
+  ansible.builtin.slurp:
+    src: "{{ hermes_profiles_dir }}/hass/config.yaml"
+  register: hermes_hass_profile_config
+
+- name: Assert HASS profile capabilities
+  ansible.builtin.assert:
+    that:
+      - "'homeassistant' in hermes_hass_config.platform_toolsets.homeassistant"
+      - "'browser' in hermes_hass_config.platform_toolsets.homeassistant"
+      - "'web' in hermes_hass_config.platform_toolsets.homeassistant"
+      - "'browser' not in hermes_hass_config.agent.disabled_toolsets"
+      - hermes_hass_config.browser.inactivity_timeout == 120
+      - hermes_hass_config.browser.cloud_provider == 'firecrawl'
+      - not hermes_hass_config.browser.use_gateway
+      - hermes_hass_config.web.search_backend == 'firecrawl'
+      - hermes_hass_config.web.extract_backend == 'firecrawl'
+    fail_msg: >-
+      The HASS profile must expose Home Assistant, browser, and web tools
+      with the managed Firecrawl configuration.
+    success_msg: "The HASS profile has Home Assistant and web content capabilities."
+  vars:
+    hermes_hass_config: >-
+      {{ hermes_hass_profile_config.content | b64decode | from_yaml }}
+
 - name: Deploy Plexibot Hermes profile config
   ansible.builtin.template:
     src: profile-plexibot-config.yaml.j2
@@ -284,6 +309,43 @@
   notify:
     - Restart Hermes dashboard
     - Restart Hermes gateway
+
+- name: Link HASS profile to Hermes environment secrets
+  ansible.builtin.file:
+    src: "{{ hermes_env_file }}"
+    dest: "{{ hermes_profiles_dir }}/hass/.env"
+    state: link
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    force: true
+
+- name: Inspect HASS profile environment link
+  ansible.builtin.stat:
+    path: "{{ hermes_profiles_dir }}/hass/.env"
+    follow: false
+  register: hermes_hass_env_link
+
+- name: Inspect HASS profile environment target
+  ansible.builtin.stat:
+    path: "{{ hermes_profiles_dir }}/hass/.env"
+    follow: true
+  register: hermes_hass_env_target
+  no_log: true
+
+- name: Assert secure HASS profile environment access
+  ansible.builtin.assert:
+    that:
+      - hermes_hass_env_link.stat.islnk
+      - hermes_hass_env_link.stat.lnk_source == hermes_env_file
+      - hermes_hass_env_target.stat.isreg
+      - hermes_hass_env_target.stat.pw_name == hermes_user
+      - hermes_hass_env_target.stat.gr_name == hermes_user
+      - hermes_hass_env_target.stat.mode == '0600'
+    fail_msg: >-
+      The HASS profile must link to the root Hermes environment file,
+      owned by {{ hermes_user }} at mode 0600.
+    success_msg: "The HASS profile securely shares the root Hermes environment."
+  no_log: true
 
 - name: Deploy Hermes provider credential store
   ansible.builtin.template:

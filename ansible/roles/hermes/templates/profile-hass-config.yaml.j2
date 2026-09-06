@@ -22,15 +22,19 @@ agent:
     - terminal
     - code_execution
     - file
-    - browser
     - delegation
     - cronjob
   verbose: false
-  reasoning_effort: medium
+  reasoning_effort: low
 terminal:
   enabled: false
 browser:
-  enabled: false
+  inactivity_timeout: 120
+  cloud_provider: firecrawl
+  use_gateway: false
+web:
+  search_backend: firecrawl
+  extract_backend: firecrawl
 tool_loop_guardrails:
   warnings_enabled: true
   hard_stop_enabled: false
@@ -101,6 +105,7 @@ group_sessions_per_user: true
 platform_toolsets:
   homeassistant:
     - homeassistant
+    - browser
     - web
     - memory
     - session_search
