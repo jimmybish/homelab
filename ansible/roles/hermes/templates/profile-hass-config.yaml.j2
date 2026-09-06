@@ -114,3 +114,15 @@ platform_toolsets:
     - clarify
 custom_providers:
 {{ hermes_custom_providers | to_nice_yaml(indent=2, sort_keys=false, width=4096) | indent(2, true) }}
+mcp_servers:
+  grafana:
+    command: "{{ hermes_mcp_grafana_bin }}"
+    args:
+      - --enabled-tools
+      - datasource,prometheus,loki
+      - --disable-write
+      - --disable-proxied
+    env:
+      GRAFANA_URL: "{{ internal_grafana_url }}"
+      GRAFANA_SERVICE_ACCOUNT_TOKEN_FILE: "{{ hermes_hass_grafana_token_file }}"
+    enabled: true

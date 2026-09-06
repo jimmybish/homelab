@@ -242,6 +242,16 @@
   diff: false
   notify: Restart Hermes Plexibot gateway
 
+- name: Deploy HASS Grafana service-account token
+  ansible.builtin.copy:
+    content: "{{ hermes_hass_grafana_api_token }}{{ '\n' }}"
+    dest: "{{ hermes_hass_grafana_token_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  no_log: true
+  diff: false
+
 - name: Deploy managed Hermes non-gateway profile configs
   ansible.builtin.template:
     src: "{{ item.config_template }}"
@@ -277,10 +287,17 @@
       - not hermes_hass_config.browser.use_gateway
       - hermes_hass_config.web.search_backend == 'firecrawl'
       - hermes_hass_config.web.extract_backend == 'firecrawl'
+      - hermes_hass_config.mcp_servers.grafana.command == hermes_mcp_grafana_bin
+      - hermes_hass_config.mcp_servers.grafana.args == ['--enabled-tools', 'datasource,prometheus,loki', '--disable-write', '--disable-proxied']
+      - hermes_hass_config.mcp_servers.grafana.env.GRAFANA_URL == internal_grafana_url
+      - hermes_hass_config.mcp_servers.grafana.env.GRAFANA_SERVICE_ACCOUNT_TOKEN_FILE == hermes_hass_grafana_token_file
+      - hermes_hass_config.mcp_servers.grafana.enabled
     fail_msg: >-
-      The HASS profile must expose Home Assistant, browser, and web tools
-      with the managed Firecrawl configuration.
-    success_msg: "The HASS profile has Home Assistant and web content capabilities."
+      The HASS profile must expose Home Assistant, browser, and web tools with
+      the managed Firecrawl configuration and exact read-only Grafana MCP settings.
+    success_msg: >-
+      The HASS profile has Home Assistant, web content, and read-only Grafana MCP
+      capabilities.
   vars:
     hermes_hass_config: >-
       {{ hermes_hass_profile_config.content | b64decode | from_yaml }}
