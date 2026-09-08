@@ -31,3 +31,6 @@ log-sweeps/
 
 # Loki sweep ignore list (may reference internal hosts/IPs)
 .github/skills/loki-scheduled-sweep/ignore-list.md
+
+# Hermes agent plans (local-only working docs)
+.hermes/plans/

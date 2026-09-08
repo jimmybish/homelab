@@ -537,6 +537,31 @@
   register: n8n_workflows
   delegate_to: localhost
 
+- name: Deactivate Discord trigger workflows before deployment
+  ansible.builtin.uri:
+    url: >-
+      {{ internal_n8n_url }}/api/v1/workflows/{{
+        (n8n_workflows.json.data
+         | selectattr('name', 'equalto', item)
+         | first).id
+      }}/deactivate
+    method: POST
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+    validate_certs: false
+    status_code: [200]
+  delegate_to: localhost
+  loop:
+    - "Discord Copilot Bot"
+    - "Discord VirtuaJimmy"
+    - "Discord Plexibot"
+  when: >-
+    n8n_workflows.json.data
+    | selectattr('name', 'equalto', item)
+    | selectattr('active', 'equalto', true)
+    | list
+    | length > 0
+
 - name: Deploy N8N workflows
   ansible.builtin.include_tasks:
     file: deploy_workflow.yaml
@@ -545,10 +570,10 @@
       template: "templates/copilot_workflow.json.j2"
     - name: "Discord VirtuaJimmy"
       template: "templates/discord_copilot_workflow.json.j2"
-      active: true
+      active: false
     - name: "Discord Plexibot"
       template: "templates/discord_plexibot_workflow.json.j2"
-      active: true
+      active: false
     - name: "Grafana Alert Handler"
       template: "templates/grafana_alerts_workflow.json.j2"
       active: true
@@ -579,8 +604,8 @@
   loop_control:
     loop_var: workflow
 
-# Activate workflows — done as a batch after all deploys so Discord trigger
-# IPC connections are established together (cycling one orphans the other)
+# Restore managed active intent only after all three Discord agent workflows are
+# inactive and every workflow update is complete.
 - name: Refresh workflow list after deploy
   ansible.builtin.uri:
     url: "{{ internal_n8n_url }}/api/v1/workflows"
@@ -592,9 +617,14 @@
   register: n8n_workflows_post
   delegate_to: localhost
 
-- name: Activate workflows
+- name: Activate inactive managed workflows
   ansible.builtin.uri:
-    url: "{{ internal_n8n_url }}/api/v1/workflows/{{ (n8n_workflows_post.json.data | selectattr('name', 'equalto', item) | first).id }}/activate"
+    url: >-
+      {{ internal_n8n_url }}/api/v1/workflows/{{
+        (n8n_workflows_post.json.data
+         | selectattr('name', 'equalto', item)
+         | first).id
+      }}/activate
     method: POST
     headers:
       X-N8N-API-KEY: "{{ n8n_api_key }}"
@@ -602,8 +632,6 @@
     status_code: [200]
   delegate_to: localhost
   loop:
-    - "Discord VirtuaJimmy"
-    - "Discord Plexibot"
     - "Grafana Alert Handler"
     - "Copilot Still Thinking"
     - "Close Stale Discord Threads"
@@ -613,3 +641,45 @@
     - "Plex Library Announcements"
     - "Docker Image Prune"
     - "QNAP Mailbox Monitor"
+  when: >-
+    not (n8n_workflows_post.json.data
+         | selectattr('name', 'equalto', item)
+         | first).active
+
+- name: Read back N8N workflow states
+  ansible.builtin.uri:
+    url: "{{ internal_n8n_url }}/api/v1/workflows"
+    method: GET
+    headers:
+      X-N8N-API-KEY: "{{ n8n_api_key }}"
+    validate_certs: false
+    return_content: true
+  register: n8n_workflows_verified
+  delegate_to: localhost
+
+- name: Assert Discord workflow cutover state
+  ansible.builtin.assert:
+    that:
+      - >-
+        n8n_workflows_verified.json.data
+        | selectattr('name', 'equalto', 'Discord Copilot Bot')
+        | selectattr('active', 'equalto', true)
+        | list
+        | length == 0
+      - >-
+        n8n_workflows_verified.json.data
+        | selectattr('name', 'equalto', 'Discord VirtuaJimmy')
+        | selectattr('active', 'equalto', true)
+        | list
+        | length == 0
+      - >-
+        n8n_workflows_verified.json.data
+        | selectattr('name', 'equalto', 'Discord Plexibot')
+        | selectattr('active', 'equalto', true)
+        | list
+        | length == 0
+    fail_msg: >-
+      Discord Copilot Bot, Discord VirtuaJimmy, and Discord Plexibot must all be
+      inactive after workflow deployment.
+    success_msg: >-
+      Discord Copilot Bot, Discord VirtuaJimmy, and Discord Plexibot are all inactive.

@@ -36,4 +36,16 @@
     DBUS_SESSION_BUS_ADDRESS: >-
       unix:path=/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}/bus
 
+- name: Restart Hermes VirtuaJimmy gateway
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_virtuajimmy_gateway_service_name }}"
+    scope: user
+    state: restarted
+  become: true
+  become_user: "{{ hermes_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}"
+    DBUS_SESSION_BUS_ADDRESS: >-
+      unix:path=/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}/bus
+
 ...

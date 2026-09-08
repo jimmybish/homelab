@@ -109,6 +109,39 @@
   loop_control:
     label: "{{ item.name }}"
 
+- name: Create VirtuaJimmy SSH directory
+  ansible.builtin.file:
+    path: "{{ hermes_virtuajimmy_ssh_dir }}"
+    state: directory
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0700'
+
+- name: Create Hermes user SSH directory for VirtuaJimmy host trust
+  ansible.builtin.file:
+    path: "{{ hermes_virtuajimmy_user_ssh_dir }}"
+    state: directory
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0700'
+
+- name: Install pinned VirtuaJimmy SSH host key for the exact host
+  ansible.builtin.known_hosts:
+    path: "{{ hermes_virtuajimmy_known_hosts_file }}"
+    name: "{{ hermes_virtuajimmy_ssh_host }}"
+    key: >-
+      {{ hermes_virtuajimmy_ssh_host }} {{ hermes_virtuajimmy_ssh_host_public_key }}
+    hash_host: true
+    state: present
+
+- name: Secure Hermes user known hosts
+  ansible.builtin.file:
+    path: "{{ hermes_virtuajimmy_known_hosts_file }}"
+    state: file
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+
 - name: Download pinned official Hermes installer
   ansible.builtin.get_url:
     url: "{{ hermes_installer_url }}"
@@ -252,6 +285,17 @@
   no_log: true
   diff: false
 
+- name: Deploy VirtuaJimmy Grafana service-account token
+  ansible.builtin.copy:
+    content: "{{ hermes_virtuajimmy_grafana_api_token }}{{ '\n' }}"
+    dest: "{{ hermes_virtuajimmy_grafana_token_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  no_log: true
+  diff: false
+  notify: Restart Hermes VirtuaJimmy gateway
+
 - name: Deploy managed Hermes non-gateway profile configs
   ansible.builtin.template:
     src: "{{ item.config_template }}"
@@ -266,6 +310,7 @@
   loop: >-
     {{ hermes_managed_profiles
        | rejectattr('name', 'equalto', 'plexibot')
+       | rejectattr('name', 'equalto', 'virtuajimmy')
        | list }}
   loop_control:
     label: "{{ item.name }}"
@@ -314,6 +359,209 @@
       'import pathlib,sys,yaml; yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))'
       %s
   notify: Restart Hermes Plexibot gateway
+
+- name: Deploy VirtuaJimmy Hermes profile config
+  ansible.builtin.template:
+    src: profile-virtuajimmy-config.yaml.j2
+    dest: "{{ hermes_virtuajimmy_config_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+    validate: >-
+      {{ hermes_install_dir }}/venv/bin/python -c
+      'import pathlib,sys,yaml; yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))'
+      %s
+  notify: Restart Hermes VirtuaJimmy gateway
+
+- name: Deploy VirtuaJimmy identity
+  ansible.builtin.template:
+    src: profile-virtuajimmy-soul.md.j2
+    dest: "{{ hermes_virtuajimmy_soul_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  notify: Restart Hermes VirtuaJimmy gateway
+
+- name: Deploy VirtuaJimmy profile environment
+  ansible.builtin.template:
+    src: profile-virtuajimmy.env.j2
+    dest: "{{ hermes_virtuajimmy_env_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  no_log: true
+  diff: false
+  notify: Restart Hermes VirtuaJimmy gateway
+
+- name: Deploy VirtuaJimmy SSH private key
+  ansible.builtin.copy:
+    content: "{{ hermes_virtuajimmy_ssh_private_key }}{{ '\n' }}"
+    dest: "{{ hermes_virtuajimmy_ssh_private_key_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  no_log: true
+  diff: false
+  notify: Restart Hermes VirtuaJimmy gateway
+
+- name: Find exact VirtuaJimmy SSH host trust
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -F
+      - "{{ hermes_virtuajimmy_ssh_host }}"
+      - -f
+      - "{{ hermes_virtuajimmy_known_hosts_file }}"
+  become: true
+  become_user: "{{ hermes_user }}"
+  register: hermes_virtuajimmy_known_host
+  changed_when: false
+  no_log: true
+
+- name: Read exact VirtuaJimmy SSH host fingerprint
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -l
+      - -f
+      - '-'
+      - -E
+      - sha256
+    stdin: "{{ hermes_virtuajimmy_known_host.stdout }}"
+  become: true
+  become_user: "{{ hermes_user }}"
+  register: hermes_virtuajimmy_known_host_fingerprint
+  changed_when: false
+
+- name: Assert exact VirtuaJimmy SSH host trust
+  ansible.builtin.assert:
+    that:
+      - hermes_virtuajimmy_known_host.rc == 0
+      - hermes_virtuajimmy_ssh_host_fingerprint in hermes_virtuajimmy_known_host_fingerprint.stdout
+    fail_msg: "The exact VirtuaJimmy SSH host is not pinned to the expected ED25519 fingerprint."
+    success_msg: "The exact VirtuaJimmy SSH host is pinned to the expected ED25519 fingerprint."
+
+- name: Verify strict VirtuaJimmy SSH access to the managed repository
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - BatchMode=yes
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - IdentitiesOnly=yes
+      - -i
+      - "{{ hermes_virtuajimmy_ssh_private_key_file }}"
+      - "{{ hermes_virtuajimmy_ssh_user }}@{{ hermes_virtuajimmy_ssh_host }}"
+      - >-
+        test -r {{ hermes_virtuajimmy_remote_cwd | quote }} &&
+        printf '%s\n' {{ (hermes_virtuajimmy_remote_cwd ~ '-readable') | quote }}
+  become: true
+  become_user: "{{ hermes_user }}"
+  environment:
+    HOME: "{{ hermes_user_home }}"
+  register: hermes_virtuajimmy_strict_ssh
+  changed_when: false
+
+- name: Assert strict VirtuaJimmy SSH repository access
+  ansible.builtin.assert:
+    that:
+      - hermes_virtuajimmy_strict_ssh.rc == 0
+      - hermes_virtuajimmy_strict_ssh.stdout == hermes_virtuajimmy_remote_cwd ~ '-readable'
+    fail_msg: "VirtuaJimmy strict SSH access cannot read the managed repository."
+    success_msg: "VirtuaJimmy strict SSH access can read the managed repository."
+
+- name: Read deployed VirtuaJimmy profile config
+  ansible.builtin.slurp:
+    src: "{{ hermes_virtuajimmy_config_file }}"
+  register: hermes_virtuajimmy_profile_config
+
+- name: Assert VirtuaJimmy profile policy
+  ansible.builtin.assert:
+    that:
+      - hermes_virtuajimmy_config.terminal.backend == 'ssh'
+      - hermes_virtuajimmy_config.terminal.ssh_host == hermes_virtuajimmy_ssh_host
+      - hermes_virtuajimmy_config.terminal.ssh_user == hermes_virtuajimmy_ssh_user
+      - hermes_virtuajimmy_config.terminal.cwd == hermes_virtuajimmy_remote_cwd
+      - "'browser' not in hermes_virtuajimmy_config.agent.disabled_toolsets"
+      - "'search' not in hermes_virtuajimmy_config.agent.disabled_toolsets"
+      - hermes_virtuajimmy_config.browser.enabled
+      - hermes_virtuajimmy_config.browser.cloud_provider == 'firecrawl'
+      - not hermes_virtuajimmy_config.browser.use_gateway
+      - hermes_virtuajimmy_config.browser.inactivity_timeout == 120
+      - hermes_virtuajimmy_config.web.search_backend == 'firecrawl'
+      - hermes_virtuajimmy_config.web.extract_backend == 'firecrawl'
+      - hermes_virtuajimmy_config.onboarding.seen.busy_input_prompt
+      - "'skills' not in hermes_virtuajimmy_config.agent.disabled_toolsets"
+      - hermes_virtuajimmy_config.skills.disabled == []
+      - "'delegation' in hermes_virtuajimmy_config.agent.disabled_toolsets"
+      - hermes_virtuajimmy_config.approvals.mode == 'manual'
+      - hermes_virtuajimmy_config.approvals.cron_mode == 'deny'
+      - hermes_virtuajimmy_config.approvals.mcp_reload_confirm
+      - hermes_virtuajimmy_config.approvals.destructive_slash_confirm
+      - hermes_virtuajimmy_config.approvals.deny == ['git push *--force*', 'git push *-f*', '*curl*|*sh*', '*wget*|*sh*', '*> /dev/*']
+      - hermes_virtuajimmy_config.security.tirith_enabled
+      - not hermes_virtuajimmy_config.security.tirith_fail_open
+      - hermes_virtuajimmy_config.display.file_mutation_verifier
+      - hermes_virtuajimmy_config.tool_loop_guardrails.hard_stop_enabled
+      - hermes_virtuajimmy_config.discord.enabled
+      - hermes_virtuajimmy_config.discord.require_mention
+      - not hermes_virtuajimmy_config.discord.allow_mentions.everyone
+      - not hermes_virtuajimmy_config.discord.allow_mentions.roles
+      - hermes_virtuajimmy_config.discord.max_attachment_bytes == 26214400
+      - hermes_virtuajimmy_config.discord.free_response_channels == [hermes_virtuajimmy_discord_control_channel_id | string]
+      - hermes_virtuajimmy_config.discord.allow_from == [hermes_virtuajimmy_discord_user_id | string]
+      - hermes_virtuajimmy_config.mcp_servers.keys() | list | sort == ['context7', 'grafana', 'radarr', 'sonarr', 'tracearr']
+      - hermes_virtuajimmy_config.mcp_servers.grafana.args == ['--enabled-tools', 'datasource,prometheus,loki', '--disable-write', '--disable-proxied']
+    fail_msg: "The VirtuaJimmy profile does not enforce the managed capability policy."
+    success_msg: "The VirtuaJimmy profile enforces its SSH, Discord, MCP, and security policy."
+  vars:
+    hermes_virtuajimmy_config: >-
+      {{ hermes_virtuajimmy_profile_config.content | b64decode | from_yaml }}
+
+- name: Inspect VirtuaJimmy private files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ hermes_virtuajimmy_config_file }}"
+    - "{{ hermes_virtuajimmy_soul_file }}"
+    - "{{ hermes_virtuajimmy_env_file }}"
+    - "{{ hermes_virtuajimmy_ssh_private_key_file }}"
+    - "{{ hermes_virtuajimmy_grafana_token_file }}"
+  register: hermes_virtuajimmy_private_files
+  no_log: true
+
+- name: Assert secure VirtuaJimmy private files
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg
+      - item.stat.pw_name == hermes_user
+      - item.stat.gr_name == hermes_user
+      - item.stat.mode == '0600'
+  loop: "{{ hermes_virtuajimmy_private_files.results }}"
+  no_log: true
+
+- name: Read VirtuaJimmy profile environment
+  ansible.builtin.slurp:
+    src: "{{ hermes_virtuajimmy_env_file }}"
+  register: hermes_virtuajimmy_environment
+  no_log: true
+
+- name: Assert VirtuaJimmy environment isolation
+  ansible.builtin.assert:
+    that:
+      - "'DISCORD_BOT_TOKEN=' in hermes_virtuajimmy_environment_text"
+      - "'TERMINAL_SSH_HOST=' in hermes_virtuajimmy_environment_text"
+      - "('FIRECRAWL_API_URL=' ~ internal_firecrawl_url) in hermes_virtuajimmy_environment_text.splitlines()"
+      - "'HOME_ASSISTANT_TOKEN=' not in hermes_virtuajimmy_environment_text"
+      - "'HERMES_DASHBOARD' not in hermes_virtuajimmy_environment_text"
+    fail_msg: "The VirtuaJimmy environment is missing required settings or exposes root profile secrets."
+    success_msg: "The VirtuaJimmy environment is isolated from unrelated Hermes secrets."
+  vars:
+    hermes_virtuajimmy_environment_text: >-
+      {{ hermes_virtuajimmy_environment.content | b64decode }}
+  no_log: true
 
 - name: Deploy Hermes environment secrets
   ansible.builtin.template:
@@ -500,6 +748,17 @@
     - Reload Hermes user systemd
     - Restart Hermes Plexibot gateway
 
+- name: Deploy Hermes VirtuaJimmy gateway user unit
+  ansible.builtin.template:
+    src: hermes-gateway-virtuajimmy.service.j2
+    dest: "{{ hermes_virtuajimmy_gateway_service_unit_path }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0644'
+  notify:
+    - Reload Hermes user systemd
+    - Restart Hermes VirtuaJimmy gateway
+
 - name: Apply pending Hermes restart
   ansible.builtin.meta: flush_handlers
 
@@ -518,6 +777,19 @@
 - name: Enable and start Hermes Plexibot gateway
   ansible.builtin.systemd_service:
     name: "{{ hermes_plexibot_gateway_service_name }}"
+    scope: user
+    state: started
+    enabled: true
+  become: true
+  become_user: "{{ hermes_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}"
+    DBUS_SESSION_BUS_ADDRESS: >-
+      unix:path=/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}/bus
+
+- name: Enable and start Hermes VirtuaJimmy gateway
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_virtuajimmy_gateway_service_name }}"
     scope: user
     state: started
     enabled: true
@@ -549,6 +821,23 @@
     DBUS_SESSION_BUS_ADDRESS: >-
       unix:path=/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}/bus
   register: hermes_plexibot_gateway_service_status
+
+- name: Read Hermes VirtuaJimmy gateway service status
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_virtuajimmy_gateway_service_name }}"
+    scope: user
+  become: true
+  become_user: "{{ hermes_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}"
+    DBUS_SESSION_BUS_ADDRESS: >-
+      unix:path=/run/user/{{ ansible_facts.getent_passwd[hermes_user][1] }}/bus
+  register: hermes_virtuajimmy_gateway_service_status
+
+- name: Read Hermes VirtuaJimmy gateway unit
+  ansible.builtin.slurp:
+    src: "{{ hermes_virtuajimmy_gateway_service_unit_path }}"
+  register: hermes_virtuajimmy_gateway_unit
 
 - name: Assert Hermes dashboard service state
   ansible.builtin.assert:
@@ -583,6 +872,25 @@
       Hermes Plexibot gateway is not active and enabled from the managed user unit.
     success_msg: "Hermes Plexibot gateway is active and enabled at boot."
 
+- name: Assert Hermes VirtuaJimmy gateway service state
+  ansible.builtin.assert:
+    that:
+      - hermes_virtuajimmy_gateway_service_status.status.ActiveState == 'active'
+      - hermes_virtuajimmy_gateway_service_status.status.UnitFileState == 'enabled'
+      - >-
+        hermes_virtuajimmy_gateway_service_status.status.FragmentPath ==
+        hermes_virtuajimmy_gateway_service_unit_path
+      - hermes_virtuajimmy_gateway_service_status.status.MainPID | int > 0
+      - "'--profile virtuajimmy gateway run' in hermes_virtuajimmy_gateway_unit_text"
+      - "('WorkingDirectory=' + hermes_virtuajimmy_profile_dir) in hermes_virtuajimmy_gateway_unit_text"
+      - "('HERMES_HOME=' + hermes_virtuajimmy_profile_dir) in hermes_virtuajimmy_gateway_unit_text"
+    fail_msg: >-
+      Hermes VirtuaJimmy gateway is not active and enabled from the managed user unit.
+    success_msg: "Hermes VirtuaJimmy gateway is active and enabled at boot."
+  vars:
+    hermes_virtuajimmy_gateway_unit_text: >-
+      {{ hermes_virtuajimmy_gateway_unit.content | b64decode }}
+
 - name: Read Hermes Plexibot gateway process identity
   ansible.builtin.command:
     argv:
@@ -611,6 +919,38 @@
     success_msg: >-
       Hermes Plexibot gateway is running as {{ hermes_user }} with the
       plexibot profile.
+  when: not ansible_check_mode
+
+- name: Read Hermes VirtuaJimmy gateway process identity
+  ansible.builtin.command:
+    argv:
+      - ps
+      - -p
+      - "{{ hermes_virtuajimmy_gateway_service_status.status.MainPID }}"
+      - -o
+      - user=
+      - -o
+      - args=
+  register: hermes_virtuajimmy_gateway_process
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert Hermes VirtuaJimmy gateway process identity
+  ansible.builtin.assert:
+    that:
+      - >-
+        hermes_virtuajimmy_gateway_process.stdout is match(
+          '^' + hermes_user + '\\s+'
+        )
+      - >-
+        '--profile virtuajimmy gateway run' in
+        hermes_virtuajimmy_gateway_process.stdout
+    fail_msg: >-
+      Hermes VirtuaJimmy gateway is not running as {{ hermes_user }} with the
+      virtuajimmy profile.
+    success_msg: >-
+      Hermes VirtuaJimmy gateway is running as {{ hermes_user }} with the
+      virtuajimmy profile.
   when: not ansible_check_mode
 
 - name: Wait for Hermes dashboard listener

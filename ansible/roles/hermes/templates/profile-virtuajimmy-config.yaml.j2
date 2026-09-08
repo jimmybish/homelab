@@ -1,0 +1,135 @@
+model:
+{{ hermes_model | to_nice_yaml(indent=2, sort_keys=false, width=4096) | indent(2, true) }}
+agent:
+  max_turns: 90
+  disabled_toolsets:
+    - code_execution
+    - computer_use
+    - cronjob
+    - delegation
+    - discord_admin
+    - feishu_doc
+    - feishu_drive
+    - homeassistant
+    - image_gen
+    - kanban
+    - project
+    - spotify
+    - stt
+    - tts
+    - video
+    - video_gen
+    - vision
+    - x_search
+    - yuanbao
+  verbose: false
+  reasoning_effort: medium
+terminal:
+  enabled: true
+  backend: ssh
+  cwd: "{{ hermes_virtuajimmy_remote_cwd }}"
+  ssh_host: "{{ hermes_virtuajimmy_ssh_host }}"
+  ssh_user: "{{ hermes_virtuajimmy_ssh_user }}"
+  ssh_key: "{{ hermes_virtuajimmy_ssh_private_key_file }}"
+browser:
+  enabled: true
+  cloud_provider: firecrawl
+  use_gateway: false
+  inactivity_timeout: 120
+web:
+  search_backend: firecrawl
+  extract_backend: firecrawl
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: true
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 4
+    same_tool_failure: 5
+    idempotent_no_progress: 3
+approvals:
+  mode: manual
+  timeout: 300
+  cron_mode: deny
+  mcp_reload_confirm: true
+  destructive_slash_confirm: true
+  deny:
+    - "git push *--force*"
+    - "git push *-f*"
+    - "*curl*|*sh*"
+    - "*wget*|*sh*"
+    - "*> /dev/*"
+security:
+  redact_secrets: true
+  tirith_enabled: true
+  tirith_fail_open: false
+display:
+  file_mutation_verifier: true
+compression:
+  enabled: false
+prompt_caching:
+  cache_ttl: 5m
+memory:
+  memory_enabled: true
+  user_profile_enabled: false
+skills:
+  disabled: []
+discord:
+  enabled: true
+  allow_from:
+    - "{{ hermes_virtuajimmy_discord_user_id }}"
+  allowed_channels:
+    - "{{ hermes_virtuajimmy_discord_control_channel_id }}"
+  free_response_channels:
+    - "{{ hermes_virtuajimmy_discord_control_channel_id }}"
+  require_mention: true
+  auto_thread: true
+  thread_require_mention: false
+  history_backfill: true
+  allow_mentions:
+    everyone: false
+    roles: false
+  missed_message_backfill:
+    enabled: false
+  max_attachment_bytes: 26214400
+session_reset:
+  mode: none
+  idle_minutes: 1440
+  at_hour: 4
+group_sessions_per_user: true
+custom_providers:
+{{ hermes_custom_providers | to_nice_yaml(indent=2, sort_keys=false, width=4096) | indent(2, true) }}
+mcp_servers:
+  context7:
+    url: "{{ hermes_virtuajimmy_mcp_context7_url }}"
+{% if hermes_virtuajimmy_context7_api_key | length > 0 %}
+    headers:
+      Authorization: "Bearer ${CONTEXT7_API_KEY}"
+{% endif %}
+    enabled: true
+  grafana:
+    command: "{{ hermes_mcp_grafana_bin }}"
+    args:
+      - --enabled-tools
+      - datasource,prometheus,loki
+      - --disable-write
+      - --disable-proxied
+    env:
+      GRAFANA_URL: "{{ internal_grafana_url }}"
+      GRAFANA_SERVICE_ACCOUNT_TOKEN_FILE: "{{ hermes_virtuajimmy_grafana_token_file }}"
+    enabled: true
+  tracearr:
+    url: "{{ hermes_virtuajimmy_mcp_tracearr_url }}/mcp"
+    enabled: true
+  sonarr:
+    url: "{{ hermes_virtuajimmy_mcp_sonarr_url }}/mcp"
+    enabled: true
+  radarr:
+    url: "{{ hermes_virtuajimmy_mcp_radarr_url }}/mcp"
+    enabled: true
+onboarding:
+  seen:
+    busy_input_prompt: true

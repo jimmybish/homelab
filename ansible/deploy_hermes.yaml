@@ -8,11 +8,15 @@
       vars:
         grafana_silence_comment: "Deploying Hermes Agent"
       when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
-  roles:
-    - hermes
-  post_tasks:
-    - name: Remove Grafana alert silence
-      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
-      when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
+  tasks:
+    - name: Deploy Hermes Agent with alert cleanup
+      block:
+        - name: Apply Hermes role
+          ansible.builtin.include_role:
+            name: hermes
+      always:
+        - name: Remove Grafana alert silence
+          ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+          when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
 
 ...
