@@ -1,0 +1,25 @@
+services:
+  tronbyt-thinking:
+    build:
+      context: "{{ tronbyt_vllm_thinking_folder }}"
+      dockerfile: Dockerfile
+    image: tronbyt-thinking:{{ tronbyt_vllm_thinking_image_tag }}
+    container_name: tronbyt-thinking
+    restart: unless-stopped
+    environment:
+      - TZ={{ timezone }}
+      - GRAFANA_URL=http://{{ tronbyt_vllm_thinking_grafana_ip }}:{{ tronbyt_vllm_thinking_grafana_port }}
+      - GRAFANA_BEARER={{ grafana_thinking_api_token | trim }}
+      - GRAFANA_DS_UID={{ tronbyt_vllm_thinking_prometheus_uid }}
+      - TRONBYT_URL=http://{{ tronbyt_vllm_thinking_local_ip }}:{{ tronbyt_vllm_thinking_tronbyt_port }}
+      - TRONBYT_DEVICE={{ tronbyt_vllm_thinking_device }}
+      - TRONBYT_INAME={{ tronbyt_vllm_thinking_iname }}
+      - TRONBYT_BEARER={{ tronbyt_thinking_api_key | trim }}
+      - ASSET_PATH=/app/think.gif
+      - TRONBYT_INSTALLATION_ID=vllm-thinking
+      - POLL_INTERVAL={{ tronbyt_vllm_thinking_poll_interval }}
+      - THINK_MIN_SECONDS={{ tronbyt_vllm_thinking_min_seconds }}
+    volumes:
+      - {{ tronbyt_vllm_thinking_folder }}/thinking_poller.py:/app/thinking_poller.py:ro
+      - {{ tronbyt_vllm_thinking_folder }}/think.gif:/app/think.gif:ro
+    command: ["python3", "/app/thinking_poller.py"]

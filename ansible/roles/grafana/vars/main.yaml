@@ -110,3 +110,18 @@ grafana_plexibot_service_account_token_name: "Hermes Plexibot"
 # Rotation is explicit to prevent accidental duplicate token creation when a
 # token secret is unavailable (Grafana only returns it once at creation).
 grafana_rotate_plexibot_token: false
+
+# ---------------------------------------------------------------------------
+# Tronbyt "vLLM is thinking" poller read-only service account automation
+# ---------------------------------------------------------------------------
+# Same model as the Plexibot account: management operations use
+# grafana_api_token; this Viewer token is used only for Prometheus queries by
+# the tronbyt_vllm_thinking poller. Persisted in group_vars/all/vars.yaml via
+# the existing grafana_vault_vars_file, matching the Plexibot/HASS tokens --
+# group_vars are only resolvable for hosts in the group that includes them, and
+# the provisioning run targets grafana_host (docker-1), not tronbyt_host.
+grafana_configure_thinking_service_account: true
+grafana_thinking_service_account_name: "Tronbyt vLLM Thinking"
+grafana_thinking_service_account_role: "Viewer"
+grafana_thinking_service_account_token_name: "Tronbyt vLLM Thinking"
+grafana_rotate_thinking_token: false

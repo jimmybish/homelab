@@ -1,0 +1,14 @@
+---
+- name: Collect Grafana host facts for the poller URL
+  # The poller runs on docker-2 but must reach Grafana on docker-1, so its
+  # address is derived from inventory rather than hardcoded. Gathering facts on
+  # grafana_host in a prior play is what makes hostvars[...] populated here.
+  hosts: grafana_host
+  gather_facts: true
+  become: false
+
+- name: Install Tronbyt vLLM Thinking Indicator
+  hosts: tronbyt_vllm_thinking_host
+  become: true
+  roles:
+    - tronbyt_vllm_thinking

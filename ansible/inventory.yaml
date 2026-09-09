@@ -209,6 +209,11 @@ tronbyt_host:
   hosts:
     docker-2:
 
+# Tronbyt vLLM thinking poller (co-located with the Tronbyt server)
+tronbyt_vllm_thinking_host:
+  hosts:
+    docker-2:
+
 # Linux Desktop
 linux_desktop:
   hosts:

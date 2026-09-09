@@ -1,0 +1,197 @@
+---
+# Deploys a stdlib-only Python poller that pins a "thinking" animation to the
+# Tronbyt device while vLLM generates tokens. No web interface: no proxy, no
+# DNS, no Homepage entry. Secrets arrive from group_vars/tronbyt_host (vault).
+
+- name: Require the Grafana Viewer token to exist
+  ansible.builtin.assert:
+    that:
+      - grafana_thinking_api_token | default('') | trim | length > 0
+      - tronbyt_thinking_api_key | default('') | trim | length > 0
+    fail_msg: >-
+      Missing secret(s). The Grafana Viewer token is minted by the grafana
+      role: ansible-playbook -i inventory.yaml deploy_grafana.yaml
+      --tags thinking_service_account
+    success_msg: "Both thinking secrets are present."
+
+# Cross-host reachability facts: Grafana runs on grafana_host (docker-1) while
+# this container runs here; derive real IPs instead of relying on localhost.
+- name: Resolve Grafana host address
+  ansible.builtin.set_fact:
+    tronbyt_vllm_thinking_grafana_ip: "{{ hostvars[groups['grafana_host'][0]]['ansible_default_ipv4']['address'] }}"
+
+- name: Resolve local address for the Tronbyt server
+  ansible.builtin.set_fact:
+    tronbyt_vllm_thinking_local_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+
+# The rendered compose file embeds both bearer tokens, so neither the directory
+# nor the file may be world-readable. The directory is root-owned because
+# docker compose runs under become here (compose tasks use become: false but
+# the play is become: true, and docker-user cannot reach the socket); group
+# docker-user 0750 lets the service account read without exposing to other
+# locals. The file itself lands 0640 from the template.
+- name: Ensure Tronbyt Thinking directory
+  ansible.builtin.file:
+    path: "{{ tronbyt_vllm_thinking_folder }}"
+    state: directory
+    owner: root
+    group: "{{ docker_user }}"
+    mode: '0750'
+
+- name: Deploy thinking poller script
+  ansible.builtin.copy:
+    src: files/thinking_poller.py
+    dest: "{{ tronbyt_vllm_thinking_folder }}/thinking_poller.py"
+    mode: '0644'
+  notify:
+    - Restart Tronbyt Thinking Poller
+
+- name: Deploy source animation gif
+  # The poller composes 64x32 frames from the 498x498 source at runtime; the
+  # gif (1.1 MB) is the source of truth, no pre-rendered asset is deployed.
+  ansible.builtin.copy:
+    src: files/think.gif
+    dest: "{{ tronbyt_vllm_thinking_folder }}/think.gif"
+    mode: '0644'
+  notify:
+    - Restart Tronbyt Thinking Poller
+
+- name: Deploy poller image Dockerfile
+  ansible.builtin.copy:
+    src: files/Dockerfile
+    dest: "{{ tronbyt_vllm_thinking_folder }}/Dockerfile"
+    mode: '0644'
+  notify:
+    - Restart Tronbyt Thinking Poller
+
+- name: Deploy Tronbyt Thinking compose file
+  ansible.builtin.template:
+    src: templates/docker_compose.yaml.j2
+    dest: "{{ tronbyt_vllm_thinking_folder }}/docker-compose.yaml"
+    # 0640: the file embeds both bearer tokens. root (the compose runner) owns
+    # it, docker-user group read covers operators, world has nothing.
+    owner: root
+    group: "{{ docker_user }}"
+    mode: '0640'
+  no_log: true
+  notify:
+    - Restart Tronbyt Thinking Poller
+
+# Logs alone are not liveness: a container that emitted `starting:` /
+# `metric route:` and then exited (or is crash-looping) keeps those lines and
+# would pass a log-only check. Compare the CURRENT container state against a
+# pre-deploy baseline: exists, running, and the restart count must not have
+# grown during this run (a crash loop raises it; an old historical restart
+# must not fail every future deploy).
+- name: Inspect container state before startup (baseline)
+  community.docker.docker_container_info:
+    name: tronbyt-thinking
+  become: false
+  register: tronbyt_vllm_thinking_container_before
+  changed_when: false
+
+- name: Run docker compose up
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ tronbyt_vllm_thinking_folder }}"
+    state: present
+    remove_orphans: true
+  # No `build: always` here: that passes --build on every run and permanently
+  # breaks the second-run changed=0 gate. Build default (policy) only builds
+  # when the tagged image is absent; when build INPUTS change, the Dockerfile
+  # copy task notifies the restart handler, which rebuilds deliberately.
+
+# Run pending restarts BEFORE verifying, otherwise a failing assertion below
+# aborts the play, handlers never run, and the container keeps executing the
+# previous script from the bind mount -- which looks like the fix "did nothing".
+- name: Flush handlers before verification
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the poller to log a working metric route
+  ansible.builtin.command:
+    cmd: docker logs --tail 50 tronbyt-thinking
+  become: false
+  register: tronbyt_vllm_thinking_logs
+  until: "'metric route: prom' in (tronbyt_vllm_thinking_logs.stdout + tronbyt_vllm_thinking_logs.stderr)
+          or 'metric route: dsquery' in (tronbyt_vllm_thinking_logs.stdout + tronbyt_vllm_thinking_logs.stderr)"
+  retries: 15
+  delay: 3
+  changed_when: false
+
+# Logs alone are not liveness: a container that emitted `starting:` /
+# `metric route:` and then exited (or is crash-looping) keeps those lines and
+# would pass a log-only check. Query the CURRENT container state, and fail on
+# a nonzero restart count, which is what a crash loop actually looks like.
+- name: Inspect the current container state
+  community.docker.docker_container_info:
+    name: tronbyt-thinking
+  become: false
+  register: tronbyt_vllm_thinking_container
+  changed_when: false
+
+- name: Assert the poller is running and a metric route works
+  ansible.builtin.assert:
+    that:
+      - tronbyt_vllm_thinking_container.exists
+      - tronbyt_vllm_thinking_container.container.State.Running
+      - tronbyt_vllm_thinking_container.container.State.Status == 'running'
+      - >-
+        (tronbyt_vllm_thinking_container.container.RestartCount | default(0) | int)
+        <= (baseline.RestartCount | default(0) | int)
+      - "'starting:' in logs"
+      - "'metric route: prom' in logs or 'metric route: dsquery' in logs"
+      - "'Traceback' not in logs"
+    fail_msg: >-
+      Poller is not provably healthy. state={{ tronbyt_vllm_thinking_container.container.State.Status | default('absent') }}
+      restart_count={{ tronbyt_vllm_thinking_container.container.RestartCount | default('n/a') }}
+      (baseline {{ baseline.RestartCount | default('n/a') }}).
+      Check: docker logs tronbyt-thinking. 'metric query failed on all routes'
+      means an unauthenticated request -- confirm the Authorization scheme
+      literal is intact (a scrubbed '***' in _auth() caused exactly this once).
+    success_msg: >-
+      Poller container is running (restart_count unchanged from baseline) with
+      a working authenticated metric route.
+  vars:
+    logs: "{{ tronbyt_vllm_thinking_logs.stdout + tronbyt_vllm_thinking_logs.stderr }}"
+    baseline: "{{ (tronbyt_vllm_thinking_container_before.container) if tronbyt_vllm_thinking_container_before.exists else {} }}"
+
+- name: Read the installation list for the pin-state assertion
+  ansible.builtin.uri:
+    url: "http://{{ tronbyt_vllm_thinking_local_ip }}:{{ tronbyt_vllm_thinking_tronbyt_port }}/v0/devices/{{ tronbyt_vllm_thinking_device }}/installations"
+    headers:
+      Authorization: "Bearer {{ tronbyt_thinking_api_key | trim }}"
+    status_code: 200
+  register: tronbyt_vllm_thinking_installations
+  changed_when: false
+  no_log: true
+
+# Enforce what is actually invariant at apply time. A stricter "rests disabled"
+# check cannot be asserted from this play: the metric the poller watches is the
+# same vLLM instance serving the agent that runs the playbook, so a legitimate
+# THINKING pin is expected mid-apply. The invariant that must always hold is
+# that the installation exists and enabled/pinned move together -- an
+# enabled-but-unpinned app would wait its turn in the rotation instead of
+# appearing, which is the failure mode the single-PATCH design exists to avoid.
+- name: Assert the thinking installation exists with consistent pin state
+  ansible.builtin.assert:
+    that:
+      - matching | length == 1
+      - matching[0].enabled | default(false) == matching[0].pinned | default(false)
+    fail_msg: >-
+      The pushed thinking installation must exist and its enabled/pinned flags
+      must agree. Found {{ matching | length }} installation(s) matching
+      iname {{ tronbyt_vllm_thinking_iname }}; ids seen:
+      {{ tronbyt_vllm_thinking_installations.json.installations
+         | default([]) | map(attribute='id') | list }}.
+      If the flags disagree, a PATCH moved only one field -- check set_display().
+    success_msg: >-
+      Thinking installation {{ tronbyt_vllm_thinking_iname }} present;
+      enabled={{ matching[0].enabled | default(false) }} equals
+      pinned={{ matching[0].pinned | default(false) }}
+      ({{ 'pinned while the model is generating' if (matching[0].enabled | default(false)) else 'resting idle' }}).
+  vars:
+    matching: >-
+      {{ tronbyt_vllm_thinking_installations.json.installations
+         | default([])
+         | selectattr('id', 'equalto', tronbyt_vllm_thinking_iname)
+         | list }}

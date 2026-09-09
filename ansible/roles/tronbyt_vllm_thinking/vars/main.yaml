@@ -1,0 +1,77 @@
+---
+# Research Notes - Tronbyt "vLLM is thinking" poller
+# Official Source: https://github.com/tronbyt/server  (v0 device API)
+# Docs:              https://tronbyt.com/configuration/
+# GIF guidance:      https://tidbyt.dev/docs/reference/gifs
+#                    (design at 64x32 natively; finished asset <=128 KB; clean loop)
+# Source asset:      files/think.gif  (498x498, 20 frames @ 20fps, exactly 1.0s
+#                    loop, from https://media1.tenor.com/m/XQadEmNrCUcAAAAC/think-meme.gif)
+#                    Composed at runtime into 64x32 frames: gif resampled to the
+#                    left 32x32, tok/s readout centred in the right 32x32 (black
+#                    bg, emoji-yellow #FBC84C sampled from the source). No
+#                    pre-rendered display asset is deployed or versioned.
+# Last Updated: 2026-09-08
+#
+# How it works:
+#   Displays ingest animated WebP served by the Tronbyt server, not GIFs. The
+#   animation is registered once as a "pushed" installation via
+#   POST /v0/devices/{id}/push, which auto-creates the installation
+#   (internal/server/handlers_api.go ensurePushedApp). The poller then only
+#   toggles that installation, so no per-frame work happens at runtime:
+#     thinking -> PATCH {"enabled": true,  "pinned": true}
+#     idle     -> PATCH {"enabled": false, "pinned": false}
+#   Both fields move in one PATCH; an enabled-but-unpinned app would wait its
+#   turn in the rotation instead of appearing immediately.
+#
+# Metric predicate (aggregate across all model_name series):
+#   sum(vllm:num_requests_running) > 0
+#     OR abs(sum(rate(vllm:generation_tokens_total[1m]))) > 0
+#   num_requests_running gives a fast off-edge and covers prefill gaps where
+#   the 1m rate has not accumulated. abs() guards a counter reset on vLLM
+#   restart. The 10s minimum thinking duration is enforced in the poller, not
+#   in PromQL, so the rule stays testable and the query stays trivial.
+
+# Naming: every variable owned by this role carries the full
+# tronbyt_vllm_thinking_ prefix (ansible-lint var-naming[no-role-prefix]).
+# The externally owned secrets do NOT: tronbyt_thinking_api_key and
+# grafana_thinking_api_token are group_vars, provisioned outside this role.
+
+# Container image tag. The poller needs Pillow to compose frames, so the
+# compose file builds a small local image (Dockerfile: python:3.12-slim +
+# pinned pillow) rather than pulling python:3.12-alpine directly. Bump the
+# tag alongside a Dockerfile change so `build: always` produces a traceable
+# image name.
+tronbyt_vllm_thinking_image_tag: "2"
+
+# This service has no web interface: no proxy, no DNS alias, no Homepage entry.
+tronbyt_vllm_thinking_configure_homepage: false
+tronbyt_vllm_thinking_configure_proxy: false
+tronbyt_vllm_thinking_configure_dns: false
+
+# Storage for the rendered poller script. The path is deliberately unchanged by
+# the variable rename: docker compose derives the project name from this
+# directory, so moving it would orphan the running container.
+tronbyt_vllm_thinking_folder: "{{ docker_storage_folder }}/tronbyt-thinking"
+
+# Behaviour tuning
+tronbyt_vllm_thinking_poll_interval: 5   # seconds between metric queries
+tronbyt_vllm_thinking_min_seconds: 10    # sustained activity before "thinking"
+
+# Device and installation. office-tidbyt is the live Tidbyt; iname 100 is the
+# pushed installation created on 2026-09-08 by POST /v0/.../push. Both are
+# discovered, never invented -- see ensure_installation() in the poller.
+tronbyt_vllm_thinking_device: "office-tidbyt"
+tronbyt_vllm_thinking_iname: "100"
+
+# Prometheus datasource UID. Verified value from the Grafana datasource list;
+# overridable if the datasource is ever reprovisioned.
+tronbyt_vllm_thinking_prometheus_uid: "PBFA97CFB590B2093"
+
+# Grafana:port. The poller lives on docker-2 (tronbyt_host) while the Grafana
+# stack lives on docker-1 (grafana_host), so the URL is derived from inventory
+# in tasks/main.yaml rather than hardcoded to a host or to localhost.
+tronbyt_vllm_thinking_grafana_port: 3000
+
+# The Tronbyt server's published host port (see roles/tronbyt/vars/main.yaml).
+# Repeated here because Ansible role vars do not cross role boundaries.
+tronbyt_vllm_thinking_tronbyt_port: 8010

@@ -1,0 +1,10 @@
+---
+- name: Restart Tronbyt Thinking Poller
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ tronbyt_vllm_thinking_folder }}"
+    state: restarted
+    # Rebuild happens ONLY when this handler fires, i.e. a build input
+    # (Dockerfile, poller script, gif, compose file) actually changed.
+    build: always
+    remove_orphans: true

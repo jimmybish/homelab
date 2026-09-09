@@ -255,6 +255,19 @@
     - service_account
     - plexibot_service_account
 
+# Ensure the read-only Viewer identity used by the tronbyt_vllm_thinking poller.
+- name: Ensure Tronbyt thinking Grafana service account and token
+  ansible.builtin.include_tasks:
+    file: thinking_service_account.yaml
+    apply:
+      tags:
+        - service_account
+        - thinking_service_account
+  when: grafana_configure_thinking_service_account | default(true)
+  tags:
+    - service_account
+    - thinking_service_account
+
 # Configure SWAG Internal Proxy
 - name: Resolve grafana host IP for proxy configuration
   ansible.builtin.set_fact:
