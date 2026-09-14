@@ -546,7 +546,7 @@
       - hermes_copilot_config.model.provider == 'copilot'
       - hermes_copilot_config.model.default == hermes_copilot_model
       - hermes_copilot_config.model.base_url == 'https://api.githubcopilot.com'
-      - hermes_copilot_config.model.api_mode == 'chat_completions'
+      - hermes_copilot_config.model.api_mode == 'codex_responses'
       - hermes_copilot_config.agent.reasoning_effort == 'max'
       - hermes_copilot_config.terminal.backend == 'ssh'
       - hermes_copilot_config.terminal.ssh_host == hermes_copilot_ssh_host
