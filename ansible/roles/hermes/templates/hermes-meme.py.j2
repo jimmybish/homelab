@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""plexibot-meme - stdin-only wrapper around the meme-generation skill script.
+
+Rendered by Ansible from ansible/roles/hermes/templates/hermes-meme.py.j2.
+Do not edit the deployed copy; edit the template and redeploy.
+
+Security contract (mirrors plexibot-usermap): argv carries ONLY the fixed
+subcommand name. Every user-derived value (search query, template id,
+captions) arrives on STDIN, one field per line, delivered by the caller in a
+quoted heredoc so the shell treats it literally. This wrapper validates each
+field and then invokes the generator via a subprocess argv list; nothing
+passes through a shell and no user-derived text ever appears on a command
+line the model constructs.
+
+Stdin contracts:
+  list     : (none)                 passthrough of the generator template list
+  search   : 1 line  - search query
+  generate : line 1 = template id, following lines = captions (1-4 lines)
+
+Output images are written by this wrapper to a fixed directory under /tmp
+with a generated filename; callers never supply output paths.
+"""
+from __future__ import annotations
+
+import os
+import re
+import secrets
+import subprocess
+import sys
+import time
+
+GENERATOR = "{{ hermes_plexibot_meme_script }}"
+# The generator needs Pillow, which only exists in the Hermes venv. This
+# wrapper itself runs under whatever python the shell resolves (system
+# python3 has no PIL), so never dispatch with sys.executable.
+GENERATOR_PY = "{{ hermes_install_dir }}/venv/bin/python"
+OUTPUT_DIR = "/tmp/plexibot-memes"
+
+QUERY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,:!?&'-]{0,63}$")
+TEMPLATE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+# Captions are plain human text: letters/digits/space/common punctuation with
+# an explicit length cap. Control characters, quotes-for-tricks, and shell
+# metacharacters have no business in a meme caption, so they are rejected.
+CAPTION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,:;!?~'\"%$#&*()+-]{1,79}$")
+QUERY_MAX_LINES = 1
+CAPTION_MAX = 4
+
+
+def die(message: str) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def checked(pattern: re.Pattern[str], value: str, label: str) -> str:
+    if not pattern.match(value):
+        die(
+            f"invalid {label} (plain text only: letters, digits, spaces, and "
+            "common punctuation; no control characters or shell "
+            "metacharacters)"
+        )
+    return value
+
+
+def read_stdin_lines(max_lines: int) -> list[str]:
+    raw = sys.stdin.buffer.read(8192)
+    if not raw.strip():
+        die("stdin is empty; pipe the fields via a quoted heredoc (e.g. <<'EOF_x7k2')")
+    if b"\x00" in raw:
+        die("stdin contains a NUL byte")
+    text = raw.decode("utf-8", errors="replace")
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    if lines and lines[-1] == "":
+        lines.pop()
+    if not lines or len(lines) > max_lines:
+        die(f"expected at most {max_lines} line(s) on stdin, got {len(lines)}")
+    for line in lines:
+        if not line.strip():
+            die("stdin lines must not be blank")
+    return [line.strip() for line in lines]
+
+
+def generator_available() -> None:
+    if not os.path.isfile(GENERATOR):
+        die(f"meme generator script not found at {GENERATOR}")
+    if not os.path.isfile(GENERATOR_PY):
+        die(f"generator interpreter not found at {GENERATOR_PY}")
+
+
+def run_generator(argv_tail: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [GENERATOR_PY, GENERATOR, *argv_tail],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def cmd_list() -> None:
+    generator_available()
+    result = run_generator(["--list"])
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    sys.exit(result.returncode)
+
+
+def cmd_search() -> None:
+    (query,) = read_stdin_lines(QUERY_MAX_LINES)
+    query = checked(QUERY_RE, query, "search query")
+    generator_available()
+    result = run_generator(["--search", query])
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    sys.exit(result.returncode)
+
+
+def known_template_ids() -> set[str]:
+    result = run_generator(["--list"])
+    if result.returncode != 0:
+        die("template listing failed; cannot validate the template id")
+    tokens: set[str] = set()
+    for line in result.stdout.splitlines():
+        for token in re.split(r"[\s|,]+", line):
+            token = token.strip().strip(":").strip()
+            if token:
+                tokens.add(token.lower())
+    return tokens
+
+
+def cmd_generate() -> None:
+    lines = read_stdin_lines(1 + CAPTION_MAX)
+    template_id = checked(TEMPLATE_ID_RE, lines[0], "template id")
+    captions = [checked(CAPTION_RE, cap, "caption") for cap in lines[1:]]
+    if not captions:
+        die("at least one caption line is required after the template id")
+    generator_available()
+    if template_id.lower() not in known_template_ids():
+        die(f"unknown template id {template_id!r}; run 'plexibot-meme list' first")
+    os.makedirs(OUTPUT_DIR, mode=0o700, exist_ok=True)
+    name = f"meme-{int(time.time())}-{secrets.token_hex(4)}.png"
+    out_path = os.path.join(OUTPUT_DIR, name)
+    result = run_generator([template_id, out_path, *captions])
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+    print(f"generated {out_path}")
+
+
+USAGE = """usage: plexibot-meme <subcommand>   (values go on STDIN, never on argv)
+
+  list                         list curated meme templates (no stdin)
+  search                       stdin: 1 line  = search query
+  generate                     stdin: template id line, then 1-4 caption lines
+
+Always deliver stdin with a quoted heredoc and a random unique delimiter,
+e.g.:  plexibot-meme generate <<'EOF_p8s4'
+"""
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        print(USAGE, file=sys.stderr)
+        die("exactly one subcommand argument is required; all values go on stdin")
+    handlers = {
+        "list": cmd_list,
+        "search": cmd_search,
+        "generate": cmd_generate,
+    }
+    handler = handlers.get(sys.argv[1])
+    if handler is None:
+        print(USAGE, file=sys.stderr)
+        die(f"unknown subcommand {sys.argv[1]!r}")
+    handler()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""plexibot-usermap - Discord-to-Plex user mapping helper for Plexibot.
+
+Rendered by Ansible from ansible/roles/hermes/templates/hermes-user-map.py.j2.
+Do not edit the deployed copy; edit the template and redeploy.
+
+Security contract (stdin-only argv discipline):
+- argv carries ONLY the fixed subcommand name (list/lookup/add/update/intake).
+  No user-derived value is EVER placed on a command line, because the model
+  layer constructs shell command strings and shell metacharacters would be
+  parsed before this script ever sees the value.
+- Every user-derived value arrives on STDIN, one field per line, in the fixed
+  order documented per subcommand below. The SOUL teaches callers to deliver
+  stdin via a quoted heredoc with a random unique delimiter, so the contents
+  are shell-literal.
+- Nothing is passed through a shell, nothing is eval'd, and every field is
+  validated against a strict whitelist regex (no shell metacharacters of any
+  kind) before it can touch the mapping file or a subprocess argv list.
+- The CSV path is a fixed constant; callers cannot point this helper at
+  another file.
+
+Stdin contracts:
+  list     : (none)
+  lookup   : 1 line  - lookup value
+  add      : 3 lines - discord handle / discord user id / plex username
+  update   : 2 lines - discord user id / plex username
+  intake   : line 1 = card title, line 2 = blank, remaining lines = body
+"""
+from __future__ import annotations
+
+import csv
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+CSV_PATH = "{{ hermes_plexibot_user_map_csv }}"
+HERMES_PYTHON = "{{ hermes_install_dir }}/venv/bin/python"
+
+FIELDS = ["discord_handle", "discord_user_id", "plex_username"]
+HANDLE_RE = re.compile(r"^[A-Za-z0-9_.]{2,32}$")
+SNOWFLAKE_RE = re.compile(r"^[0-9]{15,20}$")
+PLEX_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._%+-]{0,127}$")
+# Titles must never need shell metacharacters; keep them boring plain text.
+TITLE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,:;#?!'()\[\]/+-]{2,119}$")
+# Lookup values are handles, snowflake ids, or Plex usernames. None of those
+# ever need spaces, quotes, or shell/regex metacharacters, so reject anything
+# outside this alphabet outright instead of trusting the caller's quoting.
+LOOKUP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._%+-]{0,127}$")
+BODY_MAX_BYTES = 32768
+# Field-only stdin payloads (lookup/add/update) never need to be large.
+FIELD_STDIN_MAX_BYTES = 4096
+
+
+def die(message: str) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def checked(pattern: re.Pattern[str], value: str, label: str) -> str:
+    if not pattern.match(value):
+        die(
+            f"invalid {label} (only the characters allowed for a {label} are "
+            "accepted; no shell metacharacters, spaces where disallowed, or "
+            "control characters)"
+        )
+    return value
+
+
+def read_stdin_fields(expected: int) -> list[str]:
+    """Read stdin and return exactly `expected` single-line fields.
+
+    A payload containing an embedded newline arrives here as more lines than
+    expected and is rejected, so no caller can smuggle extra fields or
+    command separators into a value.
+    """
+    raw = sys.stdin.buffer.read(FIELD_STDIN_MAX_BYTES + 1)
+    if len(raw) > FIELD_STDIN_MAX_BYTES:
+        die(f"stdin exceeds {FIELD_STDIN_MAX_BYTES} bytes")
+    if not raw.strip():
+        die(
+            f"stdin is empty; pipe exactly {expected} line(s) via a quoted "
+            "heredoc (e.g. <<'EOF_x7k2')"
+        )
+    if b"\x00" in raw:
+        die("stdin contains a NUL byte")
+    text = raw.decode("utf-8", errors="replace")
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    if lines and lines[-1] == "":
+        lines.pop()  # trailing newline that terminates the last field
+    if len(lines) != expected:
+        die(
+            f"expected exactly {expected} line(s) on stdin, got {len(lines)}; "
+            "values may not contain newlines"
+        )
+    for line in lines:
+        if not line.strip():
+            die("stdin lines must not be blank")
+    return lines
+
+
+def load_rows() -> list[list[str]]:
+    if not os.path.exists(CSV_PATH):
+        return []
+    rows: list[list[str]] = []
+    with open(CSV_PATH, newline="", encoding="utf-8") as handle:
+        reader = csv.reader(handle, delimiter="|")
+        for index, row in enumerate(reader):
+            if not row or all(not cell.strip() for cell in row):
+                continue
+            if index == 0 and row[0].strip().lower() == FIELDS[0]:
+                continue  # header line
+            if len(row) != 3:
+                die(f"mapping file line {index + 1} is malformed; refusing to continue")
+            rows.append([cell.strip() for cell in row])
+    return rows
+
+
+def save_rows(rows: list[list[str]]) -> None:
+    directory = os.path.dirname(CSV_PATH)
+    if not os.path.isdir(directory):
+        die(f"mapping directory does not exist: {directory}")
+    # Preserve the existing file's mode across rewrites; never widen
+    # permissions implicitly (the old code forced 0664 on every write).
+    existing_mode = None
+    if os.path.exists(CSV_PATH):
+        existing_mode = os.stat(CSV_PATH).st_mode & 0o7777
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".user_map.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle, delimiter="|", lineterminator="\n")
+            writer.writerow(FIELDS)
+            for row in rows:
+                writer.writerow(row)
+        os.chmod(tmp_path, existing_mode if existing_mode is not None else 0o600)
+        os.replace(tmp_path, CSV_PATH)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+
+def cmd_list() -> None:
+    rows = load_rows()
+    print("|".join(FIELDS))
+    for row in rows:
+        print("|".join(row))
+
+
+def cmd_lookup() -> None:
+    (value,) = read_stdin_fields(1)
+    value = checked(LOOKUP_RE, value, "lookup value")
+    lowered = value.lower()
+    hits = [row for row in load_rows() if row[0].lower() == lowered or row[1] == value or row[2].lower() == lowered]
+    if not hits:
+        print(f"no mapping found for {value}")
+        sys.exit(1)
+    for row in hits:
+        print("|".join(row))
+
+
+def cmd_add() -> None:
+    handle, user_id, plex_user = read_stdin_fields(3)
+    handle = checked(HANDLE_RE, handle, "discord handle")
+    user_id = checked(SNOWFLAKE_RE, user_id, "discord user id")
+    plex_user = checked(PLEX_RE, plex_user, "plex username")
+    rows = load_rows()
+    for row in rows:
+        if row[1] == user_id:
+            die(f"a mapping already exists for discord user id {user_id}; use update instead")
+        if row[0].lower() == handle.lower():
+            die(f"a mapping already exists for discord handle {handle}")
+    rows.append([handle, user_id, plex_user])
+    save_rows(rows)
+    print(f"added {handle}|{user_id}|{plex_user}")
+
+
+def cmd_update() -> None:
+    user_id, plex_user = read_stdin_fields(2)
+    user_id = checked(SNOWFLAKE_RE, user_id, "discord user id")
+    plex_user = checked(PLEX_RE, plex_user, "plex username")
+    rows = load_rows()
+    matches = [row for row in rows if row[1] == user_id]
+    if not matches:
+        die(f"no mapping exists for discord user id {user_id}; use add first")
+    matches[0][2] = plex_user
+    save_rows(rows)
+    print(f"updated {matches[0][0]}|{user_id}|{plex_user}")
+
+
+def cmd_intake() -> None:
+    """File a change-request card. Title, blank line, then body arrive on stdin.
+
+    Fixed board/assignee/created-by values are baked into this helper; the
+    caller controls NOTHING on the argv line.
+    """
+    raw = sys.stdin.buffer.read(BODY_MAX_BYTES + 2048)
+    if len(raw) > BODY_MAX_BYTES + 2048:
+        die("stdin exceeds the intake size limit")
+    if b"\x00" in raw:
+        die("request body contains a NUL byte")
+    text = raw.decode("utf-8", errors="replace")
+    lines = text.split("\n")
+    title = lines[0].rstrip("\r").strip()
+    if len(lines) < 2 or lines[1].strip() != "":
+        die("intake stdin must be: title line, then a blank line, then the body")
+    if not title:
+        die("card title is empty")
+    title = checked(TITLE_RE, title, "card title")
+    body = "\n".join(lines[2:]).strip()
+    if not body:
+        die("request body is empty; put the request text after the blank line")
+    encoded = body.encode("utf-8")
+    if len(encoded) > BODY_MAX_BYTES:
+        die(f"request body exceeds {BODY_MAX_BYTES} bytes")
+    if os.path.exists(HERMES_PYTHON):
+        argv = [HERMES_PYTHON, "-m", "hermes_cli.main"]
+    else:
+        launcher = shutil.which("hermes")
+        if not launcher:
+            die("hermes CLI not found; cannot file the card")
+        argv = [launcher]
+    argv += [
+        "kanban", "--board", "homelab",
+        "create", title,
+        "--body", body,
+        "--assignee", "virtuajimmy",
+        "--created-by", "plexibot",
+    ]
+    result = subprocess.run(argv, check=False)
+    sys.exit(result.returncode)
+
+
+USAGE = """usage: plexibot-usermap <subcommand>   (values go on STDIN, never on argv)
+
+  list                         print the full mapping file (no stdin)
+  lookup                       stdin: 1 line  = lookup value
+  add                          stdin: 3 lines = handle / discord id / plex name
+  update                       stdin: 2 lines = discord id / plex name
+  intake                       stdin: title line, blank line, request body
+
+Always deliver stdin with a quoted heredoc and a random unique delimiter,
+e.g.:  plexibot-usermap lookup <<'EOF_x7k2'
+"""
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        print(USAGE, file=sys.stderr)
+        die("exactly one subcommand argument is required; all values go on stdin")
+    command = sys.argv[1]
+    handlers = {
+        "list": cmd_list,
+        "lookup": cmd_lookup,
+        "add": cmd_add,
+        "update": cmd_update,
+        "intake": cmd_intake,
+    }
+    handler = handlers.get(command)
+    if handler is None:
+        print(USAGE, file=sys.stderr)
+        die(f"unknown subcommand {command!r}")
+    handler()
+
+
+if __name__ == "__main__":
+    main()

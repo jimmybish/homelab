@@ -111,6 +111,7 @@ The following manually installed project skills define the expected workflows an
 - `homeassistant-dashboards`: Create or edit Home Assistant Lovelace dashboards using established layout and card patterns.
 - `pfsense-api-inspection`: Perform read-only inspection of pfSense routing, DNS, VPN, NAT, firewall rules, states, and logs.
 - `mcp-server-creation`: Build a complete MCP server, Docker image, Ansible deployment role, client configuration, and agent integration.
+- `kanban-task-triage`: Decompose a kanban change-request card into a child-card DAG before touching code (fit test, turn estimates, deploy fan-in).
 
 ## MCP Servers
 
@@ -133,6 +134,58 @@ If an MCP server lacks the required tool, explain the limitation and ask for con
 - MCP server source and other repository files may be changed when the task requires it, but follow infrastructure-as-code and validation rules.
 - Never reset passwords, regenerate tokens, or create credentials merely to gain access. Report missing authentication and let the user decide how to proceed.
 - Respect manual approvals, Tirith denials, unattended-mode restrictions, and all configured tool limits. Never work around a policy control.
+
+## Kanban Pipeline (Homelab Board)
+
+You are the implementer in a kanban pipeline on the `homelab` board. The dispatcher spawns you with a task already assigned; orient with `kanban_show` first (body, comments, prior attempts).
+
+Card types you receive:
+1. **Change request** — FIRST load and follow the `kanban-task-triage` skill: research read-only, estimate turns, then either do the job in place (fits ~50 turns) or file a child-card DAG (parallel dev cards, one fan-in deploy card). The card that holds the DAG does not also grind the work. Dev cards edit + syntax-check + stage their own files only; the deploy card owns the single playbook run, idempotency rerun, verification, and review handoff.
+2. **Fix request (round N)** — Copilot failed a review; the card body carries the blocking findings verbatim. Fix those (plus what they strictly require), re-stage, re-verify. No re-triage unless the fix genuinely outgrew one card, in which case note it in the block reason rather than silently splitting.
+
+Hard rules on every card:
+- All repo work happens through your SSH terminal in `/srv/homelab`.
+- **Never commit, never push.** Stage with `git add` only the files you changed. List them exactly, one per line, in your completion summary. If pre-existing staged changes are present, leave them alone and list them separately as "pre-existing".
+- Verify the deployed behavior before calling anything done (syntax checks, playbook run, curl the service, container health). Record exactly what you tested and any risk.
+- Send `kanban_heartbeat` during long deploys so your claim is not reclaimed.
+- Append the changelog entry as the mandatory last step before `kanban_complete` — see "Change Log" below. Missing changelog = failed card.
+- Finish with `kanban_complete`: `summary` = what changed, staged files, how it was tested, remaining risks; `metadata` = `{changed_files, tests_run, decisions}`.
+
+Change Log (MANDATORY LAST STEP of every worker run — dev cards, deploy cards, in-place change requests, and fix rounds alike):
+- Before calling `kanban_complete`, append one CAB-format entry (per the `change-logging` skill) to `changelogs/week-YYYY-MM-DD/log_YYMMDD.md` on mgmt, where `YYYY-MM-DD` is the most recent Sunday and `YYMMDD` is today. Create the week folder/file if missing; separate same-file entries with `---`.
+- The entry must record: files changed (staged list), commands run on hosts with outcomes, verification evidence, and a rollback plan.
+- Changelog files are gitignored and are NEVER `git add`ed, committed, or pushed. Verify with `git ls-files changelogs/` returning nothing before you complete.
+- This step is not optional and not deferrable to the deploy card or a later card. Every run that touched files, hosts, or config emits its own entry, even when another card already logged the same feature area.
+
+Handoff to review (before completing):
+- Create the review card with `kanban_create`: `assignee: copilot`, `parents: [<your task id>]`, title `Review (round N): <change>` (N continues from the prior review card, starting at 1). Body must contain: the exact staged file list, how to deploy/verify, and the change-request card id.
+- **Loop cap:** if a fix card would start round 4 or later, do NOT create another review card — `kanban_block` your card, summarise the deadlock, and let Jimmy decide.
+
+## Chat Intake (direct sessions, not dispatcher-spawned workers)
+
+When someone talks to you directly (Discord or any channel) instead of a card being assigned:
+
+- Requests that **change code or infrastructure** (config edits, deploys, role changes, DNS, firewall, dashboards-as-code) must go through the kanban pipeline. Do not make the change in chat.
+- File it **only** with the intake helper. The title, a blank line, and the request text — the whole chat request verbatim plus any recon you gathered — all arrive on stdin through a **quoted heredoc**, never as a command argument:
+
+  ```
+  {{ hermes_vj_intake_bin }} intake <<'HERMES_VJ_INTAKE_7f3c91a2e8604d69b58fe04c7a12d835'
+  <short title you write, a few plain words>
+
+  <whole request verbatim, exactly as typed by the user, plus your recon>
+  HERMES_VJ_INTAKE_7f3c91a2e8604d69b58fe04c7a12d835
+  ```
+
+  Choose a fresh delimiter consisting of `HERMES_VJ_INTAKE_` followed by at least 32 random hexadecimal characters. Before emitting the command, compare the candidate with every line of the complete title/body payload. If any line exactly equals the candidate, generate another candidate and check again. Use the verified candidate unchanged in both delimiter positions. The opening delimiter MUST stay single-quoted so the shell passes the payload literally. The helper runs `hermes kanban create` for you with the fixed board/assignee and prints the new card id on stdout. Reply with that card id and stop; the dispatcher spawns the worker and the triage skill handles decomposition. Never set a workspace.
+- To check the board, use `{{ hermes_vj_intake_bin }} list` (no stdin, no arguments). That is the only other thing this helper does.
+
+**Hard rules:**
+- **No user-derived text may EVER appear on a command line, flag value, or filename — not even inside quotes.** Model-constructed quoting is not a security control: a single apostrophe in a chat message breaks the quoting and everything after it is shell. Command lines contain only the helper path and its fixed subcommand name; all values travel on stdin through a quoted heredoc whose long random delimiter has first been verified absent from the complete stdin payload as an exact line.
+- **Never call `hermes kanban create` (or any other `hermes kanban` mutation) directly in a chat session.** Card creation goes through the helper's `intake` subcommand, and nothing else.
+- The title must be plain words (letters, digits, spaces, and `._:-`); the helper rejects anything else. That is intended behavior: rewrite the title plainly and put everything else in the body. If the helper rejects something, report what was rejected — do not work around it.
+- Read-only work stays direct: status checks, metrics/PromQL/Loki queries, log triage, health questions, explaining configs, Plex/Tracearr/Sonarr/Radarr MCP queries. Answer normally, no card.
+- Chat sessions never edit repo files, never run deploy playbooks, never `git add`/commit/push, even for "one-line" changes. No exceptions.
+- Genuinely ambiguous (question vs change)? Ask one clarifying question; default to filing a card when it smells like a mutation.
 
 ## Completion Standard
 

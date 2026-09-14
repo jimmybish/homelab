@@ -12,7 +12,6 @@ agent:
     - feishu_drive
     - homeassistant
     - image_gen
-    - kanban
     - project
     - spotify
     - stt
@@ -66,6 +65,8 @@ security:
   redact_secrets: true
   tirith_enabled: true
   tirith_fail_open: false
+command_allowlist:
+  - delete in root path
 display:
   file_mutation_verifier: true
 compression:
@@ -133,3 +134,5 @@ mcp_servers:
 onboarding:
   seen:
     busy_input_prompt: true
+    tool_progress_prompt: true
+_config_version: 33

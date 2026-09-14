@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""hermes-vj-intake - kanban change-request intake helper for VirtuaJimmy.
+
+Rendered by Ansible from ansible/roles/hermes/templates/hermes-vj-intake.py.j2.
+Do not edit the deployed copy; edit the template and redeploy.
+
+Security contract (stdin-only argv discipline, mirroring plexibot-usermap):
+- argv carries ONLY the fixed subcommand name (intake/list). No user-derived
+  value is EVER placed on a command line, because the model layer constructs
+  shell command strings and shell metacharacters would be parsed before this
+  script ever sees the value. A single apostrophe in a chat message is enough
+  to terminate model-constructed quoting; quoting is not a security boundary.
+- Every user-derived value arrives on STDIN: the intake contract is a title
+    line, a blank line, then the whole chat request verbatim. The SOUL teaches
+    callers to deliver stdin via a quoted heredoc with a long random delimiter
+    verified not to equal any title/body line.
+- Nothing is passed through a shell, nothing is eval'd. The title is
+  validated against a strict whitelist; the body never reaches a shell at all
+  (it is passed as ONE argv element to the hermes CLI, which is safe - it is
+  shell PARSING that must be eliminated). Body sanitation is limited to
+  control-character rejection and a size cap, for file-safety.
+- Board, assignee, and created-by are baked into this helper; the caller
+  controls NOTHING on the argv line beyond the subcommand name.
+
+Stdin contracts:
+  intake : line 1 = card title, line 2 = blank, remaining lines = request body
+  list   : (no stdin; fixed `hermes kanban list --board homelab`)
+"""
+from __future__ import annotations
+
+import json
+import re
+import os
+import shutil
+import subprocess
+import sys
+
+BOARD = "homelab"
+ASSIGNEE = "virtuajimmy"
+CREATED_BY = "virtuajimmy"
+HERMES_PYTHON = "{{ hermes_install_dir }}/venv/bin/python"
+
+# Titles must never need shell metacharacters; keep them boring plain text.
+TITLE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._:-]{3,79}$")
+BODY_MAX_BYTES = 65536
+# Any control character other than newline and tab is rejected in the body.
+BODY_BAD_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def die(message: str) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def hermes_argv() -> list[str]:
+    """Return the fixed argv prefix for the hermes CLI (no shell involved)."""
+    if os.path.exists(HERMES_PYTHON):
+        return [HERMES_PYTHON, "-m", "hermes_cli.main"]
+    launcher = shutil.which("hermes")
+    if not launcher:
+        die("hermes CLI not found; cannot file the card")
+    return [launcher]
+
+
+def cmd_intake() -> None:
+    """File a change-request card. Title, blank line, then body arrive on stdin.
+
+    Fixed board/assignee/created-by values are baked into this helper; the
+    caller controls NOTHING on the argv line.
+    """
+    raw = sys.stdin.buffer.read(BODY_MAX_BYTES + 2048)
+    if len(raw) > BODY_MAX_BYTES + 2048:
+        die(f"stdin exceeds the intake size limit ({BODY_MAX_BYTES} bytes for the body)")
+    if b"\x00" in raw:
+        die("request contains a NUL byte")
+    text = raw.decode("utf-8", errors="replace")
+    lines = text.split("\n")
+    title = lines[0].rstrip("\r").strip()
+    if len(lines) < 2 or lines[1].rstrip("\r").strip() != "":
+        die("intake stdin must be: title line, then a blank line, then the body")
+    if not title:
+        die("card title is empty")
+    if not TITLE_RE.match(title):
+        die(
+            "invalid card title (letters, digits, spaces, and . _ : - only, "
+            "4-80 chars, starting with a letter or digit; rewrite the title "
+            "in plain words and put everything else in the body)"
+        )
+    body_lines = [line.rstrip("\r") for line in lines[2:]]
+    body = "\n".join(body_lines).strip()
+    if not body:
+        die("request body is empty; put the request text after the blank line")
+    if BODY_BAD_CHARS_RE.search(body):
+        die("request body contains control characters (only newline and tab are allowed)")
+    if len(body.encode("utf-8")) > BODY_MAX_BYTES:
+        die(f"request body exceeds {BODY_MAX_BYTES} bytes")
+    argv = hermes_argv() + [
+        "kanban", "--board", BOARD,
+        "create", title,
+        "--body", body,
+        "--assignee", ASSIGNEE,
+        "--created-by", CREATED_BY,
+        "--json",
+    ]
+    result = subprocess.run(argv, check=False, capture_output=True, text=True)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    try:
+        payload = json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        sys.stdout.write(result.stdout)
+        sys.exit(result.returncode)
+    card_id = None
+    if isinstance(payload, dict):
+        for key in ("task_id", "id", "card_id"):
+            value = payload.get(key)
+            if isinstance(value, str) and value:
+                card_id = value
+                break
+        if card_id is None:
+            task = payload.get("task")
+            if isinstance(task, dict) and isinstance(task.get("id"), str):
+                card_id = task["id"]
+    if card_id is None:
+        sys.stdout.write(result.stdout)
+        sys.exit(result.returncode)
+    print(card_id)
+    sys.exit(result.returncode)
+
+
+def cmd_list() -> None:
+    """Show the board. Fixed argv; no user-derived text anywhere."""
+    argv = hermes_argv() + ["kanban", "--board", BOARD, "list"]
+    result = subprocess.run(argv, check=False)
+    sys.exit(result.returncode)
+
+
+USAGE = """usage: hermes-vj-intake <subcommand>   (all user text goes on STDIN, never on argv)
+
+  intake    stdin: title line, blank line, whole chat request verbatim
+  list      print the homelab board (no stdin)
+
+Always deliver intake stdin with a quoted heredoc. Use a long random
+delimiter and verify that it does not equal any title/body line before use,
+e.g.: hermes-vj-intake intake <<'HERMES_VJ_INTAKE_7f3c91a2e8604d69b58fe04c7a12d835'
+"""
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        print(USAGE, file=sys.stderr)
+        die("exactly one subcommand argument is required; all user text goes on stdin")
+    command = sys.argv[1]
+    handlers = {
+        "intake": cmd_intake,
+        "list": cmd_list,
+    }
+    handler = handlers.get(command)
+    if handler is None:
+        print(USAGE, file=sys.stderr)
+        die(f"unknown subcommand {command!r}")
+    handler()
+
+
+if __name__ == "__main__":
+    main()

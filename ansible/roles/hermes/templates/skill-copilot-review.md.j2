@@ -1,0 +1,151 @@
+{#- Rendered by Ansible; deployed copy is read-only for the agent. -#}
+---
+name: copilot-review
+description: 'Use when: reviewing staged homelab changes on a kanban review card. Verdict + fix cards only; never edit, stage, or deploy.'
+---
+
+# Copilot Review
+
+Method for reviewing a staged change set on the `homelab` board. You are the
+gate, not the author. Read the deployed repo baseline first
+(`{{ hermes_copilot_baseline_file }}` on the Hermes host) — it is the
+Hermes adaptation of `.github/copilot-instructions.md` and defines repo rules,
+working style, change-logging mandate, and the profile map.
+
+## Hard rule: never mutate (finding 2)
+
+Your SSH identity on mgmt is write-capable. That is an owner decision, not a
+bug — do not request or build a read-only identity, and do not use the write
+access. On review cards you:
+
+- never edit any file, never `git add`/`commit`/`push`/`reset`/`stash`/`rebase`,
+- never run a deploy playbook or any command that changes live state,
+- never fix a finding yourself, even a one-liner, even when the fix is obvious.
+
+All output goes into the card: verdict in the completion summary, findings
+verbatim in exactly one fix card via `kanban_create` (`assignee: virtuajimmy`,
+`parents: [<your card id>]`). If you catch yourself typing an edit command,
+stop and put the instruction in the fix card instead.
+
+Allowed commands: `git status`, `git diff`, `git diff --cached`,
+`git ls-files`, `git show`, `git log`, `cat`/`read`, `grep`, `ansible-lint`
+(scoped), `ansible-playbook --syntax-check`, `ansible-vault view` (never echo
+plaintext), `stat`, `sha256sum`, `yamllint`, `--check`/`--dry-run` inspection
+that cannot write. Anything ambiguous: if it can change state, it is out.
+
+## Staging reconciliation (finding 4)
+
+The card's claimed file list is a CLAIM, not ground truth. Derive reality:
+
+```
+cd /srv/homelab && git diff --cached --name-only
+```
+
+Then compare set-to-set against the card body / implementer summary:
+
+- **Extra file staged** (in git, not on the card) → FAIL. Unreviewed content
+  is about to ship.
+- **Missing file** (on the card, not staged) → FAIL. The change is incomplete;
+  templates without their tasks/vars wiring deploy nothing.
+- Both sets identical → record the derived list verbatim in your summary so
+  downstream rounds can diff against it.
+
+Also run `git status --short` and check the two-column form: ` M` (modified,
+unstaged) on a file the card claims as done means the staged blob is NOT what
+was tested — FAIL, and say which content the index actually holds
+(`git diff -- <path>` shows worktree-ahead-of-index). List pre-existing
+staged entries the card disclaims separately; they are not a mismatch, but
+confirm they are disclaimed, not merely ignored.
+
+## Security bar
+
+A change is blocking if ANY of these hold:
+
+- **Untrusted input interpolated into shell.** Any Ansible `command:`/`shell:`/
+  `argv:` item or inline script (Jinja-rendered helper snippets, n8n/Hermes
+  templates) that splices a variable, fact, or lookup result into a shell
+  string without `shlex.quote`, an argv list, or a validated enum. Treat
+  template-rendered shell as untrusted input by default. HIGH severity even
+  when today's values are trusted — the next value comes from somewhere else.
+  Check for helper-script replacements: a deployed script with argv handling
+  beats inline templated shell.
+- **SOUL/helper templates teaching command-line interpolation.** Audit any
+  SOUL or helper template in the staged set for user-derived text reaching a
+  command line: grep the template text for quoted model-inserted arguments
+  (e.g. `create "<title>"`, `--body "<request>"`, any `"<...>"` or
+  `<placeholder>` sitting inside a command example the agent is told to run).
+  FAIL on any occurrence, regardless of card brief. Quoting is not a boundary:
+  one apostrophe in the derived text terminates it. The only acceptable shape
+  is a bare helper path + fixed subcommand with values on stdin via a quoted
+  heredoc.
+- **Secret handling.** Plaintext token/key in diff, filename, or var name;
+  credential-handling task missing `no_log: true` or `diff: false`; vaulted
+  value rotated/regenerated without Jimmy asking; secrets reaching logs or
+  changelogs. Verify vault resolution behaviorally (`ansible-vault view`),
+  not by file header.
+- **Capability boundaries.** Firewall opened wider than the task requires;
+  new SSH routes; a profile granted permissions its SOUL does not justify;
+  mode/ownership regressions on private files (expect `0600`, owner
+  `hermes_user`); a check-mode or syntax-only change claimed as deployed.
+- **Idempotency.** Tasks that report changed on every run, `command:` without
+  `changed_when`, template churn (non-deterministic ordering), handlers that
+  never fire because the notifying task cannot change. A non-idempotent deploy
+  poisons every later verification run — treat as blocking.
+
+## PII scoping (finding 5)
+
+PII means private or identifying infrastructure values. BLOCKING when these
+appear in plaintext where vault-protected vars belong:
+
+- internal hostnames and LAN/CVE-internal domains (e.g. `<host>.<internal domain>`),
+- private IP addresses, MAC addresses, VLAN/subnet layouts,
+- user-identifying data: usernames tied to private systems, chat IDs, contact info,
+- per-site identifiers that would let an outsider map the network.
+
+NOT PII, explicitly permitted anywhere in the repo:
+
+- public vendor domains and endpoints (`api.githubcopilot.com`,
+  `api.nousresearch.com`, `registry.hub.docker.com`, `mcp.context7.com`,
+  public project docs sites, etc.),
+- public package names, public container image names, public API doc URLs.
+
+Do not FAIL a diff for containing a public vendor domain, and do not file a
+finding demanding it move to vault vars. Do FAIL for internal names hardcoded
+in templates, docs, changelogs, agent/skill definitions, or inventory. When
+unsure whether a domain is public: resolve it (is it public-internet DNS with
+a public cert?) or cite the vendor's public docs; say which check settled it.
+
+## Review workflow
+
+1. `kanban_show` the review card; note the parent change-request card id and
+   the implementer's claimed staged list + test evidence.
+2. Derive the real staging list (above) and reconcile. Mismatch = FAIL, stop
+   early — reviewing files nobody staged wastes the round.
+3. Read the repo standards for touched areas: `.github/copilot-instructions.md`
+   equivalents are in your baseline; per-task skills are under
+   `.github/skills/*/SKILL.md`; runbooks under `ansible/docs/`.
+4. `git diff --cached -- <scope paths>` as the primary artifact. Read the full
+   file for each template changed, not just hunks.
+5. Mechanical checks where practical: scoped `ansible-lint`,
+   `ansible-playbook -i inventory.yaml <playbook> --syntax-check`. Report
+   each check with its result; unverified ≠ clean, call it out.
+6. Secret/PII sweep over the diff: private-domain regexes, `BEGIN PRIVATE
+   KEY`, `gh[pousr]_`, `github_pat_`, `password=`, `token=`, `secret=`.
+7. Change-log entry exists under `changelogs/` per the `change-logging`
+   skill (gitignored, so verify on disk with `ls`/`cat`, not git).
+8. Verdict. `PASS` or `FAIL` first line, every finding with `file:line` or
+   command-output evidence, blocking separated from non-blocking, then the
+   kanban handoff per your SOUL (one fix card on FAIL, blocked COMMIT READY
+   card on PASS).
+
+## Pitfalls
+
+- Reviewing the worktree while the index holds different content — always
+  anchor on `git diff --cached`; note worktree drift as its own finding.
+- Accepting "deployed successfully" from the implementer's prose when the
+  staged templates would render something else. If the claim matters, check
+  the staged blob with `git show :<path>`.
+- Echoing a secret or full PII value in the verdict to explain a finding —
+  redact to `***` and cite `file:line`.
+- Round inflation: one fix card per round, findings verbatim, no re-triage
+  suggestions. Round 4+ → block for Jimmy per the SOUL loop cap.

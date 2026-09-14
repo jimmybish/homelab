@@ -1,0 +1,131 @@
+---
+name: kanban-task-triage
+description: 'Use when: starting any kanban change-request card. Decompose into a child-card DAG before touching code.'
+---
+
+# Kanban Task Triage
+
+Every **change request** card on the `homelab` board starts here, before any
+editing. A budget-killed worker cannot spawn its own continuation — the turn
+kill lands mid-run — so decomposition is the *first* act, not a rescue. This
+card either does the whole job in place or files the DAG that does.
+
+## Step 0 — Fit test (before anything else)
+
+Estimate the whole job (use the calibration table below). If the entire job —
+research, dev, deploy, verify, stage, changelog — fits under ~50 turns,
+**skip decomposition**: do it in this card, hand off review, done. Ceremony
+over a one-card job costs more than it saves. Decompose when the estimate is
+>~50 turns or there are clear phase boundaries (multiple dev streams, a
+deploy tail, an audit-style inventory phase).
+
+## Step 1 — Research, read-only
+
+Inventory what exists: live state, repo files, templates, prior cards
+(`kanban_show` siblings). This phase is read-only — no edits, no vault
+writes, nothing that could leave the repo half-changed if this card dies.
+Keep it under ~15 turns: if you cannot map the job's shape in 15 turns,
+you are rat-holing; write what you know into child briefs as "verify this
+assumption" instead of exploring further.
+
+## Step 2 — Cut the DAG
+
+Split ONLY on these axes:
+
+1. **Deploy blast radius.** Everything touched by one playbook run lives in
+   ONE deploy card. Dev cards never deploy; they edit + `--syntax-check`
+   only. Never split the deploy to make budgets — if the deploy card alone
+   estimates >60 turns the job's scope is wrong: `kanban_block` and escalate.
+2. **Turn estimate.** Each dev card ≤ ~50 turns.
+3. **Briefability.** If a child's body needs >30 lines of context to be
+   executable by a fresh worker, it is entangled with its sibling — merge.
+4. **Failure isolation.** If child B dies, is child A's output still useful?
+   Split only where the answer is yes.
+
+Explicitly NOT split axes:
+- **Per file.** File count is not cost; the deploy is. Six per-file cards
+  means six gateway restarts and loses atomicity. Files are card units only
+  when they are in genuinely independent subsystems.
+- **Per action.** "write / encrypt / lint" as three cards turns one 15-turn
+  unit into three cards that each burn 5 turns re-verifying each other.
+  Steps that don't fail independently at scale don't get their own card.
+- Dev + its own syntax check are ONE card, always.
+
+Calibration from real runs (what 90 turns actually bought vs cost):
+- read + diff ~14 live configs vs templates: ~15 turns
+- author 6 existing templates + syntax-check loops: ~50 turns
+- author new profile templates + SOUL + vault wiring: ~30 turns
+- vault encrypt + variable wiring + re-encrypt fixes: ~30 turns
+- full deploy + restarts + service asserts + idempotency rerun + stage: ~40 turns
+- handoff tax: every extra child card re-verifies state: ~5-8 turns each
+
+## Step 3 — File the children
+
+`kanban_create` per child: `title`, `assignee` (virtuajimmy for dev/deploy,
+copilot for review), `parents: [<this card id>]` (or the dev ids for the
+deploy fan-in). Children auto-promote to `ready` when all parents complete,
+so parented dev cards file `ready` immediately and run **in parallel** —
+require disjoint file sets for parallel dev cards; overlap forces
+parent-chaining (B `parents: [A]`).
+
+Ideal shape for a templating/config job:
+
+```
+this triage card (~15-20 turns, files children, then completes)
+  ├── Dev A: subsystem 1 (~30)   ──┐
+  ├── Dev B: subsystem 2 (~50)   ──┼── disjoint files, parallel
+  ├── Dev C: subsystem 3 (~30)   ──┘
+  │       (each: edit + --syntax-check, git add own files,
+  │        append changelog entry (unstaged))
+  └── Deploy card  parents=[A,B,C] (~40): one playbook run, idempotency
+          rerun, service asserts, git add remainder, its own changelog
+          entry (unstaged) — then the
+          usual review handoff (kanban_create copilot, parents=[deploy])
+                └── Review (round N) → copilot
+                      └── PASS → COMMIT READY (blocked; Jimmy's gate)
+```
+
+Every child body must contain, and nothing more:
+- **Deliverable as verifiable on-disk state** — `git status` shows X
+  staged, `--syntax-check` passes, `ansible-vault view` shows Y. The next
+  worker checks with one command, never trusts a predecessor's prose.
+- **Changelog entry in the child's OWN deliverable** — every dev AND deploy
+  child body ends its Deliverable with "append changelog entry (unstaged):
+  `changelogs/week-YYYY-MM-DD/log_YYMMDD.md`, CAB format per the
+  change-logging skill, never git-added". Do not put the changelog only on
+  the deploy card; per-run logging means per-card logging.
+- **Exact file scope** ("touch only these files") so parallel cards can't
+  collide.
+- **What NOT to do**: no commits, no pushes, no deploys from dev cards, no
+  drive-by fixes; pre-existing staged changes stay untouched and get listed.
+- Pointers, not payloads: vault var names, playbook paths, doc paths — not
+  file contents (children read the disk themselves; copying contents into
+  briefs goes stale).
+
+## Step 4 — Close this card
+
+`kanban_complete` with summary = the DAG you filed (child ids + one line
+each) and the estimate table you used. If even the triage can't fit the DAG
+in budget (huge audit jobs), file **plan children** (research/spec cards,
+assignee virtuajimmy, no code) instead of code children — never leave a
+half-mapped job that dies without filing anything.
+
+## Pitfalls
+
+- **Budget exhaustion is a design smell.** Today's reference failure: one
+  90-turn card (drift analysis + 9 templates + vault + deploy + idempotency)
+  died at ~85% twice; the disk state survived but two full runs burned
+  before a continuation card could be scoped. That's the cost of skipping
+  this skill.
+- **Estimates are not truth.** State them in the completion summary so the
+  next triage can recalibrate.
+- **Children get fresh sessions, not your memory.** Anything not in the
+  body or on disk does not exist.
+- **Workspace fields:** leave `workspace_kind`/`workspace_path` unset —
+  this repo is reached through the profile's SSH terminal at
+  `/srv/homelab` on mgmt, not through Hermes workspace checkouts.
+- **Loop cap unchanged:** rounds count on review card titles; round 4 →
+  block and escalate, per SOUL.
+- **Skip-triage abuse:** "it looks small" is not a fit test — run the
+  estimate. If a decomposed job turns out to fit one card anyway, fine:
+  file zero children and do it, the triage cost was cheap.

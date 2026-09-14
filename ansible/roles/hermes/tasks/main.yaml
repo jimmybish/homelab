@@ -360,6 +360,31 @@
       %s
   notify: Restart Hermes Plexibot gateway
 
+- name: Deploy Plexibot identity
+  ansible.builtin.template:
+    src: profile-plexibot-soul.md.j2
+    dest: "{{ hermes_plexibot_soul_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  notify: Restart Hermes Plexibot gateway
+
+- name: Deploy Plexibot user-map helper script
+  ansible.builtin.template:
+    src: hermes-user-map.py.j2
+    dest: "{{ hermes_plexibot_usermap_bin }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0755'
+
+- name: Deploy Plexibot meme wrapper script
+  ansible.builtin.template:
+    src: hermes-meme.py.j2
+    dest: "{{ hermes_plexibot_meme_bin }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0755'
+
 - name: Deploy VirtuaJimmy Hermes profile config
   ansible.builtin.template:
     src: profile-virtuajimmy-config.yaml.j2
@@ -380,6 +405,28 @@
     owner: "{{ hermes_user }}"
     group: "{{ hermes_user }}"
     mode: '0600'
+  notify: Restart Hermes VirtuaJimmy gateway
+
+- name: Deploy VirtuaJimmy kanban intake helper script
+  ansible.builtin.template:
+    src: hermes-vj-intake.py.j2
+    dest: "{{ hermes_vj_intake_bin }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0755'
+    validate: >-
+      {{ hermes_install_dir }}/venv/bin/python -c
+      'import ast,pathlib,sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))'
+      %s
+
+- name: Deploy VirtuaJimmy kanban-task-triage skill
+  ansible.builtin.template:
+    src: skill-kanban-task-triage.md.j2
+    dest: "{{ hermes_virtuajimmy_triage_skill_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0644'
+    directory_mode: '0700'
   notify: Restart Hermes VirtuaJimmy gateway
 
 - name: Deploy VirtuaJimmy profile environment
@@ -403,6 +450,149 @@
   no_log: true
   diff: false
   notify: Restart Hermes VirtuaJimmy gateway
+
+- name: Create Copilot SSH directory
+  ansible.builtin.file:
+    path: "{{ hermes_copilot_ssh_dir }}"
+    state: directory
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0700'
+
+- name: Deploy Copilot SSH private key
+  ansible.builtin.copy:
+    content: "{{ hermes_copilot_ssh_private_key }}{{ '\n' }}"
+    dest: "{{ hermes_copilot_ssh_private_key_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  no_log: true
+  diff: false
+
+- name: Deploy Copilot profile metadata
+  ansible.builtin.copy:
+    content: |
+      description: Chat profile backed by GitHub Copilot as the model provider.
+      description_auto: false
+    dest: "{{ hermes_copilot_profile_dir }}/profile.yaml"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+
+- name: Deploy Copilot identity
+  ansible.builtin.template:
+    src: profile-copilot-soul.md.j2
+    dest: "{{ hermes_copilot_soul_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+
+- name: Deploy Copilot repo baseline
+  ansible.builtin.template:
+    src: profile-copilot-baseline.md.j2
+    dest: "{{ hermes_copilot_baseline_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+
+- name: Create Copilot skills directory
+  ansible.builtin.file:
+    path: "{{ hermes_copilot_profile_dir }}/skills/copilot-review"
+    state: directory
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0700'
+
+- name: Deploy Copilot review skill
+  ansible.builtin.template:
+    src: skill-copilot-review.md.j2
+    dest: "{{ hermes_copilot_review_skill_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+    directory_mode: '0700'
+
+- name: Deploy Copilot profile environment
+  ansible.builtin.template:
+    src: profile-copilot.env.j2
+    dest: "{{ hermes_copilot_env_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  no_log: true
+  diff: false
+
+- name: Read deployed Copilot profile config
+  ansible.builtin.slurp:
+    src: "{{ hermes_copilot_config_file }}"
+  register: hermes_copilot_profile_config
+
+- name: Assert Copilot profile policy
+  ansible.builtin.assert:
+    that:
+      - hermes_copilot_config.model.provider == 'copilot'
+      - hermes_copilot_config.model.default == hermes_copilot_model
+      - hermes_copilot_config.model.base_url == 'https://api.githubcopilot.com'
+      - hermes_copilot_config.model.api_mode == 'chat_completions'
+      - hermes_copilot_config.agent.reasoning_effort == 'max'
+      - hermes_copilot_config.terminal.backend == 'ssh'
+      - hermes_copilot_config.terminal.ssh_host == hermes_copilot_ssh_host
+      - hermes_copilot_config.terminal.ssh_user == hermes_copilot_ssh_user
+      - hermes_copilot_config.terminal.ssh_key == hermes_copilot_ssh_private_key_file
+      - hermes_copilot_config.terminal.cwd == hermes_copilot_remote_cwd
+      - hermes_copilot_config.terminal.enabled
+    fail_msg: "The Copilot profile does not enforce the managed Copilot provider and SSH policy."
+    success_msg: "The Copilot profile enforces its Copilot provider and SSH terminal policy."
+  vars:
+    hermes_copilot_config: >-
+      {{ hermes_copilot_profile_config.content | b64decode | from_yaml }}
+
+- name: Inspect Copilot private files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ hermes_copilot_config_file }}"
+    - "{{ hermes_copilot_soul_file }}"
+    - "{{ hermes_copilot_baseline_file }}"
+    - "{{ hermes_copilot_review_skill_file }}"
+    - "{{ hermes_copilot_env_file }}"
+    - "{{ hermes_copilot_ssh_private_key_file }}"
+  register: hermes_copilot_private_files
+  no_log: true
+
+- name: Assert secure Copilot private files
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg
+      - item.stat.pw_name == hermes_user
+      - item.stat.gr_name == hermes_user
+      - item.stat.mode == '0600'
+  loop: "{{ hermes_copilot_private_files.results }}"
+  no_log: true
+
+- name: Read Copilot profile environment
+  ansible.builtin.slurp:
+    src: "{{ hermes_copilot_env_file }}"
+  register: hermes_copilot_environment
+  no_log: true
+
+- name: Assert Copilot environment contents
+  ansible.builtin.assert:
+    that:
+      - "'COPILOT_GITHUB_TOKEN=' in hermes_copilot_environment_text"
+      - "('COPILOT_GITHUB_TOKEN=' + (hermes_copilot_github_token | trim)) in hermes_copilot_environment_text.splitlines()"
+      - "'TERMINAL_ENV=ssh' in hermes_copilot_environment_text.splitlines()"
+      - "('TERMINAL_SSH_HOST=' + hermes_copilot_ssh_host) in hermes_copilot_environment_text.splitlines()"
+      - "('TERMINAL_SSH_USER=' + hermes_copilot_ssh_user) in hermes_copilot_environment_text.splitlines()"
+      - "('TERMINAL_SSH_KEY=' + hermes_copilot_ssh_private_key_file) in hermes_copilot_environment_text.splitlines()"
+      - "'DISCORD_BOT_TOKEN=' not in hermes_copilot_environment_text"
+      - "'HERMES_DASHBOARD' not in hermes_copilot_environment_text"
+    fail_msg: "The Copilot environment is missing required settings or exposes unrelated Hermes secrets."
+    success_msg: "The Copilot environment carries the vaulted token and SSH settings only."
+  vars:
+    hermes_copilot_environment_text: >-
+      {{ hermes_copilot_environment.content | b64decode }}
+  no_log: true
 
 - name: Find exact VirtuaJimmy SSH host trust
   ansible.builtin.command:

@@ -15,6 +15,11 @@ hermes_agent_config_file: "{{ hermes_user_home }}/.hermes.md"
 hermes_profiles_dir: "{{ hermes_home }}/profiles"
 hermes_secrets_dir: "{{ hermes_home }}/secrets"
 hermes_plexibot_grafana_token_file: "{{ hermes_secrets_dir }}/plexibot-grafana-token"
+hermes_plexibot_soul_file: "{{ hermes_profiles_dir }}/plexibot/SOUL.md"
+hermes_plexibot_usermap_bin: "{{ hermes_bin_dir }}/plexibot-usermap"
+hermes_plexibot_meme_bin: "{{ hermes_bin_dir }}/plexibot-meme"
+hermes_plexibot_meme_script: "{{ hermes_skills_dir }}/creative/meme-generation/scripts/generate_meme.py"
+hermes_plexibot_user_map_csv: "{{ hermes_profiles_dir }}/plexibot/skills/discord-plex-user-mapping/user_map.csv"
 hermes_hass_grafana_token_file: "{{ hermes_secrets_dir }}/hass-grafana-token"
 hermes_virtuajimmy_profile_dir: "{{ hermes_profiles_dir }}/virtuajimmy"
 hermes_virtuajimmy_config_file: "{{ hermes_virtuajimmy_profile_dir }}/config.yaml"
@@ -25,6 +30,8 @@ hermes_virtuajimmy_ssh_private_key_file: "{{ hermes_virtuajimmy_ssh_dir }}/id_ed
 hermes_virtuajimmy_user_ssh_dir: "{{ hermes_user_home }}/.ssh"
 hermes_virtuajimmy_known_hosts_file: "{{ hermes_virtuajimmy_user_ssh_dir }}/known_hosts"
 hermes_virtuajimmy_grafana_token_file: "{{ hermes_secrets_dir }}/virtuajimmy-grafana-token"
+hermes_vj_intake_bin: "{{ hermes_bin_dir }}/hermes-vj-intake"
+hermes_virtuajimmy_triage_skill_file: "{{ hermes_virtuajimmy_profile_dir }}/skills/kanban-task-triage/SKILL.md"
 hermes_mcp_grafana_install_root: "{{ hermes_user_home }}/.local/lib/mcp-grafana"
 hermes_mcp_grafana_bin: "{{ hermes_bin_dir }}/mcp-grafana"
 hermes_plexibot_mcp_tracearr_url: "http://{{ groups['mcp_tracearr_host'][0] }}:8850"
@@ -45,6 +52,19 @@ hermes_virtuajimmy_ssh_private_key: "{{ n8n_copilot_ssh_key }}"
 hermes_virtuajimmy_ssh_host_public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICBey71W+zwoAmxupU/7WXTox6Fz2LmPK1cymZNs+UzG"
 hermes_virtuajimmy_ssh_host_fingerprint: "SHA256:R/RfR2+noRrqrILqws0diKdQ1HZOYz7MeBhqguLpzPs"
 hermes_virtuajimmy_remote_cwd: /srv/homelab
+hermes_copilot_model: claude-opus-4.8
+hermes_copilot_profile_dir: "{{ hermes_profiles_dir }}/copilot"
+hermes_copilot_config_file: "{{ hermes_copilot_profile_dir }}/config.yaml"
+hermes_copilot_soul_file: "{{ hermes_copilot_profile_dir }}/SOUL.md"
+hermes_copilot_baseline_file: "{{ hermes_copilot_profile_dir }}/REPO_BASELINE.md"
+hermes_copilot_review_skill_file: "{{ hermes_copilot_profile_dir }}/skills/copilot-review/SKILL.md"
+hermes_copilot_env_file: "{{ hermes_copilot_profile_dir }}/.env"
+hermes_copilot_ssh_dir: "{{ hermes_copilot_profile_dir }}/.ssh"
+hermes_copilot_ssh_private_key_file: "{{ hermes_copilot_ssh_dir }}/id_ed25519"
+hermes_copilot_remote_cwd: "{{ hermes_virtuajimmy_remote_cwd }}"
+hermes_copilot_ssh_host: "{{ hermes_virtuajimmy_ssh_host }}"
+hermes_copilot_ssh_user: "{{ hermes_virtuajimmy_ssh_user }}"
+hermes_copilot_ssh_private_key: "{{ hermes_virtuajimmy_ssh_private_key }}"
 hermes_managed_profiles:
   - name: hass
     config_template: profile-hass-config.yaml.j2
@@ -52,6 +72,8 @@ hermes_managed_profiles:
     config_template: profile-plexibot-config.yaml.j2
   - name: virtuajimmy
     config_template: profile-virtuajimmy-config.yaml.j2
+  - name: copilot
+    config_template: profile-copilot-config.yaml.j2
 
 hermes_service_name: hermes-dashboard.service
 hermes_service_unit_path: "/etc/systemd/system/{{ hermes_service_name }}"
