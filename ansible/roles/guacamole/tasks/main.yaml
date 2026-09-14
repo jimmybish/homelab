@@ -59,10 +59,11 @@
 # Deploy compose stack
 # --------------------------------------------------------------------------- #
 - name: Deploy Guacamole docker-compose.yaml
+  no_log: true
   ansible.builtin.template:
     src: "docker_compose.yaml.j2"
     dest: "{{ guacamole_folder }}/docker-compose.yaml"
-    mode: '0644'
+    mode: '0600'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
@@ -111,6 +112,7 @@
           -U {{ guacamole_db_user }} -d {{ guacamole_db_name }}
   args:
     executable: /bin/bash
+  changed_when: true
   when: not guacamole_seed_stat.stat.exists
   register: guacamole_schema_load
 
@@ -177,20 +179,28 @@
   ansible.builtin.template:
     src: "{{ playbook_dir }}/roles/proxy/templates/internal/guacamole.subdomain.conf.j2"
     dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/guacamole.subdomain.conf"
-    mode: '0644'
+    mode: '0664'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
   delegate_to: "{{ groups['proxy_host'][0] }}"
   notify: Restart Swag Internal
 
 - name: Configure SWAG External proxy for Guacamole
-  when: guacamole_configure_external_proxy | default(true)
+  when: guacamole_configure_external_proxy | default(false)
   ansible.builtin.template:
     src: "{{ playbook_dir }}/roles/proxy/templates/external/guacamole.subdomain.conf.j2"
     dest: "{{ proxy_folder }}/external/nginx/proxy-confs/guacamole.subdomain.conf"
-    mode: '0644'
+    mode: '0664'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify: Restart Swag External
+
+- name: Remove disabled SWAG External proxy for Guacamole
+  when: not (guacamole_configure_external_proxy | default(false) | bool)
+  ansible.builtin.file:
+    path: "{{ proxy_folder }}/external/nginx/proxy-confs/guacamole.subdomain.conf"
+    state: absent
   delegate_to: "{{ groups['proxy_host'][0] }}"
   notify: Restart Swag External
 

@@ -81,6 +81,9 @@
 - name: Deploy Tronbyt
   ansible.builtin.import_playbook: deploy_tronbyt.yaml
 
+- name: Deploy Tronbyt vLLM Thinking Indicator
+  ansible.builtin.import_playbook: deploy_tronbyt_vllm_thinking.yaml
+
 - name: Deploy Tracearr
   ansible.builtin.import_playbook: deploy_tracearr.yaml
 

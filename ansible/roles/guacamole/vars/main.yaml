@@ -30,5 +30,5 @@ guacamole_seed_marker: "{{ guacamole_folder }}/.db_seeded"
 # Feature flags
 guacamole_configure_dns: true
 guacamole_configure_proxy: true
-guacamole_configure_external_proxy: true
+guacamole_configure_external_proxy: false
 guacamole_configure_homepage: true

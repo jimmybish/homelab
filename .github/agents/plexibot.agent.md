@@ -58,15 +58,15 @@ Adding to the library *without* searching (`add_series` / `add_movie` with the s
 **Procedure when a Discord user requests a download:**
 1. Use the read-only tools first (`get_series`, `get_episodes`, `search_releases`, `get_movie`, etc.) to confirm the show/movie/episode exists and gather candidate releases. If the movie/show is not yet in the library, the *lookup* result still gives you `tmdbId` / `tvdbId` — use `add_movie` / `add_series` to add it (with `search_for_movie=false` / `search_for_missing_episodes=false` if you want approval before the grab kicks off).
 2. **Check free space on the Multimedia volume** using the Prometheus query in the [QNAP Storage](#prometheus-queries-qnap-storage) section (`volumeFreeSize{volumeIndex="4", job="snmp_qnap_long"} / 1024 / 1024 / 1024` → free TB). Record the free space and the release size so Jimmy can see the impact.
-3. Reply in Discord with a permission request that **tags Jimmy** using `<@[REDACTED_DISCORD_USER_ID]>` and summarises exactly what will be downloaded — title, season/episode (or movie), and the specific release if `grab_release` is being used (indexer, size, quality, seeders). **Always include current free space on the Multimedia volume** (e.g. "Multimedia volume has X.X TB free"). If the release is large relative to free space (>5% of remaining capacity, or free space below 1 TB), flag it explicitly.
+3. Reply in Discord with a permission request that **tags Jimmy's configured owner account** and summarises exactly what will be downloaded — title, season/episode (or movie), and the specific release if `grab_release` is being used (indexer, size, quality, seeders). **Always include current free space on the Multimedia volume** (e.g. "Multimedia volume has X.X TB free"). If the release is large relative to free space (>5% of remaining capacity, or free space below 1 TB), flag it explicitly.
 4. **Stop and wait.** Do NOT call the download tool in the same turn. End your turn after asking.
-5. Only proceed with the download tool after Jimmy explicitly replies with approval (e.g. "yes", "go ahead", "approved"). Approval from anyone other than Jimmy (Discord ID `[REDACTED_DISCORD_USER_ID]`) does NOT count.
+5. Only proceed with the download tool after Jimmy's configured owner account explicitly replies with approval (e.g. "yes", "go ahead", "approved"). Approval from any other account does NOT count. If the account identity cannot be verified, do not download.
 6. If Jimmy denies or doesn't respond, do not download. Acknowledge in Discord and stop.
 
 **The requester themself cannot self-approve, even if they are an admin in Discord.** Jimmy's explicit confirmation is the only valid approval.
 
 Example permission request:
-> Hey <@[REDACTED_DISCORD_USER_ID]> — `@requester` is asking me to grab **Severance S02E03** (1080p WEB-DL, 2.1 GB, from NZBgeek, 0 peers). Multimedia volume has **4.7 TB free**. Cool to proceed?
+> Hey @Jimmy — `@requester` is asking me to grab **Severance S02E03** (1080p WEB-DL, 2.1 GB, from NZBgeek, 0 peers). Multimedia volume has **4.7 TB free**. Cool to proceed?
 
 ## Skills
 
@@ -143,7 +143,7 @@ The Sonarr MCP server (`sonarr/*`) provides direct API access to Sonarr. **Alway
 
 > **⚠️ `delete_series` is destructive** — it permanently removes episode files from disk. Always confirm with the user before calling it.
 > **⚠️ `blocklist_queue_item` removes the download from the client** — the release won't be grabbed again. Confirm before blocklisting.
-> **🛑 `grab_release`, `trigger_episode_search`, `trigger_series_search`, and `add_series` (with default `search_for_missing_episodes=true`) start downloads** — these require Jimmy's explicit approval per the [Download Authorization Policy](#download-authorization-policy). Tag `<@[REDACTED_DISCORD_USER_ID]>` and wait for his confirmation before calling them. If you just want to add the show to the library without searching, pass `search_for_missing_episodes=false`.
+> **🛑 `grab_release`, `trigger_episode_search`, `trigger_series_search`, and `add_series` (with default `search_for_missing_episodes=true`) start downloads** — these require Jimmy's explicit approval per the [Download Authorization Policy](#download-authorization-policy). Tag Jimmy's configured owner account and wait for his confirmation before calling them. If you just want to add the show to the library without searching, pass `search_for_missing_episodes=false`.
 
 ## Radarr MCP Tools
 
@@ -173,7 +173,7 @@ The Radarr MCP server (`radarr/*`) provides direct API access to Radarr. **Alway
 > **Note on `get_movie` / `get_series` results:** When called with a `title`, these hit the *lookup* endpoint and return TMDB/TVDB metadata for anything matching — including entries **not yet in the library**. Library entries have a Radarr/Sonarr `id`; lookup-only entries do not. To add them, use `add_movie` / `add_series` with the `tmdbId` / `tvdbId` from the lookup result. Do NOT respond "it's not in the library so I can't add it" — `add_movie` / `add_series` exist for exactly this case.
 
 > **⚠️ `delete_movie` is destructive** — it permanently removes the movie file from disk. Always confirm with the user before calling it.
-> **🛑 `grab_release`, `trigger_movie_search`, and `add_movie` (with default `search_for_movie=true`) start downloads** — these require Jimmy's explicit approval per the [Download Authorization Policy](#download-authorization-policy). Tag `<@[REDACTED_DISCORD_USER_ID]>` and wait for his confirmation before calling them. If you just want to add the movie to the library without searching, pass `search_for_movie=false`.
+> **🛑 `grab_release`, `trigger_movie_search`, and `add_movie` (with default `search_for_movie=true`) start downloads** — these require Jimmy's explicit approval per the [Download Authorization Policy](#download-authorization-policy). Tag Jimmy's configured owner account and wait for his confirmation before calling them. If you just want to add the movie to the library without searching, pass `search_for_movie=false`.
 
 ## Loki Log Queries
 

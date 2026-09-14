@@ -1,5 +1,6 @@
 ---
 - name: Render workflow JSON  # {{ workflow.name }}
+  no_log: true
   ansible.builtin.set_fact:
     _workflow_json: "{{ lookup('template', workflow.template) }}"
 
@@ -9,6 +10,7 @@
   failed_when: false
 
 - name: Create workflow  # {{ workflow.name }}
+  no_log: true
   ansible.builtin.uri:
     url: "{{ internal_n8n_url }}/api/v1/workflows"
     method: POST
@@ -24,11 +26,13 @@
   when: _workflow_id | default('') == ''
 
 - name: Set workflow ID from creation  # {{ workflow.name }}
+  no_log: true
   ansible.builtin.set_fact:
     _workflow_id: "{{ _workflow_created.json.id }}"
   when: _workflow_created is not skipped and _workflow_created is succeeded
 
 - name: Update workflow  # {{ workflow.name }}
+  no_log: true
   ansible.builtin.uri:
     url: "{{ internal_n8n_url }}/api/v1/workflows/{{ _workflow_id }}"
     method: PUT
