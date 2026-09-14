@@ -13,3 +13,26 @@ terminal:
   ssh_key: {{ hermes_copilot_ssh_private_key_file }}
   cwd: {{ hermes_copilot_remote_cwd }}
   enabled: true
+mcp_servers:
+  local_tools:
+    command: "{{ hermes_install_dir }}/venv/bin/python"
+    args:
+      - "{{ hermes_local_tools_bin }}"
+      - --profile
+      - copilot
+      - --profile-root
+      - "{{ hermes_copilot_profile_dir }}"
+      - --runtime-host
+      - "{{ inventory_hostname }}"
+      - --terminal-host
+      - "{{ hermes_copilot_ssh_host }}"
+      - --terminal-cwd
+      - "{{ hermes_copilot_remote_cwd }}"
+      - --documents-json
+      - >-
+        {{ hermes_copilot_local_documents | to_json }}
+    env:
+      HERMES_HOME: "{{ hermes_copilot_profile_dir }}"
+      HERMES_KANBAN_HOME: "{{ hermes_home }}"
+      HERMES_PROFILE: copilot
+    enabled: true

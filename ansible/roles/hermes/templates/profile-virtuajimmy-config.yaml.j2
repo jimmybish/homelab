@@ -103,7 +103,35 @@ session_reset:
 group_sessions_per_user: true
 custom_providers:
 {{ hermes_custom_providers | to_nice_yaml(indent=2, sort_keys=false, width=4096) | indent(2, true) }}
+toolsets:
+  - kanban
+platform_toolsets:
+  discord:
+    - hermes-discord
+    - kanban
 mcp_servers:
+  local_tools:
+    command: "{{ hermes_install_dir }}/venv/bin/python"
+    args:
+      - "{{ hermes_local_tools_bin }}"
+      - --profile
+      - virtuajimmy
+      - --profile-root
+      - "{{ hermes_virtuajimmy_profile_dir }}"
+      - --runtime-host
+      - "{{ inventory_hostname }}"
+      - --terminal-host
+      - "{{ hermes_virtuajimmy_ssh_host }}"
+      - --terminal-cwd
+      - "{{ hermes_virtuajimmy_remote_cwd }}"
+      - --documents-json
+      - >-
+        {{ hermes_virtuajimmy_local_documents | to_json }}
+    env:
+      HERMES_HOME: "{{ hermes_virtuajimmy_profile_dir }}"
+      HERMES_KANBAN_HOME: "{{ hermes_home }}"
+      HERMES_PROFILE: virtuajimmy
+    enabled: true
   context7:
     url: "{{ hermes_virtuajimmy_mcp_context7_url }}"
 {% if hermes_virtuajimmy_context7_api_key | length > 0 %}

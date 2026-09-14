@@ -7,10 +7,11 @@ description: 'Use when: reviewing staged homelab changes on a kanban review card
 # Copilot Review
 
 Method for reviewing a staged change set on the `homelab` board. You are the
-gate, not the author. Read the deployed repo baseline first
-(`{{ hermes_copilot_baseline_file }}` on the Hermes host) — it is the
-Hermes adaptation of `.github/copilot-instructions.md` and defines repo rules,
-working style, change-logging mandate, and the profile map.
+gate, not the author. Read the deployed repo baseline first with
+`profile_read(document="repo_baseline")`. It is the Hermes adaptation of
+`.github/copilot-instructions.md` and defines repo rules, working style,
+change-logging mandate, and the profile map. Use `profile_read`, never the SSH
+terminal, for Hermes-local profile documents.
 
 ## Hard rule: never mutate (finding 2)
 

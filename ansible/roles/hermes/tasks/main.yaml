@@ -296,6 +296,27 @@
   diff: false
   notify: Restart Hermes VirtuaJimmy gateway
 
+- name: Deploy profile-local Hermes MCP server
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../mcp-server-hermes-local-tools/server.py"
+    dest: "{{ hermes_local_tools_bin }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0755'
+    validate: >-
+      {{ hermes_install_dir }}/venv/bin/python -c
+      'import ast,pathlib,sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))'
+      %s
+  notify:
+    - Restart Hermes dashboard
+    - Restart Hermes VirtuaJimmy gateway
+
+- name: Remove obsolete VirtuaJimmy intake helper
+  ansible.builtin.file:
+    path: "{{ hermes_bin_dir }}/hermes-vj-intake"
+    state: absent
+  notify: Restart Hermes VirtuaJimmy gateway
+
 - name: Deploy managed Hermes non-gateway profile configs
   ansible.builtin.template:
     src: "{{ item.config_template }}"
@@ -314,6 +335,7 @@
        | list }}
   loop_control:
     label: "{{ item.name }}"
+  notify: Restart Hermes dashboard
 
 - name: Read deployed HASS profile config
   ansible.builtin.slurp:
@@ -407,18 +429,6 @@
     mode: '0600'
   notify: Restart Hermes VirtuaJimmy gateway
 
-- name: Deploy VirtuaJimmy kanban intake helper script
-  ansible.builtin.template:
-    src: hermes-vj-intake.py.j2
-    dest: "{{ hermes_vj_intake_bin }}"
-    owner: "{{ hermes_user }}"
-    group: "{{ hermes_user }}"
-    mode: '0755'
-    validate: >-
-      {{ hermes_install_dir }}/venv/bin/python -c
-      'import ast,pathlib,sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))'
-      %s
-
 - name: Deploy VirtuaJimmy kanban-task-triage skill
   ansible.builtin.template:
     src: skill-kanban-task-triage.md.j2
@@ -486,6 +496,7 @@
     owner: "{{ hermes_user }}"
     group: "{{ hermes_user }}"
     mode: '0600'
+  notify: Restart Hermes dashboard
 
 - name: Deploy Copilot repo baseline
   ansible.builtin.template:
@@ -494,6 +505,7 @@
     owner: "{{ hermes_user }}"
     group: "{{ hermes_user }}"
     mode: '0600'
+  notify: Restart Hermes dashboard
 
 - name: Create Copilot skills directory
   ansible.builtin.file:
@@ -511,6 +523,7 @@
     group: "{{ hermes_user }}"
     mode: '0600'
     directory_mode: '0700'
+  notify: Restart Hermes dashboard
 
 - name: Deploy Copilot profile environment
   ansible.builtin.template:
@@ -541,11 +554,35 @@
       - hermes_copilot_config.terminal.ssh_key == hermes_copilot_ssh_private_key_file
       - hermes_copilot_config.terminal.cwd == hermes_copilot_remote_cwd
       - hermes_copilot_config.terminal.enabled
+      - hermes_copilot_config.terminal.ssh_host == hermes_virtuajimmy_ssh_host
+      - hermes_copilot_config.terminal.cwd == hermes_virtuajimmy_remote_cwd
+      - hermes_copilot_config.mcp_servers.keys() | list | sort == ['local_tools']
+      - hermes_copilot_config.mcp_servers.local_tools.command == hermes_install_dir ~ '/venv/bin/python'
+      - hermes_copilot_config.mcp_servers.local_tools.args == hermes_copilot_local_tools_args
+      - hermes_copilot_config.mcp_servers.local_tools.env.keys() | list | sort == ['HERMES_HOME', 'HERMES_KANBAN_HOME', 'HERMES_PROFILE']
+      - hermes_copilot_config.mcp_servers.local_tools.env.HERMES_HOME == hermes_copilot_profile_dir
+      - hermes_copilot_config.mcp_servers.local_tools.env.HERMES_KANBAN_HOME == hermes_home
+      - hermes_copilot_config.mcp_servers.local_tools.env.HERMES_PROFILE == 'copilot'
+      - hermes_copilot_config.mcp_servers.local_tools.enabled
     fail_msg: "The Copilot profile does not enforce the managed Copilot provider and SSH policy."
     success_msg: "The Copilot profile enforces its Copilot provider and SSH terminal policy."
   vars:
     hermes_copilot_config: >-
       {{ hermes_copilot_profile_config.content | b64decode | from_yaml }}
+    hermes_copilot_local_tools_args:
+      - "{{ hermes_local_tools_bin }}"
+      - --profile
+      - copilot
+      - --profile-root
+      - "{{ hermes_copilot_profile_dir }}"
+      - --runtime-host
+      - "{{ inventory_hostname }}"
+      - --terminal-host
+      - "{{ hermes_copilot_ssh_host }}"
+      - --terminal-cwd
+      - "{{ hermes_copilot_remote_cwd }}"
+      - --documents-json
+      - "{{ hermes_copilot_local_documents | to_json }}"
 
 - name: Inspect Copilot private files
   ansible.builtin.stat:
@@ -702,13 +739,38 @@
       - hermes_virtuajimmy_config.discord.max_attachment_bytes == 26214400
       - hermes_virtuajimmy_config.discord.free_response_channels == [hermes_virtuajimmy_discord_control_channel_id | string]
       - hermes_virtuajimmy_config.discord.allow_from == [hermes_virtuajimmy_discord_user_id | string]
-      - hermes_virtuajimmy_config.mcp_servers.keys() | list | sort == ['context7', 'grafana', 'radarr', 'sonarr', 'tracearr']
+      - hermes_virtuajimmy_config.toolsets == ['kanban']
+      - hermes_virtuajimmy_config.platform_toolsets.keys() | list | sort == ['discord']
+      - hermes_virtuajimmy_config.platform_toolsets.discord == ['hermes-discord', 'kanban']
+      - "'kanban' not in hermes_virtuajimmy_config.agent.disabled_toolsets"
+      - hermes_virtuajimmy_config.mcp_servers.keys() | list | sort == ['context7', 'grafana', 'local_tools', 'radarr', 'sonarr', 'tracearr']
       - hermes_virtuajimmy_config.mcp_servers.grafana.args == ['--enabled-tools', 'datasource,prometheus,loki', '--disable-write', '--disable-proxied']
+      - hermes_virtuajimmy_config.mcp_servers.local_tools.command == hermes_install_dir ~ '/venv/bin/python'
+      - hermes_virtuajimmy_config.mcp_servers.local_tools.args == hermes_virtuajimmy_local_tools_args
+      - hermes_virtuajimmy_config.mcp_servers.local_tools.env.keys() | list | sort == ['HERMES_HOME', 'HERMES_KANBAN_HOME', 'HERMES_PROFILE']
+      - hermes_virtuajimmy_config.mcp_servers.local_tools.env.HERMES_HOME == hermes_virtuajimmy_profile_dir
+      - hermes_virtuajimmy_config.mcp_servers.local_tools.env.HERMES_KANBAN_HOME == hermes_home
+      - hermes_virtuajimmy_config.mcp_servers.local_tools.env.HERMES_PROFILE == 'virtuajimmy'
+      - hermes_virtuajimmy_config.mcp_servers.local_tools.enabled
     fail_msg: "The VirtuaJimmy profile does not enforce the managed capability policy."
     success_msg: "The VirtuaJimmy profile enforces its SSH, Discord, MCP, and security policy."
   vars:
     hermes_virtuajimmy_config: >-
       {{ hermes_virtuajimmy_profile_config.content | b64decode | from_yaml }}
+    hermes_virtuajimmy_local_tools_args:
+      - "{{ hermes_local_tools_bin }}"
+      - --profile
+      - virtuajimmy
+      - --profile-root
+      - "{{ hermes_virtuajimmy_profile_dir }}"
+      - --runtime-host
+      - "{{ inventory_hostname }}"
+      - --terminal-host
+      - "{{ hermes_virtuajimmy_ssh_host }}"
+      - --terminal-cwd
+      - "{{ hermes_virtuajimmy_remote_cwd }}"
+      - --documents-json
+      - "{{ hermes_virtuajimmy_local_documents | to_json }}"
 
 - name: Inspect VirtuaJimmy private files
   ansible.builtin.stat:
@@ -732,6 +794,25 @@
   loop: "{{ hermes_virtuajimmy_private_files.results }}"
   no_log: true
 
+- name: Inspect profile-local MCP server and obsolete helper
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ hermes_local_tools_bin }}"
+    - "{{ hermes_bin_dir }}/hermes-vj-intake"
+  register: hermes_local_tools_files
+
+- name: Assert profile-local MCP server deployment
+  ansible.builtin.assert:
+    that:
+      - hermes_local_tools_files.results[0].stat.isreg
+      - hermes_local_tools_files.results[0].stat.pw_name == hermes_user
+      - hermes_local_tools_files.results[0].stat.gr_name == hermes_user
+      - hermes_local_tools_files.results[0].stat.mode == '0755'
+      - not hermes_local_tools_files.results[1].stat.exists
+    fail_msg: "The profile-local MCP server deployment does not match the managed file policy."
+    success_msg: "The profile-local MCP server is executable and the obsolete intake helper is absent."
+
 - name: Read VirtuaJimmy profile environment
   ansible.builtin.slurp:
     src: "{{ hermes_virtuajimmy_env_file }}"
@@ -743,6 +824,8 @@
     that:
       - "'DISCORD_BOT_TOKEN=' in hermes_virtuajimmy_environment_text"
       - "'TERMINAL_SSH_HOST=' in hermes_virtuajimmy_environment_text"
+      - "('HERMES_KANBAN_HOME=' ~ hermes_home) in hermes_virtuajimmy_environment_text.splitlines()"
+      - "'HERMES_KANBAN_BOARD=homelab' in hermes_virtuajimmy_environment_text.splitlines()"
       - "('FIRECRAWL_API_URL=' ~ internal_firecrawl_url) in hermes_virtuajimmy_environment_text.splitlines()"
       - "'HOME_ASSISTANT_TOKEN=' not in hermes_virtuajimmy_environment_text"
       - "'HERMES_DASHBOARD' not in hermes_virtuajimmy_environment_text"
