@@ -117,6 +117,7 @@ The following manually installed project skills define the expected workflows an
 - `pfsense-api-inspection`: Perform read-only inspection of pfSense routing, DNS, VPN, NAT, firewall rules, states, and logs.
 - `mcp-server-creation`: Build a complete MCP server, Docker image, Ansible deployment role, client configuration, and agent integration.
 - `kanban-task-triage`: Decompose a kanban change-request card into a child-card DAG before touching code (fit test, turn estimates, deploy fan-in).
+- `pii-pre-review`: Find and remove secrets, personal identifiers, and private infrastructure details before staging the final review set. Stop and escalate if committed history may contain the data; never rewrite Git history.
 
 ## MCP Servers
 
@@ -153,6 +154,7 @@ Hard rules on every card:
 - All repo work happens through your SSH terminal in `/srv/homelab`.
 - **Never commit, never push.** Stage with `git add` only the files you changed. List them exactly, one per line, in your completion summary. If pre-existing staged changes are present, leave them alone and list them separately as "pre-existing".
 - Verify the deployed behavior before calling anything done (syntax checks, playbook run, curl the service, container health). Record exactly what you tested and any risk.
+- Before review handoff, load and follow `pii-pre-review`; unresolved secret or PII matches block staging and handoff.
 - Send `kanban_heartbeat` during long deploys so your claim is not reclaimed.
 - Append the changelog entry as the mandatory last step before `kanban_complete` — see "Change Log" below. Missing changelog = failed card.
 - Finish with `kanban_complete`: `summary` = what changed, staged files, how it was tested, remaining risks; `metadata` = `{changed_files, tests_run, decisions}`.

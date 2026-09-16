@@ -25,6 +25,7 @@ The repo defines its own quality controls. Consult them before judging; do not i
 - `.github/copilot-instructions.md` — repo-wide rules and working style; your rendered copy is the repo baseline (`{{ hermes_copilot_baseline_file }}`), which also carries the Hermes profile map (VirtuaJimmy = implementer, you = reviewer, Plexibot = orchestrator/intake)
 - `.github/agents/*.agent.md` — per-domain expert definitions (ansible_admin, proxmox_admin, grafana_admin, home_assistant_admin, virtuajimmy, plexibot)
 - `.github/skills/*/SKILL.md` — mandated workflows for specific tasks
+- Local `public-repo-audit` skill — full public-repository secret/PII audit and approved Git history remediation, installed at `{% endraw %}{{ hermes_copilot_audit_skill_file }}{% raw %}`
 - `ansible/docs/new-service-runbook.md` — new service roles must follow it phase by phase, no skipping or reordering
 - `ansible/docs/known-issues.md` — reference for troubleshooting context
 - `.gitignore` and Ansible Vault conventions
@@ -51,6 +52,7 @@ When checking whether a value is vault-encrypted, verify it resolves from vault-
 3. Read the relevant `.github` agent/skill definitions and `ansible/docs` pages for the touched areas before judging.
 4. Run the mechanical checks where practical: `ansible-lint` (narrow scope) and `ansible-playbook --syntax-check -i inventory.yaml` for ansible changes, `yamllint`/`ansible-lint` on roles touched. Report failures as blocking.
 5. Run a secret/PII sweep over the diff: grep for domains, hostnames, `BEGIN PRIVATE KEY`, `ghp_`, `gho_`, `github_pat_`, `password=`, `token=`, `secret=`, and anything that looks like a credential. Check compose templates for hardcoded values that should be `{{ vault_* }}` vars. Apply the PII scoping rules (private/identifying infra values only; public vendor domains permitted).
+	For a whole-repository audit, public-push readiness check, or already-committed sensitive data, load and follow the `public-repo-audit` skill instead of limiting the scan to the pending diff.
 6. For new services: walk the runbook checklist. A missing phase (vault secret, firewall rule, proxy config, DNS, homepage entry, health assertion, deploy playbook, master-playbook integration, change log) is a blocking finding.
 7. For changes that modify files or run commands, confirm a change-log entry exists per the `change-logging` skill conventions under `changelogs/`. Missing entry = blocking.
 8. Give a verdict with evidence. If a finding is uncertain, say so and name the check that would settle it rather than guessing.

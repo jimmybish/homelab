@@ -1,0 +1,87 @@
+---
+name: pii-pre-review
+description: 'Use when: preparing homelab changes for Copilot review. Find and remove PII, secrets, and private infrastructure details before staging the final review set.'
+---
+
+# PII Pre-Review Gate
+
+Run this before handing a change to Copilot review. Your job is to prevent new
+private data from entering the staged change set. This skill does not authorize
+commits, pushes, history rewrites, force-pushes, or credential rotation.
+
+## Never Include in Plaintext
+
+- passwords, tokens, API keys, webhook secrets, cookies, private keys, recovery
+  codes, embedded URL credentials, or credential-bearing generated files;
+- personal email addresses, phone numbers, chat user/channel/server/role/client
+  IDs, account IDs, mailbox addresses, or other durable identifiers;
+- real internal hostnames/domains, private IP mappings, MAC addresses, CIDRs,
+  VLAN/subnet layouts, VPN peer details, NAS/device names, and other private
+  topology;
+- private-system usernames or filesystem paths that identify a person or expose
+  protected infrastructure.
+
+Usually safe: public vendor endpoints, public project/documentation URLs,
+package and container image names, SSH public keys, host-key fingerprints,
+generic service names, and ports. Evaluate context instead of vaulting every
+number or hostname mechanically.
+
+## Pre-Review Workflow
+
+1. Read the relevant repo instructions and domain skills before editing.
+2. Identify the intended file set with `git status --short`, the worktree diff,
+   staged diff, and untracked files. Preserve unrelated and pre-existing staged
+   work.
+3. Search every changed file and its filename for:
+   - `BEGIN ... PRIVATE KEY`, `AKIA`, `ghp_`, `gho_`, `github_pat_`, `xox*`,
+     bearer headers, cookies, and credentials embedded in URLs;
+   - `password`, `token`, `secret`, `api_key`, `private_key`, `authorization`,
+     and credential payload fields;
+   - email/phone patterns, chat mentions, and 15-20 digit platform IDs;
+   - internal domains/hostnames, RFC1918 addresses, MACs, CIDRs, and VLANs.
+4. Inspect surrounding code for values that evade signatures: concatenated
+   tokens, template interpolation, base64, generated environment files, command
+   arguments, API bodies, registered results, documentation examples, agent
+   definitions, skills, and changelog prose.
+5. Move sensitive Ansible values into existing Vault-backed variables. If a new
+   value is required, use the `ansible-vault-secrets` skill and
+   `ansible-vault encrypt_string --vault-password-file ~/ansible_key`. Never
+   print the plaintext afterward or invent a replacement credential.
+6. Add `no_log: true` to tasks whose arguments/results contain decrypted data;
+   add `diff: false` to secret-bearing file/template/copy tasks. Use `0600` for
+   credential files and `0700` for their directories unless the application
+   requires stricter documented handling.
+7. Render sensitive templates only to temporary mode-`0600` files. Assert safe
+   fields without printing the file, then delete it.
+8. Confirm local credential/config files are ignored and untracked:
+
+   ```bash
+   git check-ignore -v <path>
+   git ls-files -- <path>
+   ```
+
+9. Re-run the focused secret/PII search after remediation. Scanner examples,
+   public endpoints, Vault ciphertext, and public keys are not findings unless
+   context makes them identifying or usable.
+10. Run the relevant syntax checks, lint, tests, template renders, and
+    `git diff --check`.
+11. Stage only your intended files with explicit paths. Compare
+    `git diff --cached --name-only` set-to-set with the handoff list, and inspect
+    `git status --short` for worktree content ahead of the index.
+12. Append the required ignored CAB change log, then hand off to Copilot with the
+    exact staged paths, checks run, and any unresolved uncertainty.
+
+## Stop Conditions
+
+Do not pass the work for review when:
+
+- a suspected credential or PII match is unresolved;
+- a sensitive value is merely renamed, encoded, redacted in `HEAD`, or moved to
+  another tracked file instead of being Vault-backed;
+- a task can expose decrypted data in Ansible output;
+- the staged file set differs from the handoff list;
+- required validation did not run or failed.
+
+If you discover that sensitive data may already exist in a commit, stop and
+escalate to Jimmy and Copilot. Do not investigate or rewrite Git history yourself; the
+`public-repo-audit` workflow belongs to the Copilot profile.

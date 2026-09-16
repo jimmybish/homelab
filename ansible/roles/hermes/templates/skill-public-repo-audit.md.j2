@@ -1,0 +1,209 @@
+---
+name: public-repo-audit
+description: 'Use when: auditing the homelab repository before a public push, checking all outgoing commits for PII or secrets, or removing already-committed sensitive data from Git history.'
+---
+
+# Public Repository Audit
+
+Audit the current tree, outgoing commits, reachable history, and local credential
+files before declaring this public repository safe to push. Treat a clean working
+tree scan as necessary but insufficient: a value removed in `HEAD` can remain in
+an outgoing or already-public commit.
+
+## Safety Rules
+
+- Never print plaintext secrets, Vault values, tokens, private keys, or full PII.
+  Report a redacted value and its path/rule only.
+- Use `~/ansible_key` for Vault verification. Stop if it is unavailable.
+- Do not rotate credentials merely because they are being audited.
+- Do not rewrite history or force-push without Jimmy's explicit approval.
+- Before rewriting, preserve the current index and worktree exactly. Never use
+  `git reset` to clear staging.
+- Use `--force-with-lease=<ref>:<verified-old-hash>`, never bare `--force`.
+
+## What Must Not Be Public
+
+Vault or otherwise remove these private or identifying values:
+
+- passwords, API keys, bearer/session tokens, webhook secrets, private keys,
+  recovery codes, embedded URL credentials, and credential-bearing files;
+- personal email addresses, phone numbers, chat user/channel/server/role/client
+  IDs, account IDs, or other durable externally resolvable identifiers;
+- private hostnames and internal domains, RFC1918 IPs when they map the private
+  environment, MAC addresses, VLANs/subnets, VPN peer data, NAS/device names,
+  and other site-specific topology;
+- usernames tied to private systems, mailbox addresses, and private paths when
+  they identify a person or reveal protected infrastructure.
+
+Usually safe: public vendor endpoints, public project URLs, package/image names,
+SSH public keys, public host-key fingerprints, generic service names, ports,
+and explicitly public authorship. Context decides: an RFC1918 example in generic
+documentation differs from a real inventory mapping.
+
+## Phase 1: Establish the Exact Push Boundary
+
+1. Record `git status --short --branch`, remotes, tracking branches, and staged
+   files. Preserve unrelated user changes.
+2. Refresh the public tracking ref without exposing SSH passphrases. For this
+   public repository, HTTPS fetch is acceptable:
+
+   ```bash
+   git fetch --prune https://github.com/jimmybish/homelab.git \
+     '+refs/heads/main:refs/remotes/origin/main'
+   ```
+
+3. Record the merge base, ahead/behind counts, outgoing commits, and changed
+   paths:
+
+   ```bash
+   git merge-base HEAD origin/main
+   git rev-list --left-right --count origin/main...HEAD
+   git log --oneline origin/main..HEAD
+   git diff --name-status origin/main...HEAD
+   ```
+
+4. Distinguish findings in the worktree, outgoing commits, already-public
+   history, unreachable objects, and ignored local files. Their remedies differ.
+
+## Phase 2: Scan Current Content and Outgoing Commits
+
+Inspect all tracked file types, not only `group_vars`. Include playbooks, roles,
+templates, Compose, scripts, docs, changelogs, agent definitions, skills,
+inventory, MCP source, and filenames.
+
+Search for:
+
+- private-key headers and credential signatures such as `AKIA`, `ghp_`, `gho_`,
+  `github_pat_`, `xox*`, bearer headers, and credentials embedded in URLs;
+- assignments or payload fields named `password`, `token`, `secret`, `api_key`,
+  `private_key`, `authorization`, `cookie`, or `credential`;
+- email/phone patterns, chat mentions and 15-20 digit platform IDs;
+- internal domains, hostnames, RFC1918 addresses, MACs, CIDRs, VLANs, and
+  environment-specific device/account names;
+- suspicious tracked filenames such as `.env`, private keys, token files,
+  password files, unencrypted `secrets.yaml`, and generated configs.
+
+Use both contextual searches and a dedicated scanner. Scanner output must be
+redacted:
+
+```bash
+docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest \
+  git /repo --no-banner --redact --exit-code 1
+```
+
+For every outgoing commit, inspect its snapshot, not only the aggregate diff:
+
+```bash
+for commit in $(git rev-list origin/main..HEAD); do
+  git grep -I -n -E '<credential-or-PII-patterns>' "$commit" -- . || true
+done
+```
+
+Classify matches manually. Scanner examples, public endpoints, ciphertext, and
+public keys are not leaks merely because they match a word.
+
+## Phase 3: Verify Vault and Runtime Handling
+
+1. Every sensitive Ansible value must be `!vault` ciphertext or obtained from an
+   approved secret lookup. A variable name is not proof of protection.
+2. Parse/decrypt without printing values:
+
+   ```bash
+   cd ansible
+   ansible-inventory -i inventory.yaml --list \
+     --vault-password-file ~/ansible_key >/dev/null
+   ```
+
+3. Render sensitive templates to mode-`0600` temporary files, assert only safe
+   structural properties, and delete them immediately. Never show the rendered
+   file or include it in logs.
+4. Tasks carrying decrypted values in module arguments, request headers/bodies,
+   rendered facts, or registered API responses need `no_log: true`; use
+   `diff: false` for secret-bearing file/template/copy tasks.
+5. Credential-bearing files should normally be owner-only (`0600`) and parent
+   directories private (`0700`).
+6. Check ignored local credential files with both `git check-ignore -v` and
+   `git ls-files`. An ignored file is safe from normal adds only when untracked.
+7. Run filesystem-mode Gitleaks to find local secret files, but report only
+   redacted paths and rule IDs. Never commit its report.
+
+## Phase 4: Additional Public-Readiness Checks
+
+A public audit also checks whether the outgoing infrastructure is safe to run:
+
+- default credentials combined with external proxy/firewall exposure;
+- duplicate inventory identities targeting the same host;
+- secret-bearing generated files with broad modes;
+- API/deployment tasks that leak values through verbose Ansible output;
+- missing master-playbook integration, health assertions, or cleanup for
+  disabled proxy configuration;
+- non-idempotent tasks and mode churn that trigger repeated restarts.
+
+Run the narrowest available syntax checks, linters, tests, template renders, and
+Python compilation. Separate real findings from tool-environment limitations.
+Do not claim `ansible-lint` passed when collection/include resolution prevented
+it from loading the repository.
+
+## Phase 5: Remove Data Already Committed
+
+Use this only after Jimmy explicitly approves a history rewrite.
+
+1. Record the public remote hash with `git ls-remote` for the later exact lease.
+2. Create and verify a complete recovery bundle, then restrict it to mode `0600`:
+
+   ```bash
+   git bundle create /tmp/homelab-pre-pii-rewrite.bundle --all
+   git bundle verify /tmp/homelab-pre-pii-rewrite.bundle
+   chmod 600 /tmp/homelab-pre-pii-rewrite.bundle
+   ```
+
+3. Preserve tracked worktree/index changes as a binary patch or commit them
+   first. Verify the staged list before and after; do not use `git reset`.
+4. Install the standard `git-filter-repo` tool if unavailable. Create a temporary
+   replacement map containing only approved literal values and explicit
+   redaction markers. Protect the file and never print it.
+5. Rewrite all relevant local branches/tags:
+
+   ```bash
+   git filter-repo --force --replace-text /tmp/pii-replacements.txt
+   ```
+
+   `git-filter-repo` removes `origin` intentionally; restore the approved remote
+   URL afterward. Reapply preserved current-tree changes against the rewritten
+   baseline and resolve only expected conflicts caused by redaction.
+6. Prove each prohibited literal is absent from every local branch and tag, then
+   rerun Gitleaks against history and the worktree.
+7. Commit reviewed current-tree remediation separately.
+8. Verify the remote hash still equals the recorded value, then publish with an
+   exact lease:
+
+   ```bash
+   git push \
+     --force-with-lease=refs/heads/main:<verified-old-remote-hash> \
+     origin HEAD:refs/heads/main
+   ```
+
+9. Fetch the rewritten branch, restore upstream tracking, compare local and
+   remote hashes, and list all remote branches/tags. Rewrite or delete any other
+   ref that retains the old history.
+10. Rerun the prohibited-literal scan and Gitleaks after the push. Delete the
+    replacement file, scanner reports, patches, and recovery bundle only after
+    the public remote is verified.
+
+A force-push removes ordinary ref reachability; it cannot revoke copies in old
+clones or guarantee immediate deletion from hosting-provider caches. Rotate any
+actual credential that was public, even after history cleanup.
+
+## Report
+
+Lead with `READY TO PUSH`, `NOT READY`, or `READY AFTER HISTORY REWRITE`. Include:
+
+- comparison base and ahead/behind count;
+- findings ordered by severity, with redacted path/line evidence;
+- files changed and why;
+- validation commands and outcomes;
+- remaining history/cache/clone risk;
+- exact commit/push status, including whether a force-push occurred.
+
+Follow the `change-logging` skill for every file edit, remote operation, or
+configuration change.

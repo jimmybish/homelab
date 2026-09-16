@@ -439,6 +439,23 @@
     directory_mode: '0700'
   notify: Restart Hermes VirtuaJimmy gateway
 
+- name: Create VirtuaJimmy PII pre-review skill directory
+  ansible.builtin.file:
+    path: "{{ hermes_virtuajimmy_pii_skill_file | dirname }}"
+    state: directory
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0700'
+
+- name: Deploy VirtuaJimmy PII pre-review skill
+  ansible.builtin.template:
+    src: skill-pii-pre-review.md.j2
+    dest: "{{ hermes_virtuajimmy_pii_skill_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  notify: Restart Hermes VirtuaJimmy gateway
+
 - name: Deploy VirtuaJimmy profile environment
   ansible.builtin.template:
     src: profile-virtuajimmy.env.j2
@@ -525,6 +542,23 @@
     directory_mode: '0700'
   notify: Restart Hermes dashboard
 
+- name: Create Copilot public repository audit skill directory
+  ansible.builtin.file:
+    path: "{{ hermes_copilot_audit_skill_file | dirname }}"
+    state: directory
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0700'
+
+- name: Deploy Copilot public repository audit skill
+  ansible.builtin.template:
+    src: skill-public-repo-audit.md.j2
+    dest: "{{ hermes_copilot_audit_skill_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  notify: Restart Hermes dashboard
+
 - name: Deploy Copilot profile environment
   ansible.builtin.template:
     src: profile-copilot.env.j2
@@ -592,6 +626,7 @@
     - "{{ hermes_copilot_soul_file }}"
     - "{{ hermes_copilot_baseline_file }}"
     - "{{ hermes_copilot_review_skill_file }}"
+    - "{{ hermes_copilot_audit_skill_file }}"
     - "{{ hermes_copilot_env_file }}"
     - "{{ hermes_copilot_ssh_private_key_file }}"
   register: hermes_copilot_private_files
@@ -781,6 +816,7 @@
     - "{{ hermes_virtuajimmy_env_file }}"
     - "{{ hermes_virtuajimmy_ssh_private_key_file }}"
     - "{{ hermes_virtuajimmy_grafana_token_file }}"
+    - "{{ hermes_virtuajimmy_pii_skill_file }}"
   register: hermes_virtuajimmy_private_files
   no_log: true
 
