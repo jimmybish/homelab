@@ -28,12 +28,36 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> str:
 
 
 async def _post(path: str, body: dict[str, Any] | None = None) -> str:
-    """POST request to the Sonarr API, return JSON string."""
+    """POST request to the Sonarr API, return an honest acceptance envelope.
+
+    Every successful (2xx) POST is wrapped in the SAME envelope:
+    {status: "accepted", statusCode: <real HTTP status>, note: <no-retry
+    guidance>, upstream: <parsed body or null when the body was empty>}.
+    The envelope fields are authoritative: they describe what the call
+    achieved, while the upstream body is only an echo of what Sonarr
+    returned (async endpoints may answer 202 or 200, and a /release grab
+    echoes a release object whose fields are mostly zeroed).
+    The real status code is never discarded and the upstream body is
+    preserved verbatim under "upstream" instead of being returned bare.
+    Non-2xx responses raise instead of being wrapped.
+    """
     async with httpx.AsyncClient(base_url=SONARR_BASE_URL, timeout=60) as client:
         resp = await client.post(f"{API_PREFIX}{path}", headers=_headers(), json=body or {})
         resp.raise_for_status()
-        data = resp.json() if resp.content else {"status": "ok"}
-        return json.dumps(data, indent=2)
+        upstream = resp.json() if resp.content else None
+        return json.dumps(
+            {
+                "status": "accepted",
+                "statusCode": resp.status_code,
+                "note": (
+                    "Sonarr accepted the request (2xx); it may be queued "
+                    "asynchronously. Verify with get_queue and do NOT "
+                    "retry the same grab."
+                ),
+                "upstream": upstream,
+            },
+            indent=2,
+        )
 
 
 async def _delete(path: str, params: dict[str, Any] | None = None) -> str:
@@ -86,16 +110,30 @@ async def get_episodes(
     series_id: int,
     season_number: Optional[int] = None,
     include_series: Optional[bool] = False,
+    include_episode_file: Optional[bool] = True,
 ) -> str:
-    """List episodes for a TV series. Returns episode id, title, season/episode number, air date, monitored status, and whether a file exists. Use the episode 'id' field when calling search_releases or trigger_episode_search."""
+    """List episodes for a TV series. Returns episode id, title, season/episode number, air date, monitored status, episodeFileId when a file exists, and (when include_episode_file=true, the default) the full episodeFile object including the exact on-disk path, size, quality, and edition. ALWAYS use this (or get_episode_file) to fetch the exact file path BEFORE calling delete_episode_file, and echo that path in the confirmation."""
     return await _get(
         "/episode",
         {
             "seriesId": series_id,
             "seasonNumber": season_number,
             "includeSeries": include_series,
+            "includeEpisodeFile": include_episode_file,
         },
     )
+
+
+@mcp.tool()
+async def get_episode_file(episode_file_id: int) -> str:
+    """Read one episode file's details from Sonarr WITHOUT deleting anything: relative_path, size, quality, dateAdded. Use this right before delete_episode_file to confirm exactly which file on disk will be removed, and echo the path back to the user first. Use get_episodes first to find the episodeFileId."""
+    return await _get(f"/episodefile/{episode_file_id}")
+
+
+@mcp.tool()
+async def delete_episode_file(episode_file_id: int) -> str:
+    """Delete one episode file from disk while keeping the series and episode in Sonarr. DESTRUCTIVE and irreversible: before calling, fetch the file with get_episode_file (or get_episodes with include_episode_file=true) and echo its exact path in the user confirmation."""
+    return await _delete(f"/episodefile/{episode_file_id}")
 
 
 @mcp.tool()
@@ -129,19 +167,19 @@ async def search_releases(
 
 @mcp.tool()
 async def grab_release(guid: str, indexer_id: int) -> str:
-    """Grab a specific release and push it to the download client. Use search_releases first to find the guid and indexerId of the release you want to download."""
+    """Grab a specific release and push it to the download client. Use search_releases first to find the guid and indexerId of the release you want to download. The response is an async ACCEPTANCE envelope and its fields are authoritative: status=accepted plus the real 2xx statusCode means the grab was queued, NOT that it completed; verify with get_queue. The upstream body may be a zeroed release echo (size 0, protocol unknown) and must not be read as the result. Never retry this call to 'confirm' success, that double-queues the release."""
     return await _post("/release", {"guid": guid, "indexerId": indexer_id})
 
 
 @mcp.tool()
 async def trigger_episode_search(episode_ids: list[int]) -> str:
-    """Trigger an automatic search for one or more episodes. Sonarr will search all indexers and grab the best matching release per its quality profile. Use get_episodes first to find the episode IDs."""
+    """Trigger an automatic search for one or more episodes. Sonarr will search all indexers and grab the best matching release per its quality profile. Use get_episodes first to find the episode IDs. Response is an async acceptance envelope whose fields are authoritative (status=accepted and the real 2xx statusCode; command JSON echoed under upstream); verify results with get_queue, do not re-issue the search."""
     return await _post("/command", {"name": "EpisodeSearch", "episodeIds": episode_ids})
 
 
 @mcp.tool()
 async def trigger_series_search(series_id: int) -> str:
-    """Trigger an automatic search for all monitored episodes in a series. Sonarr will search all indexers and grab the best matching releases per its quality profile. Use get_series first to find the series_id."""
+    """Trigger an automatic search for all monitored episodes in a series. Sonarr will search all indexers and grab the best matching releases per its quality profile. Use get_series first to find the series_id. Response is an async acceptance envelope whose fields are authoritative (status=accepted and the real 2xx statusCode; command JSON echoed under upstream); verify results with get_queue, do not re-issue the search."""
     return await _post("/command", {"name": "SeriesSearch", "seriesId": series_id})
 
 

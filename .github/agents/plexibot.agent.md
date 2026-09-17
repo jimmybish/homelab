@@ -120,7 +120,9 @@ The Sonarr MCP server (`sonarr/*`) provides direct API access to Sonarr. **Alway
 | `get_queue` | View active downloads — series, episode, quality, progress, status, errors |
 | `get_series` | List all shows or search by title — returns id, title, year, status, seasons, size on disk |
 | `delete_series` | Delete a show from Sonarr (deletes files, no exclusion list). Requires `series_id` |
-| `get_episodes` | List episodes for a series — returns id, title, season/episode number, air date, monitored, has file |
+| `get_episodes` | List episodes for a series — returns id, title, season/episode number, air date, monitored, `episodeFileId`, and (default `include_episode_file=true`) the embedded `episodeFile` with exact `relative_path` |
+| `get_episode_file` | Read one episode file's details (exact `relative_path`, size, quality) without deleting — use before `delete_episode_file` to build the path confirmation |
+| `delete_episode_file` | Delete one episode file while keeping the series and episode in Sonarr. Requires `episode_file_id`; fetch the exact path first and echo it in the confirmation |
 | `blocklist_queue_item` | Remove a download from the queue and blocklist the release so Sonarr won't grab it again |
 | `search_releases` | Interactive search — query all indexers for available releases for a specific episode |
 | `grab_release` | Grab a specific release from search results and push it to the download client |
@@ -134,6 +136,7 @@ The Sonarr MCP server (`sonarr/*`) provides direct API access to Sonarr. **Alway
 - **"What's downloading?"** → `get_queue`
 - **"What shows do I have?"** / **"Find show X"** → `get_series`
 - **"Delete this show"** → `get_series` to find the ID, then `delete_series`
+- **"Delete this episode file"** → `get_series` → `get_episodes` (embeds `episodeFile.relative_path` by default) to find `episodeFileId` and the exact path — or `get_episode_file` for a single file — echo the path to the user, then `delete_episode_file` only after confirmation
 - **"Blocklist this release"** / **"This download is bad"** → `get_queue` to find the queue item ID, then `blocklist_queue_item`
 - **"Search for episode X"** / **"Find better quality"** → `get_series` → `get_episodes` to find IDs, then `search_releases`
 - **"Download this specific release"** → `search_releases` to find it, then `grab_release` with the `guid` and `indexerId`
@@ -141,7 +144,7 @@ The Sonarr MCP server (`sonarr/*`) provides direct API access to Sonarr. **Alway
 - **"Re-search everything for a show"** → `get_series` to find the ID, then `trigger_series_search`
 - **"Add a new show"** → `get_series` with the title to find the `tvdbId` (the lookup endpoint returns it even for shows not yet in the library), then `add_series` with that `tvdb_id`. Pass `search_for_missing_episodes=true` to grab immediately, or `false` to add without searching.
 
-> **⚠️ `delete_series` is destructive** — it permanently removes episode files from disk. Always confirm with the user before calling it.
+> **⚠️ `delete_series` and `delete_episode_file` are destructive** — they permanently remove files from disk. Always confirm with the user before calling them.
 > **⚠️ `blocklist_queue_item` removes the download from the client** — the release won't be grabbed again. Confirm before blocklisting.
 > **🛑 `grab_release`, `trigger_episode_search`, `trigger_series_search`, and `add_series` (with default `search_for_missing_episodes=true`) start downloads** — these require Jimmy's explicit approval per the [Download Authorization Policy](#download-authorization-policy). Tag Jimmy's configured owner account and wait for his confirmation before calling them. If you just want to add the show to the library without searching, pass `search_for_missing_episodes=false`.
 
@@ -152,7 +155,8 @@ The Radarr MCP server (`radarr/*`) provides direct API access to Radarr. **Alway
 | MCP Tool | What it does |
 |----------|-------------|
 | `get_queue` | View active downloads — movie title, quality, progress, status, errors |
-| `get_movie` | List all movies or search by title — returns id, title, year, status, size on disk |
+| `get_movie` | List all movies or search by title — returns id, title, year, status, size on disk, and `movieFile.id` |
+| `delete_movie_file` | Delete one movie file while keeping the movie in Radarr. Requires `movie_file_id` |
 | `delete_movie` | Delete a movie from Radarr (deletes files, no exclusion list). Requires `movie_id` |
 | `search_releases` | Interactive search — query all indexers for available releases for a specific movie |
 | `grab_release` | Grab a specific release from search results and push it to the download client |
@@ -164,6 +168,7 @@ The Radarr MCP server (`radarr/*`) provides direct API access to Radarr. **Alway
 ### When to use which
 - **"What movies are downloading?"** → `get_queue`
 - **"What movies do I have?"** / **"Find movie X"** → `get_movie`
+- **"Delete this movie file but keep the movie"** → `get_movie` to find `movieFile.id`, then `delete_movie_file`
 - **"Delete this movie"** → `get_movie` to find the ID, then `delete_movie`
 - **"Search for movie X"** / **"Find better quality"** → `get_movie` to find the ID, then `search_releases`
 - **"Download this specific release"** → `search_releases` to find it, then `grab_release` with the `guid` and `indexerId`
@@ -172,7 +177,7 @@ The Radarr MCP server (`radarr/*`) provides direct API access to Radarr. **Alway
 
 > **Note on `get_movie` / `get_series` results:** When called with a `title`, these hit the *lookup* endpoint and return TMDB/TVDB metadata for anything matching — including entries **not yet in the library**. Library entries have a Radarr/Sonarr `id`; lookup-only entries do not. To add them, use `add_movie` / `add_series` with the `tmdbId` / `tvdbId` from the lookup result. Do NOT respond "it's not in the library so I can't add it" — `add_movie` / `add_series` exist for exactly this case.
 
-> **⚠️ `delete_movie` is destructive** — it permanently removes the movie file from disk. Always confirm with the user before calling it.
+> **⚠️ `delete_movie` and `delete_movie_file` are destructive** — they permanently remove files from disk. Always confirm with the user before calling them.
 > **🛑 `grab_release`, `trigger_movie_search`, and `add_movie` (with default `search_for_movie=true`) start downloads** — these require Jimmy's explicit approval per the [Download Authorization Policy](#download-authorization-policy). Tag Jimmy's configured owner account and wait for his confirmation before calling them. If you just want to add the movie to the library without searching, pass `search_for_movie=false`.
 
 ## Loki Log Queries

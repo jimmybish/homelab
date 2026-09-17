@@ -382,7 +382,35 @@
       %s
   notify: Restart Hermes Plexibot gateway
 
+- name: Assert Plexibot SOUL vault identifiers resolve
+  ansible.builtin.assert:
+    that:
+      - hermes_plexibot_loki_uid | length > 0
+      - hermes_plexibot_prometheus_uid | length > 0
+      - hermes_plexibot_qnap_long_job | length > 0
+      - hermes_plexibot_qnap_short_job | length > 0
+      - hermes_plexibot_qnap_multimedia_volume_index | length > 0
+      - hermes_plexibot_qnap_volume_reference | length > 0
+    fail_msg: >-
+      Plexibot SOUL requires every private non-hostname infrastructure
+      identifier to resolve from vault-protected group vars.
+  no_log: true
+  changed_when: false
+
+- name: Assert Plexibot SOUL inventory-derived hostnames resolve
+  ansible.builtin.assert:
+    that:
+      - plex_host | length > 0
+      - media_stack_host | length > 0
+      - tracearr_host | length > 0
+    fail_msg: >-
+      Plexibot SOUL hostnames derive from inventory groups via the global
+      vars plex_host, media_stack_host, and tracearr_host
+      (group_vars/all/vars.yaml); a missing group or member breaks rendering.
+  changed_when: false
+
 - name: Deploy Plexibot identity
+  diff: false
   ansible.builtin.template:
     src: profile-plexibot-soul.md.j2
     dest: "{{ hermes_plexibot_soul_file }}"

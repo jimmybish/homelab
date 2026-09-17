@@ -28,12 +28,36 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> str:
 
 
 async def _post(path: str, body: dict[str, Any] | None = None) -> str:
-    """POST request to the Radarr API, return JSON string."""
+    """POST request to the Radarr API, return an honest acceptance envelope.
+
+    Every successful (2xx) POST is wrapped in the SAME envelope:
+    {status: "accepted", statusCode: <real HTTP status>, note: <no-retry
+    guidance>, upstream: <parsed body or null when the body was empty>}.
+    The envelope fields are authoritative: they describe what the call
+    achieved, while the upstream body is only an echo of what Radarr
+    returned (async endpoints may answer 202 or 200, and a /release grab
+    echoes a release object whose fields are mostly zeroed).
+    The real status code is never discarded and the upstream body is
+    preserved verbatim under "upstream" instead of being returned bare.
+    Non-2xx responses raise instead of being wrapped.
+    """
     async with httpx.AsyncClient(base_url=RADARR_BASE_URL, timeout=60) as client:
         resp = await client.post(f"{API_PREFIX}{path}", headers=_headers(), json=body or {})
         resp.raise_for_status()
-        data = resp.json() if resp.content else {"status": "ok"}
-        return json.dumps(data, indent=2)
+        upstream = resp.json() if resp.content else None
+        return json.dumps(
+            {
+                "status": "accepted",
+                "statusCode": resp.status_code,
+                "note": (
+                    "Radarr accepted the request (2xx); it may be queued "
+                    "asynchronously. Verify with get_queue and do NOT "
+                    "retry the same grab."
+                ),
+                "upstream": upstream,
+            },
+            indent=2,
+        )
 
 
 async def _delete(path: str, params: dict[str, Any] | None = None) -> str:
@@ -64,10 +88,16 @@ async def get_queue(
 
 @mcp.tool()
 async def get_movie(title: Optional[str] = None) -> str:
-    """List all movies in Radarr, or search by title. Each movie includes id, title, year, status, path, size on disk, quality profile, hasFile flag, and monitored status. Use the 'id' field when calling delete_movie."""
+    """List all movies in Radarr, or search by title. Each movie includes id, title, year, status, path, size on disk, quality profile, hasFile flag, movieFile details, and monitored status. Use the movie 'id' when calling delete_movie, and movieFile.id when calling delete_movie_file."""
     if title:
         return await _get("/movie/lookup", {"term": title})
     return await _get("/movie")
+
+
+@mcp.tool()
+async def delete_movie_file(movie_file_id: int) -> str:
+    """Delete one movie file from disk while keeping the movie in Radarr. Use get_movie first to find movieFile.id."""
+    return await _delete(f"/moviefile/{movie_file_id}")
 
 
 @mcp.tool()
@@ -87,13 +117,13 @@ async def search_releases(movie_id: int) -> str:
 
 @mcp.tool()
 async def grab_release(guid: str, indexer_id: int) -> str:
-    """Grab a specific release and push it to the download client. Use search_releases first to find the guid and indexerId of the release you want to download."""
+    """Grab a specific release and push it to the download client. Use search_releases first to find the guid and indexerId of the release you want to download. The response is an async ACCEPTANCE envelope and its fields are authoritative: status=accepted plus the real 2xx statusCode means the grab was queued, NOT that it completed; verify with get_queue. The upstream body may be a zeroed release echo (size 0, protocol unknown) and must not be read as the result. Never retry this call to 'confirm' success, that double-queues the release."""
     return await _post("/release", {"guid": guid, "indexerId": indexer_id})
 
 
 @mcp.tool()
 async def trigger_movie_search(movie_ids: list[int]) -> str:
-    """Trigger an automatic search for one or more movies. Radarr will search all indexers and grab the best matching release per its quality profile. Use get_movie first to find the movie IDs."""
+    """Trigger an automatic search for one or more movies. Radarr will search all indexers and grab the best matching release per its quality profile. Use get_movie first to find the movie IDs. Response is an async acceptance envelope whose fields are authoritative (status=accepted and the real 2xx statusCode; command JSON echoed under upstream); verify results with get_queue, do not re-issue the search."""
     return await _post("/command", {"name": "MoviesSearch", "movieIds": movie_ids})
 
 

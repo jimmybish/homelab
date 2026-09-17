@@ -19,6 +19,21 @@ hermes_plexibot_soul_file: "{{ hermes_profiles_dir }}/plexibot/SOUL.md"
 hermes_plexibot_usermap_bin: "{{ hermes_bin_dir }}/plexibot-usermap"
 hermes_plexibot_meme_bin: "{{ hermes_bin_dir }}/plexibot-meme"
 hermes_plexibot_meme_script: "{{ hermes_skills_dir }}/creative/meme-generation/scripts/generate_meme.py"
+# Plexibot SOUL service reference. URLs are thin aliases to the global
+# direct-URL vars in group_vars/all/vars.yaml (owner directive 2026-09-17):
+# every service URL exists once globally, derived from the inventory-based
+# host vars (plex_host, media_stack_host, tracearr_host). Var NAMES are
+# unchanged so templates/tasks need zero edits.
+# Non-hostname private identifiers stay vaulted in group_vars/all.
+# Verified against live listeners and Loki host labels 2026-09-16/17.
+hermes_plexibot_plex_url: "{{ internal_plex_direct_url }}"
+hermes_plexibot_sonarr_url: "{{ internal_sonarr_direct_url }}"
+hermes_plexibot_radarr_url: "{{ internal_radarr_direct_url }}"
+hermes_plexibot_prowlarr_url: "{{ internal_prowlarr_direct_url }}"
+hermes_plexibot_lidarr_url: "{{ internal_lidarr_direct_url }}"
+hermes_plexibot_sabnzbd_url: "{{ internal_sabnzbd_direct_url }}"
+hermes_plexibot_qbittorrent_url: "{{ internal_qbittorrent_direct_url }}"
+hermes_plexibot_tracearr_url: "{{ internal_tracearr_direct_url }}"
 hermes_plexibot_user_map_csv: "{{ hermes_profiles_dir }}/plexibot/skills/discord-plex-user-mapping/user_map.csv"
 hermes_hass_grafana_token_file: "{{ hermes_secrets_dir }}/hass-grafana-token"
 hermes_virtuajimmy_profile_dir: "{{ hermes_profiles_dir }}/virtuajimmy"
@@ -39,10 +54,10 @@ hermes_virtuajimmy_local_documents:
   triage_skill: "{{ hermes_virtuajimmy_triage_skill_file }}"
 hermes_mcp_grafana_install_root: "{{ hermes_user_home }}/.local/lib/mcp-grafana"
 hermes_mcp_grafana_bin: "{{ hermes_bin_dir }}/mcp-grafana"
-hermes_plexibot_mcp_tracearr_url: "http://{{ groups['mcp_tracearr_host'][0] }}:8850"
-hermes_plexibot_mcp_sonarr_url: "http://{{ groups['mcp_sonarr_host'][0] }}:8851"
-hermes_plexibot_mcp_radarr_url: "http://{{ groups['mcp_radarr_host'][0] }}:8852"
-hermes_virtuajimmy_mcp_context7_url: "https://mcp.context7.com/mcp"
+hermes_plexibot_mcp_tracearr_url: "{{ internal_mcp_tracearr_url }}"
+hermes_plexibot_mcp_sonarr_url: "{{ internal_mcp_sonarr_url }}"
+hermes_plexibot_mcp_radarr_url: "{{ internal_mcp_radarr_url }}"
+hermes_virtuajimmy_mcp_context7_url: "{{ external_context7_mcp_url }}"
 hermes_virtuajimmy_mcp_tracearr_url: "{{ hermes_plexibot_mcp_tracearr_url }}"
 hermes_virtuajimmy_mcp_sonarr_url: "{{ hermes_plexibot_mcp_sonarr_url }}"
 hermes_virtuajimmy_mcp_radarr_url: "{{ hermes_plexibot_mcp_radarr_url }}"
@@ -109,12 +124,12 @@ hermes_gateway_process_name: hermes
 hermes_model:
   default: qwen38-flash-next-nvfp4
   provider: custom
-  base_url: "http://sparky.{{ internal_domain }}:4000"
+  base_url: "{{ internal_sparky_url }}"
   context_length: 262144
 
 hermes_custom_providers:
   - name: Qwen 3.8 Flash Next NVFP4
-    base_url: "http://sparky.{{ internal_domain }}:4000"
+    base_url: "{{ internal_sparky_url }}"
     model: qwen38-flash-next-nvfp4
     api_mode: anthropic_messages
     models:
