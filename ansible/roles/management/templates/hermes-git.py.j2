@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""hermes-git - fixed-interface git helper for the kanban branch workflow.
+
+Rendered by Ansible from ansible/roles/management/templates/hermes-git.py.j2.
+Do not edit the deployed copy; edit the template and redeploy.
+
+Security contract (argv discipline, mirroring plexibot-usermap):
+- Every git command is executed through a subprocess argv list. Nothing is
+  ever passed through a shell, so caller-side quoting is irrelevant and
+  shell metacharacters cannot be interpreted.
+- Subcommands are FIXED. There is no "pass an arbitrary git command" mode and
+  no ref, branch, or placeholder argument is ever accepted. The branch under
+  work is derived from the CURRENT worktree (HEAD), never from caller text.
+- The only model-derived values accepted are:
+    * the task id, taken from the dispatcher env var HERMES_KANBAN_TASK (a
+      quoted-heredoc STDIN line is accepted only for manual recovery and is
+      validated against a strict task-id regex), and
+    * repo-relative paths and the commit subject, which must arrive on STDIN
+      through a quoted heredoc (values are shell-literal inside the heredoc).
+- Every accepted value is validated against a strict whitelist regex before
+  it can reach a git argv list.
+
+Usage (run inside a task worktree; the read subcommands take no arguments):
+  hermes-git worktree    create or reuse the task worktree for the card id in
+                         the dispatcher env var HERMES_KANBAN_TASK (bare
+                         subcommand, no arguments of any kind)
+  hermes-git base        print the resolved base ref and its short SHA
+  hermes-git files       changed file names between the base and HEAD
+  hermes-git log         commit list between the base and HEAD (oneline)
+  hermes-git diff        branch diff; an optional repo-relative path list on
+                         stdin (one path per line, quoted heredoc) narrows scope
+  hermes-git check       git whitespace check across the branch diff
+  hermes-git show        print one committed file at HEAD; the path arrives on
+                         stdin through a quoted heredoc
+  hermes-git status      short status with branch
+  hermes-git ignored     short status including ignored files
+  hermes-git commit      stdin line 1 = commit subject, remaining lines =
+                         pathspecs; works only inside a task worktree
+  hermes-git help        this text
+
+Manual recovery only: show/diff also accept validated plain arguments.
+"""
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+
+REPO = "{{ management_repo_dir }}"
+WORKTREE_ROOT = "{{ management_worktree_root }}"
+
+TASK_ID_RE = re.compile(r"^t_[0-9a-z]{4,20}$")
+# Repo-relative paths only: plain characters, no leading slash, no '..' hop.
+PATH_RE = re.compile(r"^(?!/)(?!.*\.\.)[A-Za-z0-9._/-]+$")
+SUBJECT_MAX = 200
+
+
+def die(message: str) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def run(args: list[str], cwd: str | None = None) -> subprocess.CompletedProcess[str]:
+    """Run git with an argv list. Never shell=True, never a shell string."""
+    return subprocess.run(args, cwd=cwd, text=True, capture_output=True, check=False)
+
+
+def git(*args: str, cwd: str | None = None) -> subprocess.CompletedProcess[str]:
+    return run(["git", *args], cwd=cwd)
+
+
+def toplevel() -> str:
+    proc = git("rev-parse", "--show-toplevel")
+    if proc.returncode != 0:
+        die("current directory is not inside a git worktree; cd into your task worktree first")
+    return proc.stdout.strip()
+
+
+def resolve_base(toplevel_dir: str) -> tuple[str, str]:
+    """Pick the branch base exactly as the SOUL policy requires.
+
+    If local main is ahead of origin/main (origin is stale), base on main;
+    otherwise base on origin/main. Returns (ref, short-sha)."""
+    ahead = git("-C", REPO, "rev-list", "--count", "origin/main..main")
+    if ahead.returncode != 0:
+        die("cannot compare origin/main to main; check the repository")
+    ref = "main" if int(ahead.stdout.strip()) > 0 else "origin/main"
+    sha = git("-C", toplevel_dir, "rev-parse", "--short", ref)
+    if sha.returncode != 0:
+        die(f"base ref {ref} does not resolve")
+    return ref, sha.stdout.strip()
+
+
+def read_stdin_lines(label: str, allow_empty: bool = False) -> list[str]:
+    raw = sys.stdin.buffer.read(65536)
+    if b"\x00" in raw:
+        die("stdin contains a NUL byte")
+    text = raw.decode("utf-8", errors="replace")
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    if lines and lines[-1] == "":
+        lines.pop()
+    if not lines or not any(line.strip() for line in lines):
+        if allow_empty:
+            return []
+        die(f"stdin is empty; supply {label} via a quoted heredoc (e.g. <<'EOF_x7k2')")
+    return lines
+
+
+def checked_path(value: str) -> str:
+    if not PATH_RE.match(value):
+        die(f"invalid path '{value}' (repo-relative, plain characters, no leading slash, no '..')")
+    return value
+
+
+def cmd_worktree(argv: list[str]) -> int:
+    if argv:
+        die("worktree takes no arguments; the card id comes from HERMES_KANBAN_TASK")
+    task_id = os.environ.get("HERMES_KANBAN_TASK", "").strip()
+    if not task_id:
+        die("HERMES_KANBAN_TASK is unset; this subcommand only runs inside a dispatched worker")
+    if not TASK_ID_RE.match(task_id):
+        die("invalid task id in HERMES_KANBAN_TASK (expected form t_<alphanumeric>)")
+    branch = f"wt/{task_id}"
+    path = os.path.join(WORKTREE_ROOT, task_id)
+
+    if os.path.isdir(path):
+        existing = git("-C", path, "rev-parse", "--abbrev-ref", "HEAD")
+        if existing.returncode == 0 and existing.stdout.strip() == branch:
+            print(f"worktree already exists at {path} on {branch}")
+            return 0
+        die(f"{path} exists but is not on {branch}; refusing to touch it")
+
+    os.makedirs(WORKTREE_ROOT, exist_ok=True)
+    base_ref, base_sha = resolve_base(REPO)
+    has_branch = git("-C", REPO, "rev-parse", "--verify", "--quiet", branch)
+    if has_branch.returncode == 0:
+        proc = git("-C", REPO, "worktree", "add", path, branch)
+    else:
+        proc = git("-C", REPO, "worktree", "add", "-b", branch, path, base_ref)
+    if proc.returncode != 0:
+        die(f"worktree add failed: {proc.stderr.strip()}")
+    print(f"worktree: {path}")
+    print(f"branch: {branch}")
+    print(f"base: {base_ref} {base_sha}")
+    return 0
+
+
+def cmd_base() -> int:
+    top = toplevel()
+    ref, sha = resolve_base(top)
+    print(f"{ref} {sha}")
+    return 0
+
+
+def paths_from(argv: list[str]) -> list[str]:
+    if argv:
+        return [checked_path(value) for value in argv]
+    if sys.stdin.isatty():
+        return []
+    return [checked_path(value) for value in read_stdin_lines("repo-relative paths, one per line", allow_empty=True)]
+
+
+def cmd_diff(argv: list[str]) -> int:
+    top = toplevel()
+    base, _ = resolve_base(top)
+    args = ["diff", f"{base}...HEAD"]
+    paths = paths_from(argv)
+    if paths:
+        args += ["--", *paths]
+    proc = git(*args, cwd=top)
+    sys.stdout.write(proc.stdout)
+    sys.stderr.write(proc.stderr)
+    return proc.returncode
+
+
+def cmd_log() -> int:
+    top = toplevel()
+    base, _ = resolve_base(top)
+    proc = git("log", "--oneline", f"{base}..HEAD", cwd=top)
+    sys.stdout.write(proc.stdout)
+    sys.stderr.write(proc.stderr)
+    return proc.returncode
+
+
+def cmd_files() -> int:
+    top = toplevel()
+    base, _ = resolve_base(top)
+    proc = git("diff", "--name-only", f"{base}...HEAD", cwd=top)
+    sys.stdout.write(proc.stdout)
+    sys.stderr.write(proc.stderr)
+    return proc.returncode
+
+
+def cmd_check() -> int:
+    top = toplevel()
+    base, _ = resolve_base(top)
+    proc = git("diff", "--check", f"{base}...HEAD", cwd=top)
+    sys.stdout.write(proc.stdout)
+    sys.stderr.write(proc.stderr)
+    if proc.returncode == 0:
+        print("diff --check clean")
+    return proc.returncode
+
+
+def cmd_show(argv: list[str]) -> int:
+    top = toplevel()
+    paths = paths_from(argv)
+    if len(paths) != 1:
+        die("show takes exactly one repo-relative path (via stdin heredoc or one argv argument for manual recovery)")
+    proc = git("show", f"HEAD:{paths[0]}", cwd=top)
+    sys.stdout.write(proc.stdout)
+    sys.stderr.write(proc.stderr)
+    return proc.returncode
+
+
+def cmd_status(extra: list[str]) -> int:
+    top = toplevel()
+    proc = git("status", "--short", "--branch", *extra, cwd=top)
+    sys.stdout.write(proc.stdout)
+    sys.stderr.write(proc.stderr)
+    return proc.returncode
+
+
+def cmd_commit() -> int:
+    top = toplevel()
+    if os.path.realpath(top) == os.path.realpath(REPO):
+        die("refusing to commit in the shared checkout; commit only inside a task worktree")
+    lines = read_stdin_lines("a commit subject line plus one pathspec per line")
+    subject = lines[0].strip()
+    if not subject or len(subject) > SUBJECT_MAX:
+        die(f"line 1 of stdin must be a commit subject of 1-{SUBJECT_MAX} characters")
+    if any(char in subject for char in "\x00\x0a\x0d"):
+        die("commit subject must be a single line")
+    paths = [checked_path(value.strip()) for value in lines[1:]]
+    if not paths:
+        die("no pathspecs given; line 2+ of stdin must list the files to commit")
+
+    # New files must be staged explicitly (pathspec-scoped, never 'git add -A').
+    untracked: list[str] = []
+    for value in paths:
+        tracked = git("ls-files", "--error-unmatch", "--", value, cwd=top)
+        if tracked.returncode != 0:
+            untracked.append(value)
+    if untracked:
+        proc = git("add", "--", *untracked, cwd=top)
+        if proc.returncode != 0:
+            die(f"git add failed: {proc.stderr.strip()}")
+
+    proc = git("commit", "-m", subject, "--", *paths, cwd=top)
+    sys.stdout.write(proc.stdout)
+    sys.stderr.write(proc.stderr)
+    return proc.returncode
+
+
+USAGE = __doc__
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if not argv or argv[0] in {"-h", "--help", "help"}:
+        print(USAGE)
+        return 0 if argv else 1
+    command = argv[0]
+    if command == "worktree":
+        return cmd_worktree(argv[1:])
+    if command == "base":
+        return cmd_base()
+    if command == "diff":
+        return cmd_diff(argv[1:])
+    if command == "log":
+        return cmd_log()
+    if command == "files":
+        return cmd_files()
+    if command == "check":
+        return cmd_check()
+    if command == "show":
+        return cmd_show(argv[1:])
+    if command == "status":
+        return cmd_status([])
+    if command == "ignored":
+        return cmd_status(["--ignored"])
+    if command == "commit":
+        return cmd_commit()
+    die(f"unknown subcommand '{command}' (see: hermes-git help)")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

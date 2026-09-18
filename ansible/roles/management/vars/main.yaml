@@ -4,6 +4,13 @@
 management_bin_dir: "/srv/homelab/bin"
 management_trivy_scan_script_path: "{{ management_bin_dir }}/trivy-scan.sh"
 
+# Fixed-interface git helper for the kanban branch-per-task workflow. Deployed
+# beside the Trivy script for the same reason: the virtuajimmy agent runs it on
+# mgmt and the template (not the deployed copy) is the source of truth.
+management_repo_dir: "/srv/homelab"
+management_worktree_root: "/home/virtuajimmy/homelab.worktrees"
+management_hermes_git_script_path: "{{ management_bin_dir }}/hermes-git"
+
 management_trivy_scan_hosts:
   - docker-1
   - docker-2
