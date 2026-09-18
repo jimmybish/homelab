@@ -1,3 +1,4 @@
 ---
 # Plex host overrides
 alloy_plex_logs_enabled: true
+alloy_collect_docker_nfs_volumes: true

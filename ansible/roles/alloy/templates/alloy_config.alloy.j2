@@ -131,6 +131,12 @@ prometheus.scrape "node_exporter" {
 }
 {% else %}
 prometheus.exporter.unix "local" {
+{% if alloy_collect_docker_nfs_volumes | bool %}
+  filesystem {
+    fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+    mount_points_exclude = "^/(dev|proc|run/credentials/.+|sys)($|/)|^/var/lib/docker/(buildkit|containers|image|network|overlay2|plugins|runtimes|swarm|tmp|trust)($|/)"
+  }
+{% endif %}
 }
 
 prometheus.scrape "node_exporter" {

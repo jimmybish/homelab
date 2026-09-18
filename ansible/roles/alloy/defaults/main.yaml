@@ -4,3 +4,7 @@
 # service on 127.0.0.1:9100 so a stalled/busy Alloy process can't block metrics
 # collection (see group_vars/spark for the host that needs this).
 alloy_node_exporter_mode: "embedded"
+
+# Keep Alloy's default /var/lib/docker exclusion and service capabilities unless
+# a host needs metrics from NFS mounts beneath Docker's named-volume directory.
+alloy_collect_docker_nfs_volumes: false

@@ -387,10 +387,6 @@
     that:
       - hermes_plexibot_loki_uid | length > 0
       - hermes_plexibot_prometheus_uid | length > 0
-      - hermes_plexibot_qnap_long_job | length > 0
-      - hermes_plexibot_qnap_short_job | length > 0
-      - hermes_plexibot_qnap_multimedia_volume_index | length > 0
-      - hermes_plexibot_qnap_volume_reference | length > 0
     fail_msg: >-
       Plexibot SOUL requires every private non-hostname infrastructure
       identifier to resolve from vault-protected group vars.

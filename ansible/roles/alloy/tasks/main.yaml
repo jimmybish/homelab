@@ -63,6 +63,32 @@
     append: true
   notify: Restart Alloy
 
+- name: Create Alloy systemd override directory for Docker NFS metrics
+  ansible.builtin.file:
+    path: /etc/systemd/system/alloy.service.d
+    state: directory
+    mode: '0755'
+  when: alloy_collect_docker_nfs_volumes | bool
+
+- name: Allow Alloy to stat protected Docker NFS mountpoints
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/alloy.service.d/docker-nfs-filesystems.conf
+    content: |
+      [Service]
+      AmbientCapabilities=CAP_DAC_READ_SEARCH
+    mode: '0644'
+    owner: root
+    group: root
+  when: alloy_collect_docker_nfs_volumes | bool
+  notify: Restart Alloy
+
+- name: Remove Docker NFS filesystem capability override when disabled
+  ansible.builtin.file:
+    path: /etc/systemd/system/alloy.service.d/docker-nfs-filesystems.conf
+    state: absent
+  when: not (alloy_collect_docker_nfs_volumes | bool)
+  notify: Restart Alloy
+
 - name: Deploy Alloy configuration
   ansible.builtin.template:
     src: alloy_config.alloy.j2
