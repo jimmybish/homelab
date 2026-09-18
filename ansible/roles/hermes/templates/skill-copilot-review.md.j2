@@ -1,17 +1,19 @@
 {#- Rendered by Ansible; deployed copy is read-only for the agent. -#}
 ---
 name: copilot-review
-description: 'Use when: reviewing staged homelab changes on a kanban review card. Verdict + fix cards only; never edit, stage, or deploy.'
+description: 'Use when: reviewing a branch-diff change set handed off on a kanban review card. Verdict + fix cards only; never edit, stage, merge, or deploy.'
 ---
 
 # Copilot Review
 
-Method for reviewing a staged change set on the `homelab` board. You are the
-gate, not the author. Read the deployed repo baseline first with
-`profile_read(document="repo_baseline")`. It is the Hermes adaptation of
-`.github/copilot-instructions.md` and defines repo rules, working style,
-change-logging mandate, and the profile map. Use `profile_read`, never the SSH
-terminal, for Hermes-local profile documents.
+Method for reviewing a branch change set on the `homelab` board. Since the
+2026-09-20 workflow ruling, the review artifact is the **BRANCH DIFF** —
+`git diff origin/main...<branch>` plus the branch's commit list — not the
+staged index of the shared checkout. You are the gate, not the author. Read
+the deployed repo baseline first with `profile_read(document="repo_baseline")`.
+It is the Hermes adaptation of `.github/copilot-instructions.md` and defines
+repo rules, working style, change-logging mandate, and the profile map. Use
+`profile_read`, never the SSH terminal, for Hermes-local profile documents.
 
 ## Hard rule: never mutate (finding 2)
 
@@ -19,44 +21,53 @@ Your SSH identity on mgmt is write-capable. That is an owner decision, not a
 bug — do not request or build a read-only identity, and do not use the write
 access. On review cards you:
 
-- never edit any file, never `git add`/`commit`/`push`/`reset`/`stash`/`rebase`,
+- never edit any file, never `git add`/`commit`/`merge`/`push`/`reset`/`stash`/`rebase`,
 - never run a deploy playbook or any command that changes live state,
-- never fix a finding yourself, even a one-liner, even when the fix is obvious.
+- never fix a finding yourself, even a one-liner, even when the fix is obvious,
+- never touch `main` or the shared `/srv/homelab` checkout; read the branch
+  with read-only git plumbing (`git diff`, `git show`, `git log` against
+  refs), from inside the task worktree where practical.
 
 All output goes into the card: verdict in the completion summary, findings
 verbatim in exactly one fix card via `kanban_create` (`assignee: virtuajimmy`,
 `parents: [<your card id>]`). If you catch yourself typing an edit command,
 stop and put the instruction in the fix card instead.
 
-Allowed commands: `git status`, `git diff`, `git diff --cached`,
-`git ls-files`, `git show`, `git log`, `cat`/`read`, `grep`, `ansible-lint`
-(scoped), `ansible-playbook --syntax-check`, `ansible-vault view` (never echo
+Allowed commands: `git status`, `git diff`, `git log`, `git ls-files`,
+`git show`, `cat`/`read`, `grep`, `ansible-lint` (scoped),
+`ansible-playbook --syntax-check`, `ansible-vault view` (never echo
 plaintext), `stat`, `sha256sum`, `yamllint`, `--check`/`--dry-run` inspection
-that cannot write. Anything ambiguous: if it can change state, it is out.
+that cannot write. For rendered-file checks use `git show <branch>:<path>`
+against the branch, never against the shared checkout. Anything ambiguous: if
+it can change state, it is out.
 
-## Staging reconciliation (finding 4)
+## Branch reconciliation (finding 4)
 
-The card's claimed file list is a CLAIM, not ground truth. Derive reality:
+The card's claimed branch, file list, and commit list are a CLAIM, not ground
+truth. Derive reality from the refs:
 
 ```
-cd /srv/homelab && git diff --cached --name-only
+cd /srv/homelab
+git diff --name-only origin/main...<branch>
+git log --oneline origin/main..<branch>
 ```
 
 Then compare set-to-set against the card body / implementer summary:
 
-- **Extra file staged** (in git, not on the card) → FAIL. Unreviewed content
-  is about to ship.
-- **Missing file** (on the card, not staged) → FAIL. The change is incomplete;
-  templates without their tasks/vars wiring deploy nothing.
-- Both sets identical → record the derived list verbatim in your summary so
-  downstream rounds can diff against it.
+- **Extra file or commit on the branch** (in git, not on the card) → FAIL.
+  Unreviewed content is about to ship.
+- **Missing file or commit** (on the card, not on the branch) → FAIL. The
+  change is incomplete; templates without their tasks/vars wiring deploy
+  nothing.
+- Both sets identical → record the derived file list and commit list verbatim
+  in your summary so downstream rounds can diff against them.
 
-Also run `git status --short` and check the two-column form: ` M` (modified,
-unstaged) on a file the card claims as done means the staged blob is NOT what
-was tested — FAIL, and say which content the index actually holds
-(`git diff -- <path>` shows worktree-ahead-of-index). List pre-existing
-staged entries the card disclaims separately; they are not a mismatch, but
-confirm they are disclaimed, not merely ignored.
+Also check that the branch tip commit matches what the implementer's
+completion summary lists, and that the worktree is clean at the tip
+(`git status --short` inside the task worktree: anything uncommitted there is
+NOT in the artifact — treat it as a missing change and say so). If the card
+claims a base other than `origin/main` (stale-origin exception), verify the
+stated base SHA is an ancestor of the branch and note the substitution.
 
 ## Security bar
 
@@ -71,7 +82,7 @@ A change is blocking if ANY of these hold:
   Check for helper-script replacements: a deployed script with argv handling
   beats inline templated shell.
 - **SOUL/helper templates teaching command-line interpolation.** Audit any
-  SOUL or helper template in the staged set for user-derived text reaching a
+  SOUL or helper template in the change set for user-derived text reaching a
   command line: grep the template text for quoted model-inserted arguments
   (e.g. `create "<title>"`, `--body "<request>"`, any `"<...>"` or
   `<placeholder>` sitting inside a command example the agent is told to run).
@@ -118,35 +129,44 @@ a public cert?) or cite the vendor's public docs; say which check settled it.
 
 ## Review workflow
 
-1. `kanban_show` the review card; note the parent change-request card id and
-   the implementer's claimed staged list + test evidence.
-2. Derive the real staging list (above) and reconcile. Mismatch = FAIL, stop
-   early — reviewing files nobody staged wastes the round.
+1. `kanban_show` the review card; note the parent change-request card id, the
+   branch name, the base (usually `origin/main`), the worktree path, and the
+   implementer's claimed file/commit lists + test evidence.
+2. Derive the real branch file/commit lists (above) and reconcile. Mismatch =
+   FAIL, stop early — reviewing files nobody committed wastes the round.
 3. Read the repo standards for touched areas: `.github/copilot-instructions.md`
    equivalents are in your baseline; per-task skills are under
    `.github/skills/*/SKILL.md`; runbooks under `ansible/docs/`.
-4. `git diff --cached -- <scope paths>` as the primary artifact. Read the full
-   file for each template changed, not just hunks.
+4. `git diff origin/main...<branch>` (scoped with `-- <paths>`) as the primary
+   artifact. Read the full file for each template changed, not just hunks —
+   use `git show <branch>:<path>`.
 5. Mechanical checks where practical: scoped `ansible-lint`,
-   `ansible-playbook -i inventory.yaml <playbook> --syntax-check`. Report
-   each check with its result; unverified ≠ clean, call it out.
+   `ansible-playbook -i inventory.yaml <playbook> --syntax-check` run inside
+   the task worktree (read-only). Report each check with its result;
+   unverified ≠ clean, call it out.
 6. Secret/PII sweep over the diff: private-domain regexes, `BEGIN PRIVATE
-   KEY`, `gh[pousr]_`, `github_pat_`, `password=`, `token=`, `secret=`.
+   KEY`, `gh[pousr]_`, `github_pat_`, `password=`, `token=`, `secret=`. Sweep
+   commit messages too — a message can leak what a redacted diff hides.
 7. Change-log entry exists under `changelogs/` per the `change-logging`
    skill (gitignored, so verify on disk with `ls`/`cat`, not git).
 8. Verdict. `PASS` or `FAIL` first line, every finding with `file:line` or
    command-output evidence, blocking separated from non-blocking, then the
-   kanban handoff per your SOUL (one fix card on FAIL, blocked COMMIT READY
+   kanban handoff per your SOUL (one fix card on FAIL, blocked MERGE READY
    card on PASS).
 
 ## Pitfalls
 
-- Reviewing the worktree while the index holds different content — always
-  anchor on `git diff --cached`; note worktree drift as its own finding.
+- Reviewing the shared `/srv/homelab` worktree or index instead of the branch
+  — always anchor on `git diff origin/main...<branch>`; the shared checkout
+  drifts constantly and is never the artifact.
 - Accepting "deployed successfully" from the implementer's prose when the
-  staged templates would render something else. If the claim matters, check
-  the staged blob with `git show :<path>`.
+  branch templates would render something else. If the claim matters, check
+  the committed blob with `git show <branch>:<path>`.
 - Echoing a secret or full PII value in the verdict to explain a finding —
   redact to `***` and cite `file:line`.
 - Round inflation: one fix card per round, findings verbatim, no re-triage
-  suggestions. Round 4+ → block for Jimmy per the SOUL loop cap.
+  suggestions. Fix rounds commit to the same branch; re-review is the updated
+  branch diff, not a re-explanation. Round 4+ → block for Jimmy per the SOUL
+  loop cap.
+- PASS means MERGE READY, not "merged". Only Jimmy merges a branch to main;
+  never phrase a verdict as authority to merge, and never merge it yourself.

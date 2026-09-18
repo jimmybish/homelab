@@ -13,6 +13,29 @@ Ansible task pattern for verifying that a Docker service is running and its port
 - To assert that expected ports are open and listening
 - As a post-deployment validation step in `tasks/main.yaml`
 
+## MANDATORY GATE: a 200 through SWAG is not proof
+
+A bare HTTP 2xx is NEVER sufficient evidence that a service is healthy.
+Reverse proxies (SWAG internal and external) happily return 200s, redirects,
+or cached error pages for a dead or mis-proxied upstream. Every deployment
+verification must assert content, not just status:
+
+- **Assert response BODY markers**: the response contains something only the
+  real service emits (product name in the HTML title, API envelope field,
+  `/api/version`-style payload). Check the direct URL AND the proxied URL —
+  a healthy origin behind a broken proxy config still fails users.
+- **Assert response HEADERS**: expected `Server`/`Content-Type`/service
+  headers are present and the proxy didn't substitute its own defaults.
+- **Check metrics where an exporter exists**: `up`, CPU, memory, disk, recent
+  logs (Grafana MCP). Do not assume health from a single signal.
+- A verification that only saw `200`/`301`/`302` without body+header content
+  assertions has NOT verified the service. State that honestly rather than
+  claiming success.
+
+In Ansible, use `uri` with `return_content: true` plus `until`/`failed_when`
+on extracted body fields (e.g. `result.json.status == "ok"` or body contains
+the expected marker) rather than `status_code: 200` alone.
+
 ## Task Pattern
 
 ```yaml
