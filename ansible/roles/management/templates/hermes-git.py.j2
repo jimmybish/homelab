@@ -23,7 +23,11 @@ Security contract (argv discipline, mirroring plexibot-usermap):
 Usage (run inside a task worktree; the read subcommands take no arguments):
   hermes-git worktree    create or reuse the task worktree for the card id in
                          the dispatcher env var HERMES_KANBAN_TASK (bare
-                         subcommand, no arguments of any kind)
+                         subcommand, no arguments of any kind). ROOT change
+                         request cards only: this always derives wt/<current
+                         card id> from the env, so DAG children and fix cards
+                         must NOT call it -- they cd into the shared worktree
+                         named in their card body.
   hermes-git base        print the resolved base ref and its short SHA
   hermes-git files       changed file names between the base and HEAD
   hermes-git log         commit list between the base and HEAD (oneline)
