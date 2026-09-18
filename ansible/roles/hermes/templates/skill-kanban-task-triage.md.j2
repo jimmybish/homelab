@@ -22,15 +22,16 @@ deploy tail, an audit-style inventory phase).
 ## Step 0.5 — Create the task worktree (before any edit)
 
 Per the branch-per-task workflow (owner ruling 2026-09-20), the whole job —
-this card and every child — works on ONE shared branch in ONE worktree:
+this card and every child — works on ONE shared branch in ONE worktree,
+created by the managed git helper. Run the bare subcommand
+`{{ hermes_git_helper_bin }} worktree` — it reads this card's id from the
+dispatcher env itself; helper invocations NEVER carry model-derived text on
+the command line or stdin.
 
-```
-git worktree add /home/virtuajimmy/homelab.worktrees/<task-id> -b wt/<task-id> origin/main
-```
-
-Check `git log --oneline origin/main..main` first; if origin/main is behind
-local main, base on local `main` and state the chosen base in the review
-handoff. Record the branch name and worktree path in this card's completion
+`cd` into the printed worktree path and stay there. The helper resolves the
+base itself (local `main` when ahead of `origin/main`, otherwise
+`origin/main`) and prints the chosen base ref and SHA — carry that base in the
+review handoff. Record the branch name and worktree path in this card's completion
 summary so every child brief can carry them. Children NEVER create their own
 branch — they commit to the shared branch. Never edit, commit, or deploy from
 the shared `/srv/homelab` checkout.
@@ -101,15 +102,16 @@ this triage card (~15-20 turns, creates worktree, files children, completes)
           fixup commits, its own changelog entry (never committed) — then the
           branch-diff review handoff (kanban_create copilot, parents=[deploy])
                 └── Review (branch, round N) → copilot
-                      └── PASS → MERGE READY: <branch> (blocked; Jimmy merges)
+                      └── PASS → MERGE READY for that branch (blocked; Jimmy merges)
 ```
 
 Every child body must contain, and nothing more:
 - **The worktree and branch** — path + branch name + base SHA, plus "commit to
-  this branch with an explicit pathspec (`git commit -m "<msg>" -- <paths>`);
+  this branch through the managed git helper (`{{ hermes_git_helper_bin }} commit`,
+  subject on line 1 of stdin and one pathspec per line after it);
   never `git add -A`, never commit another card's files, never create a new
   branch."
-- **Deliverable as verifiable on-disk state** — `git log --oneline origin/main..wt/<task-id>`
+- **Deliverable as verifiable on-disk state** — `{{ hermes_git_helper_bin }} log`
   shows a commit touching X, `--syntax-check` passes, `ansible-vault view`
   shows Y. The next worker checks with one command, never trusts a
   predecessor's prose.
@@ -149,7 +151,8 @@ half-mapped job that dies without filing anything.
   body or on disk does not exist.
 - **Workspace fields:** leave `workspace_kind`/`workspace_path` unset —
   this repo is reached through the profile's SSH terminal on mgmt, with the
-  job's git worktree under `/home/virtuajimmy/homelab.worktrees/<task-id>`,
+  job's git worktree under `/home/virtuajimmy/homelab.worktrees/` (created by
+  the helper's `worktree` subcommand from the card id),
   not through Hermes workspace checkouts.
 - **Loop cap unchanged:** rounds count on review card titles; round 4 →
   block and escalate, per SOUL.

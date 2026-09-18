@@ -55,23 +55,26 @@ number or hostname mechanically.
    requires stricter documented handling.
 7. Render sensitive templates only to temporary mode-`0600` files. Assert safe
    fields without printing the file, then delete it.
-8. Confirm local credential/config files are ignored and untracked:
+8. Confirm local credential/config files are ignored and untracked. Run the
+   commands with the REAL literal path of each candidate file (never a
+   placeholder token), e.g.:
 
    ```bash
-   git check-ignore -v <path>
-   git ls-files -- <path>
+   git check-ignore -v .env changelogs
+   git ls-files -- .env changelogs
    ```
 
 9. Re-run the focused secret/PII search after remediation. Scanner examples,
    public endpoints, Vault ciphertext, and public keys are not findings unless
    context makes them identifying or usable.
 10. Run the relevant syntax checks, lint, tests, template renders, and
-    `git diff --check origin/main...HEAD`.
-11. Commit only your intended files with an explicit pathspec
-    (`git commit -m "<msg>" -- <path1> <path2>`). Compare
-    `git diff --name-only origin/main...HEAD` set-to-set with the handoff
+    `{{ hermes_git_helper_bin }} check` (run inside the task worktree).
+11. Commit only your intended files through the managed helper
+    (`{{ hermes_git_helper_bin }} commit` — subject on line 1 of stdin, one
+    pathspec per line after it, delivered via a quoted heredoc). Compare
+    `{{ hermes_git_helper_bin }} files` set-to-set with the handoff
     list, sweep every branch commit message for leaks
-    (`git log --format=%B origin/main..HEAD`), and inspect
+    (`git log --format=%B` over the branch's own commit range), and inspect
     `git status --short` so nothing you claim is left uncommitted.
 12. Append the required ignored CAB change log, then hand off to Copilot with
     the branch, base, commit list, changed paths, checks run, and any

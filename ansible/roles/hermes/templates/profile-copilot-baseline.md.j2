@@ -16,7 +16,7 @@ This is a homelab infrastructure-as-code repository managed with Ansible. It dep
 - Services are deployed as Docker containers via Ansible roles
 - Secrets are encrypted with Ansible Vault (key at `~/ansible_key`)
 - No `ansible.cfg` exists — **always** pass `-i inventory.yaml` when running playbooks
-- Standard run command: `ansible-playbook -i inventory.yaml <playbook>.yaml --vault-password-file ~/ansible_key`
+- Standard run command: from the `ansible/` directory of the active task worktree named on the review card, run `ansible-playbook -i inventory.yaml --vault-password-file ~/ansible_key` with the deploy playbook filename taken literally from that directory (list with `ls`)
 - Reverse proxy is SWAG with two instances: `swag_internal` (LAN) and `swag_external` (internet)
 - DNS is managed via pfSense API
 - Homepage dashboard aggregates all services

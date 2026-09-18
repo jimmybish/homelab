@@ -7,9 +7,10 @@ description: 'Use when: reviewing a branch-diff change set handed off on a kanba
 # Copilot Review
 
 Method for reviewing a branch change set on the `homelab` board. Since the
-2026-09-20 workflow ruling, the review artifact is the **BRANCH DIFF** —
-`git diff origin/main...<branch>` plus the branch's commit list — not the
-staged index of the shared checkout. You are the gate, not the author. Read
+2026-09-20 workflow ruling, the review artifact is the **BRANCH DIFF** — the
+output of the managed git helper `{{ hermes_git_helper_bin }} diff` run inside
+the task worktree, plus the helper's commit list — not the staged index of the
+shared checkout. You are the gate, not the author. Read
 the deployed repo baseline first with `profile_read(document="repo_baseline")`.
 It is the Hermes adaptation of `.github/copilot-instructions.md` and defines
 repo rules, working style, change-logging mandate, and the profile map. Use
@@ -33,23 +34,27 @@ verbatim in exactly one fix card via `kanban_create` (`assignee: virtuajimmy`,
 `parents: [<your card id>]`). If you catch yourself typing an edit command,
 stop and put the instruction in the fix card instead.
 
-Allowed commands: `git status`, `git diff`, `git log`, `git ls-files`,
-`git show`, `cat`/`read`, `grep`, `ansible-lint` (scoped),
+Allowed commands: the managed helper `{{ hermes_git_helper_bin }}` (bare
+subcommands: `diff`, `files`, `log`, `check`, `show`, `status`, `ignored` —
+run inside the named task worktree), plus `git status`, `git diff`, `git log`,
+`git ls-files`, `git show`, `cat`/`read`, `grep`, `ansible-lint` (scoped),
 `ansible-playbook --syntax-check`, `ansible-vault view` (never echo
 plaintext), `stat`, `sha256sum`, `yamllint`, `--check`/`--dry-run` inspection
-that cannot write. For rendered-file checks use `git show <branch>:<path>`
-against the branch, never against the shared checkout. Anything ambiguous: if
+that cannot write. For rendered-file checks use `{{ hermes_git_helper_bin }} show`
+(stdin heredoc carries the one repo-relative path) against the branch HEAD,
+never against the shared checkout. Anything ambiguous: if
 it can change state, it is out.
 
 ## Branch reconciliation (finding 4)
 
 The card's claimed branch, file list, and commit list are a CLAIM, not ground
-truth. Derive reality from the refs:
+truth. First change directory into the worktree path stated on the card (a
+plain `cd` to that literal path), then run these fixed helper subcommands —
+they take no arguments at all and resolve the branch from the worktree:
 
 ```
-cd /srv/homelab
-git diff --name-only origin/main...<branch>
-git log --oneline origin/main..<branch>
+{{ hermes_git_helper_bin }} files
+{{ hermes_git_helper_bin }} log
 ```
 
 Then compare set-to-set against the card body / implementer summary:
@@ -137,12 +142,14 @@ a public cert?) or cite the vendor's public docs; say which check settled it.
 3. Read the repo standards for touched areas: `.github/copilot-instructions.md`
    equivalents are in your baseline; per-task skills are under
    `.github/skills/*/SKILL.md`; runbooks under `ansible/docs/`.
-4. `git diff origin/main...<branch>` (scoped with `-- <paths>`) as the primary
-   artifact. Read the full file for each template changed, not just hunks —
-   use `git show <branch>:<path>`.
-5. Mechanical checks where practical: scoped `ansible-lint`,
-   `ansible-playbook -i inventory.yaml <playbook> --syntax-check` run inside
-   the task worktree (read-only). Report each check with its result;
+4. `{{ hermes_git_helper_bin }} diff` as the primary artifact (scope it by
+   feeding repo-relative paths, one per line, on stdin via a quoted heredoc).
+   Read the full file for each template changed, not just hunks —
+   use `{{ hermes_git_helper_bin }} show` with the path on stdin.
+5. Mechanical checks where practical: scoped `ansible-lint`, and
+   `ansible-playbook -i inventory.yaml --syntax-check` against the deploy
+   playbook named on the review card, run inside the task worktree
+   (read-only). Report each check with its result;
    unverified ≠ clean, call it out.
 6. Secret/PII sweep over the diff: private-domain regexes, `BEGIN PRIVATE
    KEY`, `gh[pousr]_`, `github_pat_`, `password=`, `token=`, `secret=`. Sweep
@@ -157,11 +164,11 @@ a public cert?) or cite the vendor's public docs; say which check settled it.
 ## Pitfalls
 
 - Reviewing the shared `/srv/homelab` worktree or index instead of the branch
-  — always anchor on `git diff origin/main...<branch>`; the shared checkout
-  drifts constantly and is never the artifact.
+  — always anchor on `{{ hermes_git_helper_bin }} diff` inside the task
+  worktree; the shared checkout drifts constantly and is never the artifact.
 - Accepting "deployed successfully" from the implementer's prose when the
   branch templates would render something else. If the claim matters, check
-  the committed blob with `git show <branch>:<path>`.
+  the committed blob with `{{ hermes_git_helper_bin }} show` (path on stdin).
 - Echoing a secret or full PII value in the verdict to explain a finding —
   redact to `***` and cite `file:line`.
 - Round inflation: one fix card per round, findings verbatim, no re-triage
