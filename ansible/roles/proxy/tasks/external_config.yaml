@@ -59,3 +59,44 @@
     group: "{{ docker_user }}"
   notify:
     - Start Swag
+
+- name: Deploy VirtuaJimmy webhook log format
+  ansible.builtin.template:
+    src: "templates/external/virtuajimmy-webhook-log.conf.j2"
+    dest: "{{ proxy_folder }}/external/nginx/site-confs/00-virtuajimmy-webhook-log.conf"
+    mode: '0664'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Restart Swag External
+  tags:
+    - virtuajimmy_webhook_proxy
+
+- name: Deploy VirtuaJimmy webhook external proxy
+  ansible.builtin.template:
+    src: "templates/external/virtuajimmy.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/external/nginx/proxy-confs/virtuajimmy.subdomain.conf"
+    mode: '0664'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Restart Swag External
+  tags:
+    - virtuajimmy_webhook_proxy
+
+- name: Configure VirtuaJimmy webhook public DNS
+  community.general.cloudflare_dns:
+    zone: "{{ external_domain }}"
+    record: virtuajimmy
+    type: CNAME
+    value: "request.{{ external_domain }}"
+    proxied: true
+    ttl: 1
+    solo: true
+    api_token: "{{ dns_cloudflare_api_token }}"
+    state: present
+  delegate_to: localhost
+  become: false
+  no_log: true
+  tags:
+    - virtuajimmy_webhook_proxy

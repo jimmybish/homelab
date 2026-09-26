@@ -1,0 +1,29 @@
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+
+    server_name virtuajimmy.{{ external_domain }};
+
+    include /config/nginx/ssl.conf;
+
+    client_max_body_size 1m;
+
+    location = /webhooks/github {
+        limit_except POST {
+            deny all;
+        }
+
+        access_log /dev/stderr virtuajimmy_webhook;
+
+        include /config/nginx/proxy.conf;
+        include /config/nginx/resolver.conf;
+        set $upstream_app hermes.{{ internal_domain }};
+        set $upstream_port {{ hermes_virtuajimmy_webhook_port }};
+        set $upstream_proto http;
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+    }
+
+    location / {
+        return 404;
+    }
+}

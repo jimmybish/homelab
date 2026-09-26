@@ -444,6 +444,13 @@
       %s
   notify: Restart Hermes VirtuaJimmy gateway
 
+- name: Assert VirtuaJimmy webhook secret strength
+  ansible.builtin.assert:
+    that:
+      - hermes_virtuajimmy_webhook_secret | trim | length >= 64
+    fail_msg: "The VirtuaJimmy webhook secret must contain at least 256 bits of hex entropy."
+  no_log: true
+
 - name: Deploy VirtuaJimmy identity
   ansible.builtin.template:
     src: profile-virtuajimmy-soul.md.j2
@@ -798,6 +805,12 @@
       - hermes_virtuajimmy_config.discord.max_attachment_bytes == 26214400
       - hermes_virtuajimmy_config.discord.free_response_channels == [hermes_virtuajimmy_discord_control_channel_id | string]
       - hermes_virtuajimmy_config.discord.allow_from == [hermes_virtuajimmy_discord_user_id | string]
+      - hermes_virtuajimmy_config.platforms.webhook.enabled
+      - hermes_virtuajimmy_config.platforms.webhook.extra.host == hermes_virtuajimmy_webhook_bind_address
+      - hermes_virtuajimmy_config.platforms.webhook.extra.port == hermes_virtuajimmy_webhook_port
+      - hermes_virtuajimmy_config.platforms.webhook.extra.routes.github.events == []
+      - hermes_virtuajimmy_config.platforms.webhook.extra.routes.github.deliver == 'log'
+      - hermes_virtuajimmy_config.platforms.webhook.extra.routes.github.secret is not defined
       - hermes_virtuajimmy_config.toolsets == ['kanban']
       - hermes_virtuajimmy_config.platform_toolsets.keys() | list | sort == ['discord']
       - hermes_virtuajimmy_config.platform_toolsets.discord == ['hermes-discord', 'kanban']
@@ -887,6 +900,9 @@
       - "('HERMES_KANBAN_HOME=' ~ hermes_home) in hermes_virtuajimmy_environment_text.splitlines()"
       - "'HERMES_KANBAN_BOARD=homelab' in hermes_virtuajimmy_environment_text.splitlines()"
       - "('FIRECRAWL_API_URL=' ~ internal_firecrawl_url) in hermes_virtuajimmy_environment_text.splitlines()"
+      - "'WEBHOOK_ENABLED=true' in hermes_virtuajimmy_environment_text.splitlines()"
+      - "('WEBHOOK_PORT=' ~ (hermes_virtuajimmy_webhook_port | string)) in hermes_virtuajimmy_environment_text.splitlines()"
+      - "('WEBHOOK_SECRET=' ~ (hermes_virtuajimmy_webhook_secret | trim)) in hermes_virtuajimmy_environment_text.splitlines()"
       - "'HOME_ASSISTANT_TOKEN=' not in hermes_virtuajimmy_environment_text"
       - "'HERMES_DASHBOARD' not in hermes_virtuajimmy_environment_text"
     fail_msg: "The VirtuaJimmy environment is missing required settings or exposes root profile secrets."
@@ -1003,6 +1019,7 @@
   loop:
     - "{{ hermes_port }}"
     - "{{ hermes_api_server_port }}"
+    - "{{ hermes_virtuajimmy_webhook_port }}"
   when: ansible_os_family == "Debian"
 
 - name: Read UFW status for Hermes services
@@ -1020,12 +1037,15 @@
       - "'Status: active' in hermes_ufw_status.stdout"
       - "(hermes_port | string) + '/tcp' in hermes_ufw_status.stdout"
       - "(hermes_api_server_port | string) + '/tcp' in hermes_ufw_status.stdout"
+      - "(hermes_virtuajimmy_webhook_port | string) + '/tcp' in hermes_ufw_status.stdout"
     fail_msg: >-
-      UFW is not active with TCP ports {{ hermes_port }} and
-      {{ hermes_api_server_port }} allowed.
+      UFW is not active with TCP ports {{ hermes_port }},
+      {{ hermes_api_server_port }}, and
+      {{ hermes_virtuajimmy_webhook_port }} allowed.
     success_msg: >-
-      UFW is active with TCP ports {{ hermes_port }} and
-      {{ hermes_api_server_port }} allowed.
+      UFW is active with TCP ports {{ hermes_port }},
+      {{ hermes_api_server_port }}, and
+      {{ hermes_virtuajimmy_webhook_port }} allowed.
   when:
     - ansible_os_family == "Debian"
     - not ansible_check_mode
@@ -1300,6 +1320,13 @@
     state: started
     timeout: 120
 
+- name: Wait for VirtuaJimmy webhook listener
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ hermes_virtuajimmy_webhook_port }}"
+    state: started
+    timeout: 120
+
 - name: Gather listening port facts
   community.general.listen_ports_facts:
 
@@ -1315,6 +1342,13 @@
     hermes_api_server_listeners: >-
       {{ ansible_facts.tcp_listen
          | selectattr('port', 'equalto', hermes_api_server_port | int)
+         | list }}
+
+- name: Select VirtuaJimmy webhook listeners
+  ansible.builtin.set_fact:
+    hermes_virtuajimmy_webhook_listeners: >-
+      {{ ansible_facts.tcp_listen
+         | selectattr('port', 'equalto', hermes_virtuajimmy_webhook_port | int)
          | list }}
 
 - name: Assert Hermes dashboard listener identity
@@ -1348,6 +1382,50 @@
       Hermes API server is listening as {{ hermes_user }} process
       {{ hermes_gateway_process_name }} on
       {{ hermes_api_server_bind_address }}:{{ hermes_api_server_port }}.
+
+- name: Assert VirtuaJimmy webhook listener identity
+  ansible.builtin.assert:
+    that:
+      - hermes_virtuajimmy_webhook_listeners | length > 0
+      - hermes_virtuajimmy_webhook_bind_address in (hermes_virtuajimmy_webhook_listeners | map(attribute='address') | list)
+      - hermes_user in (hermes_virtuajimmy_webhook_listeners | map(attribute='user') | list)
+      - hermes_gateway_process_name in (hermes_virtuajimmy_webhook_listeners | map(attribute='name') | list)
+      - (hermes_virtuajimmy_gateway_service_status.status.MainPID | int) in (hermes_virtuajimmy_webhook_listeners | map(attribute='pid') | list)
+    fail_msg: >-
+      The VirtuaJimmy webhook adapter is not listening as {{ hermes_user }} on
+      {{ hermes_virtuajimmy_webhook_bind_address }}:{{ hermes_virtuajimmy_webhook_port }}.
+    success_msg: "The VirtuaJimmy webhook adapter is listening on its managed port."
+
+- name: Check VirtuaJimmy webhook health endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hermes_virtuajimmy_webhook_port }}/health"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: hermes_virtuajimmy_webhook_health
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert VirtuaJimmy webhook health response
+  ansible.builtin.assert:
+    that:
+      - hermes_virtuajimmy_webhook_health.json.status == 'ok'
+      - hermes_virtuajimmy_webhook_health.json.platform == 'webhook'
+  when: not ansible_check_mode
+
+- name: Verify unsigned GitHub webhook requests fail closed
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hermes_virtuajimmy_webhook_port }}/webhooks/github"
+    method: POST
+    body_format: json
+    body:
+      zen: ansible-auth-check
+    headers:
+      X-GitHub-Event: ping
+      X-GitHub-Delivery: ansible-auth-check
+    status_code: 401
+  changed_when: false
+  when: not ansible_check_mode
 
 - name: Read Hermes dashboard public status
   ansible.builtin.uri:
