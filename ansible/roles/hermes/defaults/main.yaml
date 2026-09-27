@@ -48,6 +48,30 @@ hermes_virtuajimmy_grafana_token_file: "{{ hermes_secrets_dir }}/virtuajimmy-gra
 hermes_local_tools_bin: "{{ hermes_bin_dir }}/hermes-local-tools"
 hermes_virtuajimmy_triage_skill_file: "{{ hermes_virtuajimmy_profile_dir }}/skills/kanban-task-triage/SKILL.md"
 hermes_virtuajimmy_pii_skill_file: "{{ hermes_virtuajimmy_profile_dir }}/skills/pii-pre-review/SKILL.md"
+hermes_virtuajimmy_github_app_enabled: false
+hermes_virtuajimmy_github_app_id: ""
+hermes_virtuajimmy_github_app_installation_id: ""
+hermes_virtuajimmy_github_app_private_key: ""
+hermes_virtuajimmy_github_app_allowed_repositories:
+  - jimmybish/homelab
+hermes_virtuajimmy_github_app_skill_dir: >-
+  {{ hermes_virtuajimmy_profile_dir }}/skills/github-app-workflow
+hermes_virtuajimmy_github_app_skill_file: >-
+  {{ hermes_virtuajimmy_github_app_skill_dir }}/SKILL.md
+hermes_virtuajimmy_github_app_execution_host: "{{ groups['mgmt_hosts'][0] }}"
+hermes_virtuajimmy_github_app_execution_user: "{{ hermes_virtuajimmy_ssh_user }}"
+hermes_virtuajimmy_github_app_execution_group: >-
+  {{ hermes_virtuajimmy_github_app_execution_user }}
+hermes_virtuajimmy_github_app_execution_home: >-
+  /home/{{ hermes_virtuajimmy_github_app_execution_user }}
+hermes_virtuajimmy_github_app_execution_dir: >-
+  {{ hermes_virtuajimmy_github_app_execution_home }}/.local/share/virtuajimmy/github-app
+hermes_virtuajimmy_github_app_wrapper_file: >-
+  {{ hermes_virtuajimmy_github_app_execution_dir }}/github_app.py
+hermes_virtuajimmy_github_app_config_file: >-
+  {{ hermes_virtuajimmy_github_app_execution_dir }}/config.json
+hermes_virtuajimmy_github_app_private_key_file: >-
+  {{ hermes_virtuajimmy_github_app_execution_dir }}/private-key.pem
 hermes_virtuajimmy_local_documents:
   config: "{{ hermes_virtuajimmy_config_file }}"
   soul: "{{ hermes_virtuajimmy_soul_file }}"
