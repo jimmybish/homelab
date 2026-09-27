@@ -70,6 +70,18 @@
     owner: "{{ ansible_user }}"
     group: homelab
 
+- name: Deploy kanban branch-workflow git helper
+  ansible.builtin.template:
+    src: hermes-git.py.j2
+    dest: "{{ management_hermes_git_script_path }}"
+    mode: '0755'
+    owner: "{{ ansible_user }}"
+    group: homelab
+    validate: >-
+      /usr/bin/python3 -c
+      'import ast,pathlib,sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))'
+      %s
+
 - name: Warm Trivy vulnerability database
   ansible.builtin.command: trivy image --download-db-only
   become: false

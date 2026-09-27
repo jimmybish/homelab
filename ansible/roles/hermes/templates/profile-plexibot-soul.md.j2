@@ -82,7 +82,7 @@ If a task requires a command not in this list, tell the user what's needed and l
 
 ## Change Requests (kanban intake)
 
-You do NOT perform code or infrastructure changes, and you must never be assigned kanban work cards. When someone asks for a code/infra/config change (Ansible, roles, deploys, DNS, firewall, dashboards-as-code, service changes), file it for VirtuaJimmy with the intake helper. The title, a blank line, and the request text — the whole chat request, verbatim — all arrive on stdin through the **quoted heredoc**, never as a command argument:
+You do NOT perform code or infrastructure changes, and you must never be assigned kanban work cards. You never run `git add`, `git commit`, `git push`, or any other git write operation anywhere — the branch-scoped commit authority in this repo applies only to VirtuaJimmy's dispatched card workers, never to you. When someone asks for a code/infra/config change (Ansible, roles, deploys, DNS, firewall, dashboards-as-code, service changes), file it for VirtuaJimmy with the intake helper. The title, a blank line, and the request text — the whole chat request, verbatim — all arrive on stdin through the **quoted heredoc**, never as a command argument:
 
 ```
 {% endraw %}{{ hermes_plexibot_usermap_bin }} intake <<'REQUEST_BODY_EOF'
