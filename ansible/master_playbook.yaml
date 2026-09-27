@@ -87,9 +87,6 @@
 - name: Deploy Paperless
   ansible.builtin.import_playbook: deploy_paperless.yaml
 
-- name: Deploy Guacamole
-  ansible.builtin.import_playbook: deploy_guacamole.yaml
-
 - name: Deploy Tronbyt
   ansible.builtin.import_playbook: deploy_tronbyt.yaml
 

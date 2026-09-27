@@ -108,6 +108,16 @@ Add these to `tasks/main.yaml` after the health check.
     - Restart Swag External
 ```
 
+### Cloudflare DNS record type migrations
+
+`community.general.cloudflare_dns` with `solo: true` only removes records that
+have the same name **and type**. It cannot replace an existing `A` record with
+a `CNAME` in one task because Cloudflare rejects the conflicting record types.
+Before creating the CNAME, query Cloudflare for same-name `A` records and
+delete their record IDs with authenticated `ansible.builtin.uri` tasks. Mark
+all API tasks `no_log: true`, delegate them to localhost, and assert that the
+zone lookup returned exactly one zone before deleting anything.
+
 SWAG normalizes files in its proxy-confs directories to mode `0664` at startup. Set
 that mode in Ansible templates to prevent a mode-only change and container restart on
 every deployment.

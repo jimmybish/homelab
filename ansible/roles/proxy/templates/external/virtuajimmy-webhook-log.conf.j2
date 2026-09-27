@@ -1,0 +1,10 @@
+log_format virtuajimmy_webhook escape=json
+  '{"timestamp":"$time_iso8601",'
+  '"source_ip":"$remote_addr",'
+  '"request_id":"$request_id",'
+  '"method":"$request_method",'
+  '"request_uri":"$request_uri",'
+  '"status":$status,'
+  '"bytes_sent":$body_bytes_sent,'
+  '"request_time":$request_time,'
+  '"upstream_time":"$upstream_response_time"}';

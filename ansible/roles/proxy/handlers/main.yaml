@@ -5,3 +5,11 @@
     project_src: "{{ proxy_folder }}"
     state: restarted
     remove_orphans: true
+
+- name: Restart Swag External
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ proxy_folder }}"
+    services:
+      - swag_external
+    state: restarted

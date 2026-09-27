@@ -127,6 +127,20 @@
   ansible.builtin.include_tasks: internal_config.yaml
 - name: Load External Proxy Config
   ansible.builtin.include_tasks: external_config.yaml
+  tags:
+    - virtuajimmy_webhook_proxy
+
+- name: Validate SWAG external nginx configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - swag_external
+      - nginx
+      - -t
+  changed_when: false
+  tags:
+    - virtuajimmy_webhook_proxy
 
 - name: Deploy Swag using Docker Compose
   ansible.builtin.template:

@@ -1,0 +1,7 @@
+{
+  "api_url": "https://api.github.com",
+  "app_id": {{ hermes_virtuajimmy_github_app_id | string | to_json }},
+  "installation_id": {{ hermes_virtuajimmy_github_app_installation_id | string | to_json }},
+  "private_key_file": {{ hermes_virtuajimmy_github_app_private_key_file | to_json }},
+  "allowed_repositories": {{ hermes_virtuajimmy_github_app_allowed_repositories | to_json }}
+}

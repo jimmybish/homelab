@@ -59,3 +59,108 @@
     group: "{{ docker_user }}"
   notify:
     - Start Swag
+
+- name: Deploy VirtuaJimmy webhook log format
+  ansible.builtin.template:
+    src: "templates/external/virtuajimmy-webhook-log.conf.j2"
+    dest: "{{ proxy_folder }}/external/nginx/site-confs/00-virtuajimmy-webhook-log.conf"
+    mode: '0664'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Restart Swag External
+  tags:
+    - virtuajimmy_webhook_proxy
+
+- name: Deploy VirtuaJimmy webhook external proxy
+  ansible.builtin.template:
+    src: "templates/external/virtuajimmy.subdomain.conf.j2"
+    dest: "{{ proxy_folder }}/external/nginx/proxy-confs/virtuajimmy.subdomain.conf"
+    mode: '0664'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Restart Swag External
+  tags:
+    - virtuajimmy_webhook_proxy
+
+- name: Look up Cloudflare zone for VirtuaJimmy webhook DNS
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones?name={{ external_domain }}"
+    headers:
+      Authorization: "{{ ['Bearer', dns_cloudflare_api_token] | join(' ') }}"
+    return_content: true
+    status_code: 200
+  delegate_to: localhost
+  become: false
+  register: virtuajimmy_cloudflare_zone
+  failed_when: false
+  no_log: true
+  tags:
+    - virtuajimmy_webhook_proxy
+
+- name: Assert Cloudflare zone lookup succeeded
+  ansible.builtin.assert:
+    that:
+      - virtuajimmy_cloudflare_zone.status | default(0) == 200
+      - virtuajimmy_cloudflare_zone.json.success | default(false)
+      - virtuajimmy_cloudflare_zone.json.result | default([]) | length == 1
+    fail_msg: >-
+      Cloudflare zone lookup failed with HTTP status
+      {{ virtuajimmy_cloudflare_zone.status | default('unknown') }}.
+  no_log: true
+  tags:
+    - virtuajimmy_webhook_proxy
+
+- name: Look up conflicting VirtuaJimmy webhook public A records
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{
+      virtuajimmy_cloudflare_zone.json.result[0].id
+      }}/dns_records?type=A&name=virtuajimmy.{{ external_domain }}
+    headers:
+      Authorization: "{{ ['Bearer', dns_cloudflare_api_token] | join(' ') }}"
+    return_content: true
+    status_code: 200
+  delegate_to: localhost
+  become: false
+  register: virtuajimmy_cloudflare_a_records
+  no_log: true
+  tags:
+    - virtuajimmy_webhook_proxy
+
+- name: Remove conflicting VirtuaJimmy webhook public A records
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{
+      virtuajimmy_cloudflare_zone.json.result[0].id
+      }}/dns_records/{{ item.id }}
+    method: DELETE
+    headers:
+      Authorization: "{{ ['Bearer', dns_cloudflare_api_token] | join(' ') }}"
+    status_code: 200
+  loop: "{{ virtuajimmy_cloudflare_a_records.json.result }}"
+  loop_control:
+    label: "conflicting A record"
+  delegate_to: localhost
+  become: false
+  no_log: true
+  tags:
+    - virtuajimmy_webhook_proxy
+
+- name: Configure VirtuaJimmy webhook public DNS
+  community.general.cloudflare_dns:
+    zone: "{{ external_domain }}"
+    record: virtuajimmy
+    type: CNAME
+    value: "request.{{ external_domain }}"
+    proxied: true
+    ttl: 1
+    solo: true
+    api_token: "{{ dns_cloudflare_api_token }}"
+    state: present
+  delegate_to: localhost
+  become: false
+  no_log: true
+  tags:
+    - virtuajimmy_webhook_proxy

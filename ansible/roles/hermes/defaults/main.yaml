@@ -57,6 +57,30 @@ hermes_local_tools_bin: "{{ hermes_bin_dir }}/hermes-local-tools"
 hermes_git_helper_bin: "/srv/homelab/bin/hermes-git"
 hermes_virtuajimmy_triage_skill_file: "{{ hermes_virtuajimmy_profile_dir }}/skills/kanban-task-triage/SKILL.md"
 hermes_virtuajimmy_pii_skill_file: "{{ hermes_virtuajimmy_profile_dir }}/skills/pii-pre-review/SKILL.md"
+hermes_virtuajimmy_github_app_enabled: false
+hermes_virtuajimmy_github_app_id: ""
+hermes_virtuajimmy_github_app_installation_id: ""
+hermes_virtuajimmy_github_app_private_key: ""
+hermes_virtuajimmy_github_app_allowed_repositories:
+  - jimmybish/homelab
+hermes_virtuajimmy_github_app_skill_dir: >-
+  {{ hermes_virtuajimmy_profile_dir }}/skills/github-app-workflow
+hermes_virtuajimmy_github_app_skill_file: >-
+  {{ hermes_virtuajimmy_github_app_skill_dir }}/SKILL.md
+hermes_virtuajimmy_github_app_execution_host: "{{ groups['mgmt_hosts'][0] }}"
+hermes_virtuajimmy_github_app_execution_user: "{{ hermes_virtuajimmy_ssh_user }}"
+hermes_virtuajimmy_github_app_execution_group: >-
+  {{ hermes_virtuajimmy_github_app_execution_user }}
+hermes_virtuajimmy_github_app_execution_home: >-
+  /home/{{ hermes_virtuajimmy_github_app_execution_user }}
+hermes_virtuajimmy_github_app_execution_dir: >-
+  {{ hermes_virtuajimmy_github_app_execution_home }}/.local/share/virtuajimmy/github-app
+hermes_virtuajimmy_github_app_wrapper_file: >-
+  {{ hermes_virtuajimmy_github_app_execution_dir }}/github_app.py
+hermes_virtuajimmy_github_app_config_file: >-
+  {{ hermes_virtuajimmy_github_app_execution_dir }}/config.json
+hermes_virtuajimmy_github_app_private_key_file: >-
+  {{ hermes_virtuajimmy_github_app_execution_dir }}/private-key.pem
 hermes_virtuajimmy_local_documents:
   config: "{{ hermes_virtuajimmy_config_file }}"
   soul: "{{ hermes_virtuajimmy_soul_file }}"
@@ -75,6 +99,7 @@ hermes_virtuajimmy_grafana_api_token: "{{ hermes_plexibot_grafana_api_token }}"
 hermes_virtuajimmy_discord_token: "{{ n8n_discord_bot_token }}"
 hermes_virtuajimmy_discord_user_id: "{{ n8n_discord_author_id }}"
 hermes_virtuajimmy_discord_control_channel_id: "{{ virtuajimmy_discord_control_channel_id }}"
+hermes_virtuajimmy_webhook_bind_address: "0.0.0.0"
 hermes_virtuajimmy_ssh_host: "{{ n8n_copilot_mgmt_host }}"
 hermes_virtuajimmy_ssh_user: "{{ n8n_copilot_mgmt_user }}"
 hermes_virtuajimmy_ssh_private_key: "{{ n8n_copilot_ssh_key }}"
