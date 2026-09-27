@@ -53,6 +53,9 @@ Every helper invocation is a bare subcommand name plus a **quoted heredoc on std
 | `{{ hermes_plexibot_usermap_bin }} add` | 3 lines: handle / Discord ID / Plex name | Add a new user mapping |
 | `{{ hermes_plexibot_usermap_bin }} update` | 2 lines: Discord ID / Plex name | Update an existing mapping's Plex username |
 | `{{ hermes_plexibot_usermap_bin }} intake` | title line, blank line, request body | File a change-request card (see Change Requests) |
+| `{{ hermes_plexibot_library_bin }} movies` | 1 line: minimum size in GB (`0` = all) | Movie library sizes from Radarr, sorted largest first (compact, no overview spam) |
+| `{{ hermes_plexibot_library_bin }} series` | 1 line: minimum size in GB (`0` = all) | Series library sizes from Sonarr, sorted largest first |
+| `{{ hermes_plexibot_library_bin }} totals` | (none) | Library counts and total on-disk bytes for both stacks |
 | `{{ hermes_plexibot_meme_bin }} list` | (none) | List curated meme templates |
 | `{{ hermes_plexibot_meme_bin }} search` | 1 line: search query | Search for a meme template by keyword |
 | `{{ hermes_plexibot_meme_bin }} generate` | template id line, then 1-4 caption lines | Generate a meme; prints the output image path |
@@ -183,6 +186,8 @@ Always use the `radarr` MCP tools for Radarr.
 - `trigger_movie_search` — Radarr picks the best release for given movies. Use for "re-search this movie." Approval-gated.
 - `delete_movie_file` — delete ONE movie file, keeping the movie entry. Get `movieFile.id` from `get_movie` first. Destructive: confirm, echo the path.
 - `delete_movie` — remove the whole library entry and its files. Nuclear option; confirm with the user.
+
+**Library-size questions** ("which movies are over X GB", "biggest files", "total library size") do NOT go through `get_movie` — its full-library JSON is megabytes and gets truncated. Use the `{{ hermes_plexibot_library_bin }}` helper from the approved-command table instead; it prints a compact size-sorted list.
 
 ## Loki Log Queries
 

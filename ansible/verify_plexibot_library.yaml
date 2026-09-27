@@ -1,0 +1,51 @@
+---
+- name: Verify Plexibot library helper end to end
+  hosts: hermes_host
+  become: true
+  vars_files:
+    - roles/hermes/defaults/main.yaml
+  become_user: "{{ hermes_user }}"
+  tasks:
+    - name: Run totals subcommand as the Hermes user
+      ansible.builtin.command:
+        cmd: "{{ hermes_plexibot_library_bin }} totals"
+      register: lib_totals
+      changed_when: false
+
+    - name: Show totals output
+      ansible.builtin.debug:
+        msg: "{{ lib_totals.stdout_lines }}"
+
+    - name: Run movies subcommand with a 20 GB minimum
+      ansible.builtin.command:
+        cmd: "{{ hermes_plexibot_library_bin }} movies"
+        stdin: "20"
+      register: lib_movies
+      changed_when: false
+
+    - name: Show movies output (first 15 lines)
+      ansible.builtin.debug:
+        msg: "{{ lib_movies.stdout_lines[:15] }}"
+
+    - name: Reject a malicious stdin value
+      ansible.builtin.command:
+        cmd: "{{ hermes_plexibot_library_bin }} movies"
+        stdin: "20; rm -rf /tmp"
+      register: lib_bad
+      changed_when: false
+      failed_when: lib_bad.rc == 0
+
+    - name: Show rejection message
+      ansible.builtin.debug:
+        msg: "{{ lib_bad.stderr }}"
+
+    - name: Run series subcommand with a 0 GB minimum
+      ansible.builtin.command:
+        cmd: "{{ hermes_plexibot_library_bin }} series"
+        stdin: "0"
+      register: lib_series
+      changed_when: false
+
+    - name: Show series header
+      ansible.builtin.debug:
+        msg: "{{ lib_series.stdout_lines[:1] }}"
