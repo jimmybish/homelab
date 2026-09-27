@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""plexibot-library - compact Radarr/Sonarr library size helper for Plexibot.
+
+Rendered by Ansible from ansible/roles/hermes/templates/hermes-library.py.j2.
+Do not edit the deployed copy; edit the template and redeploy.
+
+Why this exists: the Radarr/Sonarr MCP tools dump the entire library as JSON
+(megabytes of overviews) and the agent-side output gets truncated before it
+can be parsed. This helper fetches the library list once on the host, keeps
+only title/year/sizeOnDisk, applies the minimum-size filter, and prints a
+compact sorted table. Nothing secret is ever printed: the API keys are read
+from fixed 0600 files under the Hermes secrets directory.
+
+Security contract (mirrors plexibot-usermap): argv carries ONLY the fixed
+subcommand name (movies/series/totals). Every user-derived value (the minimum
+size in GB) arrives on STDIN as exactly one line, delivered by the caller in
+a quoted heredoc, validated against a strict numeric regex before use.
+Nothing passes through a shell, nothing is eval'd, no URL or file path is
+caller-controlled, and no API key value ever reaches stdout or stderr.
+
+Stdin contracts:
+  movies : 1 line - minimum size in GB (e.g. "20", or "0" for everything)
+  series : 1 line - minimum size in GB
+  totals : (none)
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+RADARR_URL = "{{ internal_radarr_direct_url }}"
+SONARR_URL = "{{ internal_sonarr_direct_url }}"
+RADARR_KEY_FILE = "{{ hermes_plexibot_radarr_key_file }}"
+SONARR_KEY_FILE = "{{ hermes_plexibot_sonarr_key_file }}"
+TOP = {{ hermes_plexibot_library_top }}
+# Fixed API endpoints; callers can never point this helper elsewhere.
+MOVIE_ENDPOINT = "/api/v3/movie"
+SERIES_ENDPOINT = "/api/v3/series"
+
+HTTP_TIMEOUT_SECONDS = 30
+# Sizes in the Arr stack are reported in bytes; GB here is decimal (1e9), the
+# same convention the Radarr/Sonarr web UIs use.
+GB = 1_000_000_000
+# Plain non-negative number with at most two decimals. That is all a minimum
+# size can ever be, so anything else (including every shell metacharacter) is
+# rejected outright.
+MINGB_RE = re.compile(r"^(0|[1-9][0-9]{0,4})(\.[0-9]{1,2})?$")
+STDIN_MAX_BYTES = 64
+
+
+def die(message: str) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def read_min_gb() -> float:
+    raw = sys.stdin.buffer.read(STDIN_MAX_BYTES + 1)
+    if len(raw) > STDIN_MAX_BYTES:
+        die("stdin exceeds the minimum-size line limit")
+    if not raw.strip():
+        die(
+            "stdin is empty; pipe exactly 1 line (the minimum size in GB, "
+            "e.g. 20 or 0) via a quoted heredoc (e.g. <<'EOF_x7k2')"
+        )
+    if b"\x00" in raw:
+        die("stdin contains a NUL byte")
+    text = raw.decode("utf-8", errors="replace")
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    if lines and lines[-1] == "":
+        lines.pop()
+    if len(lines) != 1:
+        die(f"expected exactly 1 line on stdin, got {len(lines)}")
+    value = lines[0].strip()
+    if not MINGB_RE.match(value):
+        die(
+            f"invalid minimum size {value!r}; expected a plain number in GB "
+            "such as 0, 20, or 12.5"
+        )
+    return float(value)
+
+
+def load_key(path: str, service: str) -> str:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            key = handle.read().strip()
+    except OSError:
+        die(f"cannot read the {service} API key file; report this, do not work around it")
+    if not key:
+        die(f"{service} API key file is empty; report this, do not work around it")
+    return key
+
+
+def fetch_library(base_url: str, endpoint: str, key: str, service: str) -> list[dict[str, object]]:
+    request = urllib.request.Request(
+        base_url.rstrip("/") + endpoint,
+        headers={"X-Api-Key": key, "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as exc:
+        die(f"{service} API returned HTTP {exc.code}; check the API key and service state")
+    except (urllib.error.URLError, TimeoutError, OSError):
+        die(f"could not reach the {service} API; the service may be down")
+    except json.JSONDecodeError:
+        die(f"{service} API returned unreadable JSON")
+    if not isinstance(payload, list):
+        die(f"{service} API returned an unexpected response shape")
+    return payload
+
+
+def human_size(num_bytes: float) -> str:
+    if num_bytes >= 1000 * GB:
+        return f"{num_bytes / (1000 * GB):.2f} TB"
+    return f"{num_bytes / GB:.1f} GB"
+
+
+def emit(items: list[tuple[str, float]], min_bytes: float, label: str) -> None:
+    total_all = sum(size for _, size in items)
+    matched = [item for item in items if item[1] >= min_bytes]
+    matched.sort(key=lambda item: item[1], reverse=True)
+    header = (
+        f"{label}: {len(items)} entries, {human_size(total_all)} total; "
+        f"{len(matched)} at or above {human_size(min_bytes)}"
+    )
+    print(header)
+    if not matched:
+        print("(none)")
+        return
+    shown = matched[:TOP]
+    for title, size in shown:
+        print(f"{human_size(size):>9}  {title}")
+    if len(matched) > len(shown):
+        print(f"... {len(matched) - len(shown)} more not shown (raise the minimum or use totals)")
+
+
+def cmd_movies() -> None:
+    min_bytes = read_min_gb() * GB
+    payload = fetch_library(RADARR_URL, MOVIE_ENDPOINT, load_key(RADARR_KEY_FILE, "Radarr"), "Radarr")
+    items: list[tuple[str, float]] = []
+    for entry in payload:
+        title = str(entry.get("title", "?"))
+        year = entry.get("year")
+        label = f"{title} ({year})" if year else title
+        # Radarr reports the movie's on-disk size at the top level; the
+        # embedded movieFile object is the fallback for older payloads.
+        movie_file = entry.get("movieFile") or {}
+        size = float(entry.get("sizeOnDisk") or movie_file.get("sizeOnDisk") or 0)
+        items.append((label, size))
+    emit(items, min_bytes, "Radarr movies")
+
+
+def cmd_series() -> None:
+    min_bytes = read_min_gb() * GB
+    payload = fetch_library(SONARR_URL, SERIES_ENDPOINT, load_key(SONARR_KEY_FILE, "Sonarr"), "Sonarr")
+    items: list[tuple[str, float]] = []
+    for entry in payload:
+        title = str(entry.get("title", "?"))
+        statistics = entry.get("statistics") or {}
+        size = float(statistics.get("sizeOnDisk") or 0)
+        items.append((title, size))
+    emit(items, min_bytes, "Sonarr series")
+
+
+def cmd_totals() -> None:
+    movies = fetch_library(RADARR_URL, MOVIE_ENDPOINT, load_key(RADARR_KEY_FILE, "Radarr"), "Radarr")
+    movie_bytes = 0
+    for entry in movies:
+        movie_file = entry.get("movieFile") or {}
+        movie_bytes += float(entry.get("sizeOnDisk") or movie_file.get("sizeOnDisk") or 0)
+    series = fetch_library(SONARR_URL, SERIES_ENDPOINT, load_key(SONARR_KEY_FILE, "Sonarr"), "Sonarr")
+    series_bytes = 0
+    for entry in series:
+        statistics = entry.get("statistics") or {}
+        series_bytes += float(statistics.get("sizeOnDisk") or 0)
+    print(f"Radarr: {len(movies)} movies, {human_size(movie_bytes)} on disk")
+    print(f"Sonarr: {len(series)} series, {human_size(series_bytes)} on disk")
+
+
+USAGE = """usage: plexibot-library <subcommand>   (values go on STDIN, never on argv)
+
+  movies                       stdin: 1 line = minimum size in GB (0 = all)
+  series                       stdin: 1 line = minimum size in GB (0 = all)
+  totals                       library counts and on-disk totals (no stdin)
+
+Always deliver stdin with a quoted heredoc and a random unique delimiter,
+e.g.:  plexibot-library movies <<'EOF_k3d9'
+20
+EOF_k3d9
+"""
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        print(USAGE, file=sys.stderr)
+        die("exactly one subcommand argument is required; all values go on stdin")
+    handlers = {
+        "movies": cmd_movies,
+        "series": cmd_series,
+        "totals": cmd_totals,
+    }
+    handler = handlers.get(sys.argv[1])
+    if handler is None:
+        print(USAGE, file=sys.stderr)
+        die(f"unknown subcommand {sys.argv[1]!r}")
+    handler()
+
+
+if __name__ == "__main__":
+    main()

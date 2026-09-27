@@ -2,9 +2,15 @@
 # Example:
 # ansible-playbook shutdown_hosts.yaml -i inventory.yaml --extra-vars "target=[hostname]"
 
+# Include every inventory host (`localhost, all`) so ANY --limit value still
+# matches this play (a narrower pattern is dropped when the limit selects a
+# host outside it, which skipped the prompt/add_host and the silence during
+# limited runs). run_once on the silence include keeps exactly one silence.
+# No play-level become: add_host runs on the controller and the silence
+# include delegates to localhost with become: false, so limited runs against
+# hosts without ansible sudo cannot die on privilege escalation first.
 - name: Initialise
-  hosts: localhost
-  become: true
+  hosts: localhost, all
   gather_facts: false
   vars_prompt:
     - name: target_hosts
@@ -22,6 +28,7 @@
       ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
       vars:
         grafana_silence_comment: "Host shutdown — {{ target_hosts }}"
+      run_once: true
 
 - name: Stop containers
   hosts: hosts_list

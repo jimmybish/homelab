@@ -423,6 +423,37 @@
     group: "{{ hermes_user }}"
     mode: '0755'
 
+- name: Deploy Plexibot Radarr API key file
+  ansible.builtin.copy:
+    content: "{{ radarr_api_key }}{{ '\n' }}"
+    dest: "{{ hermes_plexibot_radarr_key_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  no_log: true
+  diff: false
+
+- name: Deploy Plexibot Sonarr API key file
+  ansible.builtin.copy:
+    content: "{{ sonarr_api_key }}{{ '\n' }}"
+    dest: "{{ hermes_plexibot_sonarr_key_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  no_log: true
+  diff: false
+
+- name: Deploy Plexibot library size helper script
+  ansible.builtin.template:
+    src: hermes-library.py.j2
+    dest: "{{ hermes_plexibot_library_bin }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    # The rendered helper embeds internal service URLs and private key-file
+    # paths, so it stays owner-only executable.
+    mode: '0700'
+    validate: '{{ hermes_install_dir }}/venv/bin/python -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" %s'
+
 - name: Deploy Plexibot meme wrapper script
   ansible.builtin.template:
     src: hermes-meme.py.j2
@@ -1047,6 +1078,30 @@
       - item.stat.mode == '0600'
   loop: "{{ hermes_virtuajimmy_private_files.results }}"
   no_log: true
+
+- name: Inspect Plexibot library helper and API key files
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop:
+    - { path: "{{ hermes_plexibot_library_bin }}", mode: "0700" }
+    - { path: "{{ hermes_plexibot_radarr_key_file }}", mode: "0600" }
+    - { path: "{{ hermes_plexibot_sonarr_key_file }}", mode: "0600" }
+  loop_control:
+    label: "{{ item.path }}"
+  register: hermes_plexibot_library_files
+
+- name: Assert Plexibot library helper deployment
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg
+      - item.stat.pw_name == hermes_user
+      - item.stat.gr_name == hermes_user
+      - item.stat.mode == item.item.mode
+    fail_msg: "The Plexibot library helper or its API key files do not match the managed file policy."
+    success_msg: "The Plexibot library helper is executable and its API key files are owner-only."
+  loop: "{{ hermes_plexibot_library_files.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
 
 - name: Inspect profile-local MCP server and obsolete helper
   ansible.builtin.stat:

@@ -1,12 +1,18 @@
 ---
+# Silence plays use `hosts: localhost, all` so ANY --limit value still
+# matches them (a narrower pattern like localhost+ubuntu is dropped when the
+# limit selects a host outside ubuntu). run_once keeps exactly one silence per
+# run. Do NOT move these into the serial:1 work play - serial re-runs run_once
+# tasks per batch.
 - name: Silence Grafana alerts during Ubuntu updates
-  hosts: localhost
+  hosts: localhost, all
   gather_facts: false
   tasks:
     - name: Create Grafana silence
       ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
       vars:
         grafana_silence_comment: "Updating and rebooting Ubuntu hosts"
+      run_once: true
 
 - name: Update, upgrade, and reboot all Ubuntu hosts
   hosts: "ubuntu"
@@ -36,8 +42,9 @@
       when: upgrade_result.changed
 
 - name: Re-enable Grafana alerts after Ubuntu updates
-  hosts: localhost
+  hosts: localhost, all
   gather_facts: false
   tasks:
     - name: Remove Grafana silence
       ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+      run_once: true

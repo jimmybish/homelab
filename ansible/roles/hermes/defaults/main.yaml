@@ -17,6 +17,10 @@ hermes_secrets_dir: "{{ hermes_home }}/secrets"
 hermes_plexibot_grafana_token_file: "{{ hermes_secrets_dir }}/plexibot-grafana-token"
 hermes_plexibot_soul_file: "{{ hermes_profiles_dir }}/plexibot/SOUL.md"
 hermes_plexibot_usermap_bin: "{{ hermes_bin_dir }}/plexibot-usermap"
+hermes_plexibot_library_bin: "{{ hermes_bin_dir }}/plexibot-library"
+hermes_plexibot_library_top: 40
+hermes_plexibot_radarr_key_file: "{{ hermes_secrets_dir }}/plexibot-radarr-key"
+hermes_plexibot_sonarr_key_file: "{{ hermes_secrets_dir }}/plexibot-sonarr-key"
 hermes_plexibot_meme_bin: "{{ hermes_bin_dir }}/plexibot-meme"
 hermes_plexibot_meme_script: "{{ hermes_skills_dir }}/creative/meme-generation/scripts/generate_meme.py"
 # Plexibot SOUL service reference. URLs are thin aliases to the global
@@ -46,6 +50,11 @@ hermes_virtuajimmy_user_ssh_dir: "{{ hermes_user_home }}/.ssh"
 hermes_virtuajimmy_known_hosts_file: "{{ hermes_virtuajimmy_user_ssh_dir }}/known_hosts"
 hermes_virtuajimmy_grafana_token_file: "{{ hermes_secrets_dir }}/virtuajimmy-grafana-token"
 hermes_local_tools_bin: "{{ hermes_bin_dir }}/hermes-local-tools"
+# Fixed-interface git helper deployed by roles/management into the shared repo
+# bin on mgmt (virtuajimmy-executable). Kanban branch-workflow commands go
+# through it; the SOUL/skill templates reference this rendered path instead of
+# teaching raw git command lines with placeholders.
+hermes_git_helper_bin: "/srv/homelab/bin/hermes-git"
 hermes_virtuajimmy_triage_skill_file: "{{ hermes_virtuajimmy_profile_dir }}/skills/kanban-task-triage/SKILL.md"
 hermes_virtuajimmy_pii_skill_file: "{{ hermes_virtuajimmy_profile_dir }}/skills/pii-pre-review/SKILL.md"
 hermes_virtuajimmy_github_app_enabled: false

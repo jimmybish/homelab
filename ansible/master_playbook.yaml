@@ -1,16 +1,28 @@
 ---
+# Silence plays use `hosts: localhost, all` so ANY --limit value (any inventory
+# host) still matches them; a pattern narrower than the work plays' `all`
+# scope (e.g. localhost+ubuntu) is dropped when the limit selects a
+# non-Ubuntu inventory host, which skipped silencing during limited runs.
+# run_once = one silence per run regardless of matched host; every mutating
+# task delegates to localhost (delegate_facts) so deploy plays read
+# hostvars['localhost']['grafana_master_silence_active'].
 - name: Silence Grafana alerts for full deployment
-  hosts: localhost
+  hosts: localhost, all
   gather_facts: false
   tasks:
     - name: Mark master silence active
       ansible.builtin.set_fact:
         grafana_master_silence_active: true
+      delegate_to: localhost
+      delegate_facts: true
+      become: false
+      run_once: true
 
     - name: Create Grafana silence
       ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
       vars:
         grafana_silence_comment: "Master playbook full deployment"
+      run_once: true
 
 - name: Initial OS Configuration
   ansible.builtin.import_playbook: os_setup.yaml
@@ -94,12 +106,17 @@
   ansible.builtin.import_playbook: deploy_mcp_radarr.yaml
 
 - name: Re-enable Grafana alerts after deployment
-  hosts: localhost
+  hosts: localhost, all
   gather_facts: false
   tasks:
     - name: Remove Grafana silence
       ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+      run_once: true
 
     - name: Clear master silence flag
       ansible.builtin.set_fact:
         grafana_master_silence_active: false
+      delegate_to: localhost
+      delegate_facts: true
+      become: false
+      run_once: true
