@@ -21,6 +21,13 @@ This is a homelab infrastructure-as-code repository managed with Ansible. It dep
 - **When creating a new service role**, follow `ansible/docs/new-service-runbook.md` step-by-step — read it at the start and use it as the task list throughout. Do not skip phases or reorder steps.
 - **When creating a new MCP server**, follow the `mcp-server-creation` skill end-to-end. MCP servers wrap service APIs as tools for Copilot agents — source lives in `mcp-server-<name>/` at repo root, deployed via Ansible roles under `ansible/roles/mcp_<name>/`.
 
+## Git Workflow
+
+- Before making any file change, inspect the current branch and worktree, then create and switch to a dedicated branch for the task.
+- Never begin edits on `main` or another shared/base branch. If unrelated worktree changes already exist, preserve them and ask for guidance when they cannot be safely carried onto the task branch.
+- Keep the completed changes on the local task branch. Do not push, synchronize the branch to a remote, or open a pull request unless the user explicitly requests it; the user owns those steps by default.
+- Do not commit unless the user explicitly requests a commit.
+
 ## Change Logging
 
 After any task that modifies files, runs commands on remote hosts, or changes configuration, **always** use the `change-logging` skill to record the change. This is mandatory — never skip it when changes have been made. Read the skill for the full format and file location conventions.
