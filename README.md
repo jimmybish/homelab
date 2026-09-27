@@ -132,3 +132,5 @@ ansible-playbook master_playbook.yaml -i inventory.yaml --vault-password-file ~/
 - Node Exporter runs on all Ubuntu hosts. Prometheus scrapes via FQDNs.
 - cAdvisor outputs Docker metrics via Prometheus.
 - InfluxDB receives metrics from Proxmox hosts and Home Assistant.
+
+<!-- GitHub App smoke test 2026-09-27: added by the VirtuaJimmy GitHub App to verify branch push, PR, and comment permissions. Safe to delete. -->
