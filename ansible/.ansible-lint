@@ -1,6 +1,10 @@
 profile: null
 warn_list:
   - role-name
+  # run_once only diverges under strategy: free, which no play in this repo
+  # uses. Silence/maintenance playbooks rely on run_once deliberately so
+  # --limit runs still create/remove exactly one Grafana silence.
+  - run-once
   # roles/hermes/tasks/main.yaml has 125 tasks (> 100 max). Downgraded to a
   # visible warning instead of a gate failure; revisit if it keeps growing.
   - complexity[tasks]

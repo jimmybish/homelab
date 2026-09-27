@@ -1,7 +1,14 @@
 ---
+# hosts is `localhost, all` so ANY --limit value still matches both this
+# Initialise play and the remove play at the bottom (a narrower pattern is
+# dropped when the limit selects a host outside it, which skipped the
+# prompt/add_host and the silence during limited runs).
+# No play-level become: every task here is add_host/set_fact (runs on the
+# controller) or delegates to localhost with become: false, so limited runs
+# against a host without Ansible sudo cannot fail on privilege escalation
+# before the silence is even created.
 - name: Initialise
-  hosts: localhost
-  become: true
+  hosts: localhost, all
   gather_facts: false
   vars_prompt:
     - name: target_hosts
@@ -31,6 +38,7 @@
       ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
       vars:
         grafana_silence_comment: "Stopping containers — {{ target_hosts }}"
+      run_once: true
 
 - name: Stop containers
   hosts: hosts_list
@@ -64,8 +72,9 @@
         var: docker_info.containers
 
 - name: Re-enable Grafana alerts
-  hosts: localhost
+  hosts: localhost, all
   gather_facts: false
   tasks:
     - name: Remove Grafana silence
       ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+      run_once: true

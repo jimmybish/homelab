@@ -2,14 +2,17 @@
 # Playbook to update all Docker Compose containers to the latest version
 # Equivalent to: docker compose pull && docker compose up -d
 
+# hosts is `localhost, all` so ANY --limit value still matches this play
+# (a narrower pattern is dropped when the limit selects a host outside it).
 - name: Silence Grafana alerts during container updates
-  hosts: localhost
+  hosts: localhost, all
   gather_facts: false
   tasks:
     - name: Create Grafana silence
       ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
       vars:
         grafana_silence_comment: "Updating all Docker containers"
+      run_once: true
 
 - name: Update all Docker Compose containers
   hosts:
@@ -60,8 +63,9 @@
         var: up_results
 
 - name: Re-enable Grafana alerts after container updates
-  hosts: localhost
+  hosts: localhost, all
   gather_facts: false
   tasks:
     - name: Remove Grafana silence
       ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+      run_once: true
