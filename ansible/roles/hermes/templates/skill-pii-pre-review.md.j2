@@ -1,14 +1,13 @@
 ---
 name: pii-pre-review
-description: 'Use when: preparing homelab changes for Copilot review. Find and remove PII, secrets, and private infrastructure details before the branch is handed off for review.'
+description: 'Use when: preparing homelab changes for Copilot review. Find and remove PII, secrets, and private infrastructure details before staging the final review set.'
 ---
 
 # PII Pre-Review Gate
 
-Run this before handing a branch to Copilot review. Your job is to prevent new
-private data from entering the committed change set. This skill does not
-authorize pushes, history rewrites, force-pushes, merges to main, or
-credential rotation.
+Run this before handing a change to Copilot review. Your job is to prevent new
+private data from entering the staged change set. This skill does not authorize
+commits, pushes, history rewrites, force-pushes, or credential rotation.
 
 ## Never Include in Plaintext
 
@@ -30,10 +29,9 @@ number or hostname mechanically.
 ## Pre-Review Workflow
 
 1. Read the relevant repo instructions and domain skills before editing.
-2. Identify the intended file set with `git status --short`, the worktree diff
-   against the base (`git diff origin/main...HEAD`), and untracked files.
-   Preserve unrelated work; on a shared task branch, never commit another
-   card's in-flight files.
+2. Identify the intended file set with `git status --short`, the worktree diff,
+   staged diff, and untracked files. Preserve unrelated and pre-existing staged
+   work.
 3. Search every changed file and its filename for:
    - `BEGIN ... PRIVATE KEY`, `AKIA`, `ghp_`, `gho_`, `github_pat_`, `xox*`,
      bearer headers, cookies, and credentials embedded in URLs;
@@ -55,30 +53,23 @@ number or hostname mechanically.
    requires stricter documented handling.
 7. Render sensitive templates only to temporary mode-`0600` files. Assert safe
    fields without printing the file, then delete it.
-8. Confirm local credential/config files are ignored and untracked. Run the
-   commands with the REAL literal path of each candidate file (never a
-   placeholder token), e.g.:
+8. Confirm local credential/config files are ignored and untracked:
 
    ```bash
-   git check-ignore -v .env changelogs
-   git ls-files -- .env changelogs
+   git check-ignore -v <path>
+   git ls-files -- <path>
    ```
 
 9. Re-run the focused secret/PII search after remediation. Scanner examples,
    public endpoints, Vault ciphertext, and public keys are not findings unless
    context makes them identifying or usable.
 10. Run the relevant syntax checks, lint, tests, template renders, and
-    `{{ hermes_git_helper_bin }} check` (run inside the task worktree).
-11. Commit only your intended files through the managed helper
-    (`{{ hermes_git_helper_bin }} commit` — subject on line 1 of stdin, one
-    pathspec per line after it, delivered via a quoted heredoc). Compare
-    `{{ hermes_git_helper_bin }} files` set-to-set with the handoff
-    list, sweep every branch commit message for leaks
-    (`git log --format=%B` over the branch's own commit range), and inspect
-    `git status --short` so nothing you claim is left uncommitted.
-12. Append the required ignored CAB change log, then hand off to Copilot with
-    the branch, base, commit list, changed paths, checks run, and any
-    unresolved uncertainty.
+    `git diff --check`.
+11. Stage only your intended files with explicit paths. Compare
+    `git diff --cached --name-only` set-to-set with the handoff list, and inspect
+    `git status --short` for worktree content ahead of the index.
+12. Append the required ignored CAB change log, then hand off to Copilot with the
+    exact staged paths, checks run, and any unresolved uncertainty.
 
 ## Stop Conditions
 
@@ -88,11 +79,9 @@ Do not pass the work for review when:
 - a sensitive value is merely renamed, encoded, redacted in `HEAD`, or moved to
   another tracked file instead of being Vault-backed;
 - a task can expose decrypted data in Ansible output;
-- the branch file set differs from the handoff list;
+- the staged file set differs from the handoff list;
 - required validation did not run or failed.
 
-If you discover that sensitive data may already exist in a commit on the task
-branch, stop and escalate to Jimmy and Copilot before handing off — the branch
-stays local, so remediation (follow-up commit or, with approval, branch-local
-history fix) is Jimmy's call; the
+If you discover that sensitive data may already exist in a commit, stop and
+escalate to Jimmy and Copilot. Do not investigate or rewrite Git history yourself; the
 `public-repo-audit` workflow belongs to the Copilot profile.
