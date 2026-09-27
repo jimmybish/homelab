@@ -82,11 +82,20 @@ class WrapperTests(unittest.TestCase):
         captured_config = []
 
         def fake_run(*_args, **kwargs):
-            captured_config.append(
-                pathlib.Path(kwargs["env"]["GIT_CONFIG_GLOBAL"]).read_text(
-                    encoding="utf-8"
+            command = _args[0]
+            if command[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                return mock.Mock(
+                    returncode=0, stdout="/srv/homelab\n", stderr=""
                 )
-            )
+            if command[:3] == ["git", "config", "--file"]:
+                pathlib.Path(command[3]).write_text(
+                    "[safe]\n\tdirectory = /srv/homelab\n",
+                    encoding="utf-8",
+                )
+                return completed
+            captured_config.append(pathlib.Path(
+                kwargs["env"]["GIT_CONFIG_GLOBAL"]
+            ).read_text(encoding="utf-8"))
             return completed
 
         args = argparse.Namespace(
@@ -98,13 +107,14 @@ class WrapperTests(unittest.TestCase):
             self.wrapper.subprocess, "run", side_effect=fake_run
         ) as run:
             result = self.wrapper.push_branch(self.config, args)
-        command = run.call_args.args[0]
-        environment = run.call_args.kwargs["env"]
+        command = run.call_args_list[-1].args[0]
+        environment = run.call_args_list[-1].kwargs["env"]
         self.assertEqual(command[2], "--porcelain")
         self.assertEqual(command[3], "https://github.com/jimmybish/homelab.git")
         self.assertEqual(command[4], "HEAD:refs/heads/task/7")
         self.assertNotIn("installation-secret", " ".join(command))
         self.assertNotIn("installation-secret", json.dumps(environment))
+        self.assertIn("directory = /srv/homelab", captured_config[0])
         self.assertIn("Authorization: Basic", captured_config[0])
         self.assertNotIn("installation-secret", captured_config[0])
         self.assertNotIn("installation-secret", json.dumps(result))

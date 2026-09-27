@@ -158,12 +158,38 @@ def validate_ref(value, label):
 def push_branch(config, args):
     validate_ref(args.branch, "branch")
     validate_ref(args.source, "source")
+    repository = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if repository.returncode != 0:
+        raise AppError("current directory is not a trusted Git repository")
+    repository_root = repository.stdout.strip()
+    if not repository_root or "\n" in repository_root:
+        raise AppError("Git returned an invalid repository path")
+
     token = installation_token(config, args.repo)
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")
     with tempfile.TemporaryDirectory(prefix="vj-github-") as directory:
         git_config = pathlib.Path(directory) / "gitconfig"
+        safe_directory = subprocess.run(
+            [
+                "git", "config", "--file", str(git_config),
+                "--add", "safe.directory", repository_root,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if safe_directory.returncode != 0:
+            raise AppError("could not create isolated Git configuration")
         git_config.write_text(
-            "[credential]\n"
+            git_config.read_text(encoding="utf-8")
+            + "[credential]\n"
             "\thelper =\n"
             '[http "https://github.com/"]\n'
             f"\textraHeader = Authorization: Basic {basic}\n",
