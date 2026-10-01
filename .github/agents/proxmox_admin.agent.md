@@ -243,6 +243,12 @@ Before any modification:
 5. Note if the VM/LXC is part of an HA group
 6. Check for active backups or snapshots
 
+Use the node task endpoint's `source` filter to check active tasks:
+```bash
+pvesh get /nodes/{node}/tasks --source active --output-format json
+```
+`--running` is not a valid option for this endpoint.
+
 When in doubt, provide the commands for the user to review and execute manually rather than running them automatically.
 
 ---
