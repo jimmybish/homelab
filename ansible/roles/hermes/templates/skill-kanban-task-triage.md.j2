@@ -13,32 +13,11 @@ card either does the whole job in place or files the DAG that does.
 ## Step 0 — Fit test (before anything else)
 
 Estimate the whole job (use the calibration table below). If the entire job —
-research, dev, deploy, verify, commits, changelog — fits under ~50 turns,
+research, dev, deploy, verify, stage, changelog — fits under ~50 turns,
 **skip decomposition**: do it in this card, hand off review, done. Ceremony
 over a one-card job costs more than it saves. Decompose when the estimate is
 >~50 turns or there are clear phase boundaries (multiple dev streams, a
 deploy tail, an audit-style inventory phase).
-
-## Step 0.5 — Create the task worktree (before any edit)
-
-Per the branch-per-task workflow (owner ruling 2026-09-20), the whole job —
-this card and every child — works on ONE shared branch in ONE worktree,
-created by the managed git helper. This substep runs on the ROOT change
-request only. Run the bare subcommand
-`{{ hermes_git_helper_bin }} worktree` — it reads this card's id from the
-dispatcher env itself; helper invocations NEVER carry model-derived text on
-the command line or stdin.
-
-`cd` into the printed worktree path and stay there. The helper resolves the
-base itself (local `main` when ahead of `origin/main`, otherwise
-`origin/main`) and prints the chosen base ref and SHA — carry that base in the
-review handoff. Record the branch name and worktree path in this card's completion
-summary so every child brief can carry them. Children NEVER run the `worktree`
-subcommand and NEVER create their own branch — it derives `wt/<current-card-id>`
-from the dispatcher env, so a child calling it would fork off the reviewed
-branch; children `cd` into the worktree named in their body and commit to the
-shared branch. Never edit, commit, or deploy from
-the shared `/srv/homelab` checkout.
 
 ## Step 1 — Research, read-only
 
@@ -77,7 +56,7 @@ Calibration from real runs (what 90 turns actually bought vs cost):
 - author 6 existing templates + syntax-check loops: ~50 turns
 - author new profile templates + SOUL + vault wiring: ~30 turns
 - vault encrypt + variable wiring + re-encrypt fixes: ~30 turns
-- full deploy + restarts + service asserts + idempotency rerun + branch handoff: ~40 turns
+- full deploy + restarts + service asserts + idempotency rerun + stage: ~40 turns
 - handoff tax: every extra child card re-verifies state: ~5-8 turns each
 
 ## Step 3 — File the children
@@ -85,52 +64,40 @@ Calibration from real runs (what 90 turns actually bought vs cost):
 `kanban_create` per child: `title`, `assignee` (virtuajimmy for dev/deploy,
 copilot for review), `parents: [<this card id>]` (or the dev ids for the
 deploy fan-in). Children auto-promote to `ready` when all parents complete,
-so parented dev cards file `ready` immediately and run **in parallel on the
-shared branch** — require disjoint file sets for parallel dev cards; overlap
-forces parent-chaining (B `parents: [A]`), which doubles as sequential claim
-discipline: cards that touch the same files must never run at once, and the
-later card starts from the earlier card's committed state.
+so parented dev cards file `ready` immediately and run **in parallel** —
+require disjoint file sets for parallel dev cards; overlap forces
+parent-chaining (B `parents: [A]`).
 
 Ideal shape for a templating/config job:
 
 ```
-this triage card (~15-20 turns, creates worktree, files children, completes)
+this triage card (~15-20 turns, files children, then completes)
   ├── Dev A: subsystem 1 (~30)   ──┐
-  ├── Dev B: subsystem 2 (~50)   ──┼── disjoint files, parallel, one branch
+  ├── Dev B: subsystem 2 (~50)   ──┼── disjoint files, parallel
   ├── Dev C: subsystem 3 (~30)   ──┘
-  │       (each: work in the task worktree, edit + --syntax-check,
-  │        commit own files with an explicit pathspec,
-  │        append changelog entry (never committed))
-  └── Deploy card  parents=[A,B,C] (~40): one playbook run FROM THE WORKTREE,
-          idempotency rerun, service asserts with body/header checks, any
-          fixup commits, its own changelog entry (never committed) — then the
-          branch-diff review handoff (kanban_create copilot, parents=[deploy])
-                └── Review (branch, round N) → copilot
-                      └── PASS → MERGE READY for that branch (blocked; Jimmy merges)
+  │       (each: edit + --syntax-check, git add own files,
+  │        append changelog entry (unstaged))
+  └── Deploy card  parents=[A,B,C] (~40): one playbook run, idempotency
+          rerun, service asserts, git add remainder, its own changelog
+          entry (unstaged) — then the
+          usual review handoff (kanban_create copilot, parents=[deploy])
+                └── Review (round N) → copilot
+                      └── PASS → COMMIT READY (blocked; Jimmy's gate)
 ```
 
 Every child body must contain, and nothing more:
-- **The worktree and branch** — path + branch name + base SHA, plus "commit to
-  this branch through the managed git helper (`{{ hermes_git_helper_bin }} commit`,
-  subject on line 1 of stdin and one pathspec per line after it);
-  never `git add -A`, never commit another card's files, never run the
-  helper's `worktree` subcommand, never create a new
-  branch."
-- **Deliverable as verifiable on-disk state** — `{{ hermes_git_helper_bin }} log`
-  shows a commit touching X, `--syntax-check` passes, `ansible-vault view`
-  shows Y. The next worker checks with one command, never trusts a
-  predecessor's prose.
+- **Deliverable as verifiable on-disk state** — `git status` shows X
+  staged, `--syntax-check` passes, `ansible-vault view` shows Y. The next
+  worker checks with one command, never trusts a predecessor's prose.
 - **Changelog entry in the child's OWN deliverable** — every dev AND deploy
-  child body ends its Deliverable with "append changelog entry (never
-  committed): `changelogs/week-YYYY-MM-DD/log_YYMMDD.md`, CAB format per the
-  change-logging skill, gitignored, never added or committed". Do not put the
-  changelog only on the deploy card; per-run logging means per-card logging.
+  child body ends its Deliverable with "append changelog entry (unstaged):
+  `changelogs/week-YYYY-MM-DD/log_YYMMDD.md`, CAB format per the
+  change-logging skill, never git-added". Do not put the changelog only on
+  the deploy card; per-run logging means per-card logging.
 - **Exact file scope** ("touch only these files") so parallel cards can't
-  collide on the shared branch.
-- **What NOT to do**: no pushes to origin, no touching `main`, no new
-  branches, no deploys from dev cards, no drive-by fixes; a card that finds
-  the branch tip does not match its brief's expected state re-reads the peer
-  card handoffs before proceeding.
+  collide.
+- **What NOT to do**: no commits, no pushes, no deploys from dev cards, no
+  drive-by fixes; pre-existing staged changes stay untouched and get listed.
 - Pointers, not payloads: vault var names, playbook paths, doc paths — not
   file contents (children read the disk themselves; copying contents into
   briefs goes stale).
@@ -155,10 +122,8 @@ half-mapped job that dies without filing anything.
 - **Children get fresh sessions, not your memory.** Anything not in the
   body or on disk does not exist.
 - **Workspace fields:** leave `workspace_kind`/`workspace_path` unset —
-  this repo is reached through the profile's SSH terminal on mgmt, with the
-  job's git worktree under `/home/virtuajimmy/homelab.worktrees/` (created by
-  the helper's `worktree` subcommand from the ROOT change-request card id),
-  not through Hermes workspace checkouts.
+  this repo is reached through the profile's SSH terminal at
+  `/srv/homelab` on mgmt, not through Hermes workspace checkouts.
 - **Loop cap unchanged:** rounds count on review card titles; round 4 →
   block and escalate, per SOUL.
 - **Skip-triage abuse:** "it looks small" is not a fit test — run the
