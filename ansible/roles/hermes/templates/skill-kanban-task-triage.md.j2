@@ -80,7 +80,9 @@ this triage card (~15-20 turns, files children, then completes)
   └── Deploy card  parents=[A,B,C] (~40): one playbook run, idempotency
           rerun, service asserts, git add remainder, its own changelog
           entry (unstaged) — then the
-          usual review handoff (kanban_create copilot, parents=[deploy])
+          review handoff (kanban_create copilot, parented to the last
+          COMPLETED card e.g. dev B, then kanban_link review as parent
+          of the deploy card so it auto-resumes on the verdict)
                 └── Review (round N) → copilot
                       └── PASS → COMMIT READY (blocked; Jimmy's gate)
 ```
@@ -112,6 +114,14 @@ half-mapped job that dies without filing anything.
 
 ## Pitfalls
 
+- **Never parent a review card to a card waiting on its verdict.** Children
+  promote only when ALL parents are done: a review card parented to the
+  running/blocked deploy card gates on that card's done, and the deploy card
+  cannot complete without the PASS — neither ever promotes. Parent the review
+  to the last COMPLETED card (dev card for round 1, completed fix card for
+  later rounds) and `kanban_link` the review as a parent of the waiting card
+  so it auto-resumes on the verdict. Reference failure: `t_bed2b4be` sat in
+  todo forever.
 - **Budget exhaustion is a design smell.** Today's reference failure: one
   90-turn card (drift analysis + 9 templates + vault + deploy + idempotency)
   died at ~85% twice; the disk state survived but two full runs burned
