@@ -14,19 +14,30 @@ backend executes every command over SSH as
 `{{ hermes_virtuajimmy_github_app_execution_host }}`; therefore the absolute
 wrapper and configuration paths below are management-host paths.
 
+Model-authored prose (PR titles, bodies, comments) must NEVER appear inline
+in a command line. Write it to a private file first (for example with your
+file-writing tool, mode 0600, owned by you, under a directory only you can
+read), then pass
+that path via `--title-file` / `--body-file`; `-` reads the text from stdin
+instead. The wrapper rejects inline text, any file with group or other
+access (0600 or stricter is required), files you do not own, symlinks, and
+anything that is not a regular file, so prose never lands in process argv.
+
 ```bash
 {{ hermes_virtuajimmy_github_app_wrapper_file }} \
   --config {{ hermes_virtuajimmy_github_app_config_file }} push-branch \
   --repo jimmybish/homelab --branch TASK_BRANCH --source TASK_BRANCH
 
+# TITLE_FILE and BODY_FILE are 0600 files you wrote beforehand; '-' = stdin
 {{ hermes_virtuajimmy_github_app_wrapper_file }} \
   --config {{ hermes_virtuajimmy_github_app_config_file }} open-pr \
   --repo jimmybish/homelab --head TASK_BRANCH --base main \
-  --title "TITLE" --body "BODY"
+  --title-file TITLE_FILE --body-file BODY_FILE
 
+# BODY_FILE holds the comment text; never pass the comment inline
 {{ hermes_virtuajimmy_github_app_wrapper_file }} \
   --config {{ hermes_virtuajimmy_github_app_config_file }} comment \
-  --repo jimmybish/homelab --pr PR_NUMBER --body "COMMENT"
+  --repo jimmybish/homelab --pr PR_NUMBER --body-file BODY_FILE
 ```
 
 The wrapper accepts only `push-branch`, `open-pr`, and `comment`. It validates

@@ -80,9 +80,18 @@ this triage card (~15-20 turns, files children, then completes)
   └── Deploy card  parents=[A,B,C] (~40): one playbook run, idempotency
           rerun, service asserts, git add remainder, its own changelog
           entry (unstaged) — then the
-          usual review handoff (kanban_create copilot, parents=[deploy])
+          review handoff (kanban_create copilot, parented to the last
+          COMPLETED card e.g. dev B, then kanban_link review as parent
+          of the deploy card so it auto-resumes on the verdict)
                 └── Review (round N) → copilot
-                      └── PASS → COMMIT READY (blocked; Jimmy's gate)
+                      └── PASS → DELIVERY on the deploy card:
+                            recheck staged tree == reviewed tree,
+                            commit reviewed set to the task branch,
+                            App-wrapper push-branch (wt/* only),
+                            App-wrapper open-pr vs main (--title-file/
+                            --body-file only, never inline text) with
+                            merge-order + branch-protection notes,
+                            then block awaiting Jimmy's merge
 ```
 
 Every child body must contain, and nothing more:
@@ -98,6 +107,17 @@ Every child body must contain, and nothing more:
   collide.
 - **What NOT to do**: no commits, no pushes, no deploys from dev cards, no
   drive-by fixes; pre-existing staged changes stay untouched and get listed.
+- **Delivery step baked into every deploy-card body**: after review PASS and
+  a verified post-PASS deployment with a clean idempotency rerun, recheck the
+  staged tree is byte-identical to the reviewed tree, commit exactly that set
+  to the task branch (local Git identity), push the `wt/*` branch and open the
+  PR against `main` using ONLY the `github-app-workflow` wrapper commands
+  (`push-branch` then `open-pr`, with the PR title and body passed ONLY via
+  `--title-file`/`--body-file` files or stdin — never inline in argv). The PR
+  body must note merge-order dependencies (changed-file overlap with other
+  open PRs) AND Jimmy's optional branch-protection follow-up (his own console
+  action, never via API), then `kanban_block` awaiting Jimmy's merge. Dev
+  cards never commit or push.
 - Pointers, not payloads: vault var names, playbook paths, doc paths — not
   file contents (children read the disk themselves; copying contents into
   briefs goes stale).
@@ -112,6 +132,14 @@ half-mapped job that dies without filing anything.
 
 ## Pitfalls
 
+- **Never parent a review card to a card waiting on its verdict.** Children
+  promote only when ALL parents are done: a review card parented to the
+  running/blocked deploy card gates on that card's done, and the deploy card
+  cannot complete without the PASS — neither ever promotes. Parent the review
+  to the last COMPLETED card (dev card for round 1, completed fix card for
+  later rounds) and `kanban_link` the review as a parent of the waiting card
+  so it auto-resumes on the verdict. Reference failure: `t_bed2b4be` sat in
+  todo forever.
 - **Budget exhaustion is a design smell.** Today's reference failure: one
   90-turn card (drift analysis + 9 templates + vault + deploy + idempotency)
   died at ~85% twice; the disk state survived but two full runs burned
