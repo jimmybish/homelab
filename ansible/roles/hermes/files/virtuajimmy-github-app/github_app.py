@@ -37,6 +37,24 @@ class AppError(RuntimeError):
     """Safe, credential-free error suitable for stderr."""
 
 
+class SanitizedArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser that never echoes user-supplied values on usage errors.
+
+    argparse's default error() prints the offending arguments verbatim, so a
+    rejected inline draft (e.g. '--title SECRET-DRAFT-$(id)') still reaches
+    terminal logs even though it is never acted on. Usage failures here print
+    only this parser's fixed usage line and keep the exit-code-2 semantics.
+    """
+
+    def error(self, message):
+        # 'message' is deliberately dropped: it can contain raw argv text.
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: invalid command line (details suppressed "
+              "because rejected arguments may contain private text)",
+              file=sys.stderr)
+        raise SystemExit(2)
+
+
 def b64url(value):
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
@@ -369,13 +387,14 @@ def comment(config, args):
 
 
 def parser():
-    root = argparse.ArgumentParser(
+    root = SanitizedArgumentParser(
         description=__doc__,
         usage="%(prog)s --config FILE {push-branch,open-pr,comment} ...",
         allow_abbrev=False,
     )
     root.add_argument("--config", required=True)
-    commands = root.add_subparsers(dest="operation", required=True)
+    commands = root.add_subparsers(
+        dest="operation", required=True, parser_class=SanitizedArgumentParser)
 
     push = commands.add_parser(
         "push-branch",

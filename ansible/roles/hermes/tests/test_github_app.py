@@ -411,6 +411,59 @@ class WrapperTests(unittest.TestCase):
                           stderr.getvalue())
             self.assertNotIn(hostile, stderr.getvalue())
 
+    def test_usage_errors_never_echo_user_supplied_text(self):
+        # Hostile inline --title/--body alongside OTHERWISE-VALID file args:
+        # argparse reaches the unrecognized-arguments stage and used to echo
+        # the rejected values verbatim in its error tail.
+        hostile = "SECRET-DRAFT-$(id)-`whoami`-payload"
+        title_file = self.write_text("t.txt", "Safe title")
+        body_file = self.write_text("b.txt", "Safe body")
+        cases = [
+            ["--config", self.write_config(), "open-pr", "--repo",
+             "jimmybish/homelab", "--head", "wt/t_1",
+             "--title-file", title_file, "--body-file", body_file,
+             "--title", hostile, "--body", hostile],
+            ["--config", self.write_config(), "comment", "--repo",
+             "jimmybish/homelab", "--pr", "7",
+             "--body-file", body_file, "--body", hostile],
+        ]
+        for argv in cases:
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), \
+                    contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as caught:
+                    self.wrapper.main(argv)
+            output = stdout.getvalue() + stderr.getvalue()
+            self.assertEqual(caught.exception.code, 2)
+            self.assertNotIn(hostile, output)
+            self.assertIn("usage:", stderr.getvalue())
+            self.assertEqual(output.count("invalid command line"), 1)
+
+    def test_malformed_option_values_are_not_echoed(self):
+        # Type-conversion failures (e.g. non-integer --pr) must also stay
+        # generic instead of echoing the rejected value.
+        argv = ["--config", self.write_config(), "comment", "--repo",
+                "jimmybish/homelab", "--pr", "$(id)", "--body-file", "b"]
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), \
+                contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as caught:
+                self.wrapper.main(argv)
+        self.assertEqual(caught.exception.code, 2)
+        self.assertNotIn("$(id)", stdout.getvalue() + stderr.getvalue())
+
+    def test_parser_subcommands_all_use_sanitized_parser(self):
+        root = self.wrapper.parser()
+        self.assertIsInstance(root, self.wrapper.SanitizedArgumentParser)
+        subparsers = [
+            action for action in root._actions
+            if isinstance(action, argparse._SubParsersAction)
+        ]
+        self.assertEqual(len(subparsers), 1)
+        for name, sub in subparsers[0].choices.items():
+            self.assertIsInstance(
+                sub, self.wrapper.SanitizedArgumentParser, msg=name)
+
     def test_open_pr_text_never_reaches_child_process_argv(self):
         hostile = "Body $('`\"\\ injection') payload"
         title_file = self.write_text("title.txt", "Task title " + hostile)
