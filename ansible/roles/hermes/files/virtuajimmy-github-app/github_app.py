@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-"""Constrained GitHub App client for VirtuaJimmy's pull-request workflow."""
+"""Constrained GitHub App client for VirtuaJimmy's pull-request workflow.
+
+Model-authored prose (PR titles, bodies, comments) is accepted only through
+the --title-file/--body-file options ('-' reads stdin), never as command-line
+text, so it never appears in process argv.
+"""
 
 import argparse
 import base64
+import errno
 import json
 import os
 import pathlib
@@ -24,6 +30,7 @@ TOKEN_PERMISSIONS = {
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REF_RE = re.compile(r"^(?![-/.])(?!.*(?:\.\.|//|@\{|\\))(?!.*[/.]$)[A-Za-z0-9._/-]+$")
 COMMENT_MARKER = "<!-- virtuajimmy-github-app -->"
+MODEL_TEXT_LIMIT = 65_536
 
 
 class AppError(RuntimeError):
@@ -155,6 +162,96 @@ def validate_ref(value, label):
         raise AppError(f"{label} is not a safe Git reference")
 
 
+def read_model_text(value, label):
+    """Load model-authored text from stdin or a private file, never argv.
+
+    PR/comment prose is model-derived and must never appear in a command
+    line (injection plus process-argument disclosure). Accepted values:
+    '-' for stdin, or the path of a private regular file owned by the
+    executing user with no group or other access (0600 or stricter).
+    Validation is bound to the opened descriptor: os.open() with
+    O_NOFOLLOW refuses symlinks at open time, and os.fstat() checks the
+    very descriptor that is read, so there is no interval where the
+    pathname could be swapped to a symlink after validation.
+    O_NONBLOCK keeps the open itself non-blocking: opening a FIFO for
+    reading without O_NONBLOCK would stall forever waiting for a writer,
+    so FIFOs are refused immediately (ENXIO with no writer, otherwise by
+    the fstat regular-file check on the opened descriptor). Stdin is
+    likewise bounded to MODEL_TEXT_LIMIT + 1 characters so an oversized
+    stream is rejected without buffering it in full.
+    """
+    if value == "-":
+        text = sys.stdin.read(MODEL_TEXT_LIMIT + 1)
+    else:
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if nofollow is not None:
+            flags |= nofollow
+        try:
+            descriptor = os.open(value, flags)
+        except OSError as exc:
+            if getattr(exc, "errno", None) in (errno.ELOOP, errno.ENXIO):
+                # ELOOP: O_NOFOLLOW refused a symlink at open time.
+                # ENXIO: O_NONBLOCK refused a FIFO with no writer; a FIFO
+                # is not a regular file either way.
+                raise AppError(f"{label} must be a regular text file or '-'") from None
+            raise AppError(
+                f"{label} must be '-' for stdin or an existing text file; "
+                "inline text on the command line is not accepted"
+            ) from None
+        try:
+            try:
+                file_stat = os.fstat(descriptor)
+            except OSError as exc:
+                raise AppError(f"cannot read {label} file: {exc}") from None
+            if not stat.S_ISREG(file_stat.st_mode):
+                # Also covers ELOOP symlinks re-checked here and any
+                # non-regular descriptor that reached the open.
+                raise AppError(f"{label} must be a regular text file or '-'")
+            if stat.S_IMODE(file_stat.st_mode) & 0o077:
+                raise AppError(
+                    f"{label} file must be private: no group or other "
+                    "access (0600 or stricter) is required"
+                )
+            if file_stat.st_uid != os.getuid():
+                raise AppError(
+                    f"{label} file must be owned by the executing user"
+                )
+            if nofollow is None:  # exotic platform without O_NOFOLLOW
+                try:
+                    path_stat = os.lstat(value)
+                except OSError as exc:
+                    raise AppError(f"cannot read {label} file: {exc}") from None
+                if (
+                    stat.S_IFMT(path_stat.st_mode) != stat.S_IFREG
+                    or (path_stat.st_ino, path_stat.st_dev)
+                    != (file_stat.st_ino, file_stat.st_dev)
+                ):
+                    raise AppError(
+                        f"{label} must be a regular text file or '-'"
+                    )
+            try:
+                with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+                    descriptor = -1
+                    raw = handle.read(MODEL_TEXT_LIMIT + 1)
+            except (OSError, UnicodeError) as exc:
+                raise AppError(f"cannot read {label} file: {exc}") from None
+        finally:
+            if descriptor != -1:
+                os.close(descriptor)
+        text = raw
+    if len(text) > MODEL_TEXT_LIMIT:
+        raise AppError(f"{label} text exceeds {MODEL_TEXT_LIMIT} characters")
+    text = text.rstrip("\r\n")
+    if not text.strip():
+        raise AppError(f"{label} text must not be empty")
+    return text
+
+
 def push_branch(config, args):
     validate_ref(args.branch, "branch")
     validate_ref(args.source, "source")
@@ -222,6 +319,8 @@ def push_branch(config, args):
 def open_pr(config, args):
     validate_ref(args.head, "head")
     validate_ref(args.base, "base")
+    title = read_model_text(args.title_file, "title")
+    body = read_model_text(args.body_file, "body")
     token = installation_token(config, args.repo)
     response = api_request(
         config,
@@ -229,10 +328,10 @@ def open_pr(config, args):
         f"/repos/{args.repo}/pulls",
         token,
         {
-            "title": args.title,
+            "title": title,
             "head": args.head,
             "base": args.base,
-            "body": args.body,
+            "body": body,
             "draft": args.draft,
         },
     )
@@ -245,13 +344,13 @@ def open_pr(config, args):
 
 
 def comment(config, args):
+    body = read_model_text(args.body_file, "body")
     token = installation_token(config, args.repo)
     issue = api_request(
         config, "GET", f"/repos/{args.repo}/issues/{args.pr}", token
     )
     if "pull_request" not in issue:
         raise AppError(f"#{args.pr} is an issue, not a pull request")
-    body = args.body
     if COMMENT_MARKER not in body:
         body = f"{body.rstrip()}\n\n{COMMENT_MARKER}"
     response = api_request(
@@ -270,29 +369,58 @@ def comment(config, args):
 
 
 def parser():
-    root = argparse.ArgumentParser(description=__doc__)
+    root = argparse.ArgumentParser(
+        description=__doc__,
+        usage="%(prog)s --config FILE {push-branch,open-pr,comment} ...",
+        allow_abbrev=False,
+    )
     root.add_argument("--config", required=True)
     commands = root.add_subparsers(dest="operation", required=True)
 
-    push = commands.add_parser("push-branch")
+    push = commands.add_parser(
+        "push-branch",
+        usage="%(prog)s --repo REPO --branch REF [--source REF]",
+        allow_abbrev=False,
+    )
     push.add_argument("--repo", required=True)
     push.add_argument("--branch", required=True)
     push.add_argument("--source", default="HEAD")
     push.set_defaults(handler=push_branch)
 
-    pull = commands.add_parser("open-pr")
+    pull = commands.add_parser(
+        "open-pr",
+        usage="%(prog)s --repo REPO --head REF [--base REF] "
+              "--title-file FILE --body-file FILE [--draft]",
+        allow_abbrev=False,
+    )
     pull.add_argument("--repo", required=True)
     pull.add_argument("--head", required=True)
     pull.add_argument("--base", default="main")
-    pull.add_argument("--title", required=True)
-    pull.add_argument("--body", required=True)
+    pull.add_argument(
+        "--title-file", required=True,
+        help="file holding the PR title, or '-' to read stdin; "
+             "inline title text on the command line is not accepted",
+    )
+    pull.add_argument(
+        "--body-file", required=True,
+        help="file holding the PR body, or '-' to read stdin; "
+             "inline body text on the command line is not accepted",
+    )
     pull.add_argument("--draft", action="store_true")
     pull.set_defaults(handler=open_pr)
 
-    note = commands.add_parser("comment")
+    note = commands.add_parser(
+        "comment",
+        usage="%(prog)s --repo REPO --pr NUMBER --body-file FILE",
+        allow_abbrev=False,
+    )
     note.add_argument("--repo", required=True)
     note.add_argument("--pr", type=int, required=True)
-    note.add_argument("--body", required=True)
+    note.add_argument(
+        "--body-file", required=True,
+        help="file holding the comment body, or '-' to read stdin; "
+             "inline comment text on the command line is not accepted",
+    )
     note.set_defaults(handler=comment)
     return root
 

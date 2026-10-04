@@ -84,7 +84,14 @@ this triage card (~15-20 turns, files children, then completes)
           COMPLETED card e.g. dev B, then kanban_link review as parent
           of the deploy card so it auto-resumes on the verdict)
                 └── Review (round N) → copilot
-                      └── PASS → COMMIT READY (blocked; Jimmy's gate)
+                      └── PASS → DELIVERY on the deploy card:
+                            recheck staged tree == reviewed tree,
+                            commit reviewed set to the task branch,
+                            App-wrapper push-branch (wt/* only),
+                            App-wrapper open-pr vs main (--title-file/
+                            --body-file only, never inline text) with
+                            merge-order + branch-protection notes,
+                            then block awaiting Jimmy's merge
 ```
 
 Every child body must contain, and nothing more:
@@ -100,6 +107,17 @@ Every child body must contain, and nothing more:
   collide.
 - **What NOT to do**: no commits, no pushes, no deploys from dev cards, no
   drive-by fixes; pre-existing staged changes stay untouched and get listed.
+- **Delivery step baked into every deploy-card body**: after review PASS and
+  a verified post-PASS deployment with a clean idempotency rerun, recheck the
+  staged tree is byte-identical to the reviewed tree, commit exactly that set
+  to the task branch (local Git identity), push the `wt/*` branch and open the
+  PR against `main` using ONLY the `github-app-workflow` wrapper commands
+  (`push-branch` then `open-pr`, with the PR title and body passed ONLY via
+  `--title-file`/`--body-file` files or stdin — never inline in argv). The PR
+  body must note merge-order dependencies (changed-file overlap with other
+  open PRs) AND Jimmy's optional branch-protection follow-up (his own console
+  action, never via API), then `kanban_block` awaiting Jimmy's merge. Dev
+  cards never commit or push.
 - Pointers, not payloads: vault var names, playbook paths, doc paths — not
   file contents (children read the disk themselves; copying contents into
   briefs goes stale).
