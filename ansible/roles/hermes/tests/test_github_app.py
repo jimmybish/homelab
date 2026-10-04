@@ -89,6 +89,10 @@ class WrapperTests(unittest.TestCase):
                 return mock.Mock(
                     returncode=0, stdout="/srv/homelab\n", stderr=""
                 )
+            if command[3:4] == ["symbolic-ref"]:
+                return mock.Mock(
+                    returncode=0, stdout="wt/t_7\n", stderr=""
+                )
             if command[:3] == ["git", "config", "--file"]:
                 pathlib.Path(command[3]).write_text(
                     "[safe]\n\tdirectory = /srv/homelab\n",
@@ -101,7 +105,7 @@ class WrapperTests(unittest.TestCase):
             return completed
 
         args = argparse.Namespace(
-            repo="jimmybish/homelab", branch="task/7", source="HEAD"
+            repo="jimmybish/homelab", branch="wt/t_7", source="HEAD"
         )
         with mock.patch.object(
             self.wrapper, "installation_token", return_value="installation-secret"
@@ -113,7 +117,7 @@ class WrapperTests(unittest.TestCase):
         environment = run.call_args_list[-1].kwargs["env"]
         self.assertEqual(command[2], "--porcelain")
         self.assertEqual(command[3], "https://github.com/jimmybish/homelab.git")
-        self.assertEqual(command[4], "HEAD:refs/heads/task/7")
+        self.assertEqual(command[4], "HEAD:refs/heads/wt/t_7")
         self.assertNotIn("installation-secret", " ".join(command))
         self.assertNotIn("installation-secret", json.dumps(environment))
         self.assertIn("directory = /srv/homelab", captured_config[0])
@@ -393,6 +397,162 @@ class WrapperTests(unittest.TestCase):
                 self.wrapper.AppError, f"exceeds {self.wrapper.MODEL_TEXT_LIMIT}"
             ):
                 self.wrapper.read_model_text("-", "body")
+
+    def test_push_destination_rejects_non_task_branches_before_token_mint(self):
+        # The destination must match wt/<task-id>; anything else (protected
+        # branches, feature branches, raw refs, traversal attempts) fails
+        # before an installation token is minted or any network call runs.
+        for rejected in (
+            "main", "master", "feature/x", "refs/heads/main",
+            "wt/", "wt/../x", "wt//x", "w/t_1", "wtx/t_1",
+            "WT/t_1", "wt/t_1/", ".wt/t_1",
+        ):
+            with self.subTest(branch=rejected):
+                with mock.patch.object(self.wrapper, "installation_token") as mint:
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        result = self.wrapper.main([
+                            "--config", self.write_config(),
+                            "push-branch", "--repo", "jimmybish/homelab",
+                            "--branch", rejected,
+                        ])
+                    self.assertEqual(result, 1)
+                    mint.assert_not_called()
+                    self.assertIn("wt/<task-id>", stderr.getvalue())
+        # Traversal ids are rejected too (by the ref-safety check that runs
+        # alongside the convention check); assert only that they are denied.
+        for traversal in ("wt/t_..x", "wt/t_1\\"):
+            with self.subTest(branch=traversal):
+                with mock.patch.object(self.wrapper, "installation_token") as mint:
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        result = self.wrapper.main([
+                            "--config", self.write_config(),
+                            "push-branch", "--repo", "jimmybish/homelab",
+                            "--branch", traversal,
+                        ])
+                    self.assertEqual(result, 1)
+                    mint.assert_not_called()
+
+    def test_push_accepts_checked_out_task_branch(self):
+        self.assertTrue(self.wrapper.TASK_BRANCH_RE.fullmatch("wt/t_abc123"))
+        self.assertTrue(self.wrapper.TASK_BRANCH_RE.fullmatch("wt/t_93bab1bd"))
+        commands = []
+
+        def fake_run(command, *_args, **_kwargs):
+            commands.append(list(command))
+            if command[:3] == ["git", "config", "--file"]:
+                pathlib.Path(command[3]).write_text(
+                    "[safe]\n\tdirectory = /srv/homelab\n", encoding="utf-8",
+                )
+            if command[3:4] == ["symbolic-ref"]:
+                return mock.Mock(
+                    returncode=0, stdout="wt/t_abc123\n", stderr=""
+                )
+            return mock.Mock(returncode=0, stdout="/srv/homelab\n", stderr="")
+
+        # The destination equals the branch actually checked out in this
+        # worktree (Git reports it via symbolic-ref), so both gates pass.
+        with mock.patch.object(
+            self.wrapper, "validate_task_branch",
+            wraps=self.wrapper.validate_task_branch,
+        ) as check, mock.patch.object(
+            self.wrapper, "installation_token", return_value="secret"
+        ), mock.patch.object(
+            self.wrapper.subprocess, "run", side_effect=fake_run
+        ):
+            result = self.wrapper.push_branch(self.config, argparse.Namespace(
+                repo="jimmybish/homelab", branch="wt/t_abc123", source="HEAD",
+            ))
+        check.assert_called_once_with("wt/t_abc123")
+        self.assertIn(
+            ["git", "-C", "/srv/homelab", "symbolic-ref", "--short", "HEAD"],
+            commands,
+        )
+        self.assertEqual(commands[-1][:2], ["git", "push"])
+        self.assertEqual(result["branch"], "wt/t_abc123")
+
+    def test_push_rejects_other_task_branch_before_token_mint(self):
+        # Gate 2 regression: a syntactically valid wt/<task-id> that is NOT
+        # the checked-out branch is refused after the shape check, using
+        # Git's own answer for what is checked out, before the installation
+        # token is minted and before any git push runs.
+        commands = []
+
+        def fake_run(command, *_args, **_kwargs):
+            commands.append(list(command))
+            if command[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                return mock.Mock(
+                    returncode=0, stdout="/srv/homelab\n", stderr=""
+                )
+            if command[3:4] == ["symbolic-ref"]:
+                # This worktree is on wt/t_abc123; the caller asks for
+                # another task's branch.
+                return mock.Mock(
+                    returncode=0, stdout="wt/t_abc123\n", stderr=""
+                )
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(
+            self.wrapper, "installation_token"
+        ) as mint, mock.patch.object(
+            self.wrapper.subprocess, "run", side_effect=fake_run
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = self.wrapper.main([
+                    "--config", self.write_config(),
+                    "push-branch", "--repo", "jimmybish/homelab",
+                    "--branch", "wt/t_other_task",
+                ])
+        self.assertEqual(result, 1)
+        self.assertIn("checked out", stderr.getvalue())
+        self.assertNotIn("wt/t_other_task", stderr.getvalue())
+        mint.assert_not_called()
+        self.assertTrue(any(c[3:4] == ["symbolic-ref"] for c in commands))
+        self.assertFalse(any(c[:2] == ["git", "push"] for c in commands))
+
+    def test_push_rejects_detached_head_before_token_mint(self):
+        # With no single checked-out branch (symbolic-ref fails) the
+        # binding gate cannot be satisfied, so nothing is pushed.
+        def fake_run(command, *_args, **_kwargs):
+            if command[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                return mock.Mock(
+                    returncode=0, stdout="/srv/homelab\n", stderr=""
+                )
+            if command[3:4] == ["symbolic-ref"]:
+                return mock.Mock(returncode=1, stdout="", stderr="")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(
+            self.wrapper, "installation_token"
+        ) as mint, mock.patch.object(
+            self.wrapper.subprocess, "run", side_effect=fake_run
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = self.wrapper.main([
+                    "--config", self.write_config(),
+                    "push-branch", "--repo", "jimmybish/homelab",
+                    "--branch", "wt/t_abc123",
+                ])
+        self.assertEqual(result, 1)
+        self.assertIn("no single checked-out branch", stderr.getvalue())
+        mint.assert_not_called()
+
+    def test_task_branch_validation_precedes_repository_lookup(self):
+        # Rejection happens before even the local `git rev-parse` lookup,
+        # so a hostile destination never reaches any git or network step.
+        with mock.patch.object(self.wrapper.subprocess, "run") as run, \
+                mock.patch.object(self.wrapper, "installation_token") as mint:
+            with contextlib.redirect_stderr(io.StringIO()):
+                result = self.wrapper.main([
+                    "--config", self.write_config(),
+                    "push-branch", "--repo", "jimmybish/homelab",
+                    "--branch", "main",
+                ])
+        self.assertEqual(result, 1)
+        run.assert_not_called()
+        mint.assert_not_called()
 
     def test_open_pr_and_comment_reject_inline_text_and_hide_it_from_argv(self):
         hostile = "PR $(id) `whoami` body with \"quotes\" and 'apostrophes'"

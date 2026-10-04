@@ -156,8 +156,12 @@ a public cert?) or cite the vendor's public docs; say which check settled it.
    evidence rather than a path you typed), then use the structured file-read
    tool on the worktree copy; never synthesise `git show :path` or otherwise
    place a derived path in terminal shell text.
-5. Mechanical checks where practical, using fixed literal commands only —
-   e.g. `ansible-lint roles/hermes` and
+5. Mechanical checks where practical, using fixed literal commands only.
+   For Git checks set the terminal `workdir` to the task-worktree root; for
+   the Ansible checks below set it to the worktree's `ansible/` subdirectory
+   (the `roles/hermes` and `inventory.yaml` paths below resolve only there) —
+   again via the structured `workdir` parameter, never spliced into the
+   command. Commands: `ansible-lint roles/hermes` and
    `ansible-playbook -i inventory.yaml deploy_hermes.yaml --syntax-check`
    (verbatim from this list or the card's own check list; never build a
    command from a derived path). Report
@@ -169,8 +173,13 @@ a public cert?) or cite the vendor's public docs; say which check settled it.
    file-read tool on the dated path, not via a shell command).
 8. Verdict. `PASS` or `FAIL` first line, every finding with `file:line` or
    command-output evidence, blocking separated from non-blocking, then the
-   kanban handoff per your SOUL (one fix card on FAIL, blocked COMMIT READY
-   card on PASS).
+   kanban handoff per your SOUL: one fix card on FAIL; on PASS, when your
+   review card is linked as a parent of a delivery/deploy card awaiting the
+   verdict (the normal case), create NO handoff card at all — complete with
+   PASS + evidence and let that linked card own post-PASS work — and only
+   when no awaiting card exists, fall back to the blocked verdict card
+   carrying the verdict, staged list, branch, worktree path, and evidence for
+   Jimmy (never commit/push instructions in its body).
 
 ## Pitfalls
 

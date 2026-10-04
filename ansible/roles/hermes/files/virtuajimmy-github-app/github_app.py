@@ -29,6 +29,18 @@ TOKEN_PERMISSIONS = {
 }
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REF_RE = re.compile(r"^(?![-/.])(?!.*(?:\.\.|//|@\{|\\))(?!.*[/.]$)[A-Za-z0-9._/-]+$")
+# Push destinations are restricted to the per-task branch convention
+# wt/<task-id>: an anchored full match on exactly one 'wt/' prefix followed
+# by a safe id. This rejects main, master, arbitrary refs, and traversal
+# attempts regardless of what the caller passes. Shape alone is only the
+# first gate: a syntactically valid wt/ id belonging to another task still
+# matches this regex, so the destination is additionally bound to the
+# branch actually checked out in the current worktree (see
+# require_checked_out_branch), which rejects other tasks' branches too.
+# The convention is deliberately hardcoded rather than a config allow-list:
+# the destination rule is an invariant of the delivery contract, not a
+# per-deployment knob, so a config key could only weaken it.
+TASK_BRANCH_RE = re.compile(r"^wt/[A-Za-z0-9][A-Za-z0-9._-]*$")
 COMMENT_MARKER = "<!-- virtuajimmy-github-app -->"
 MODEL_TEXT_LIMIT = 65_536
 
@@ -180,6 +192,66 @@ def validate_ref(value, label):
         raise AppError(f"{label} is not a safe Git reference")
 
 
+def validate_task_branch(value):
+    """Gate 1: reject any push destination outside the wt/<task-id> shape.
+
+    Runs before any token is minted so a rejected destination never spends
+    an installation token or touches the network. main, master,
+    refs/heads/... forms, and traversal attempts all fail the anchored
+    full match. This gate checks shape only; gate 2 (binding to the
+    checked-out branch, see require_checked_out_branch) enforces
+    ownership of the task id.
+    """
+    if not TASK_BRANCH_RE.fullmatch(value):
+        raise AppError(
+            "push destination must be a task branch matching wt/<task-id>; "
+            "main, master, and other refs are never pushable through this "
+            "wrapper"
+        )
+
+
+def current_branch(repository_root):
+    """Ask Git which branch this worktree actually has checked out.
+
+    The answer comes from the repository itself via
+    `git -C <root> symbolic-ref --short HEAD`, never from card, model, or
+    command-line text, so it is the trustworthy source for the binding
+    gate. A detached HEAD makes symbolic-ref exit non-zero and raises.
+    """
+    branch = subprocess.run(
+        ["git", "-C", repository_root, "symbolic-ref", "--short", "HEAD"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    name = branch.stdout.strip()
+    if branch.returncode != 0 or not name or "\n" in name:
+        raise AppError(
+            "current worktree has no single checked-out branch; the push "
+            "destination must be bound to the task branch that is checked out"
+        )
+    return name
+
+
+def require_checked_out_branch(branch, repository_root):
+    """Gate 2: bind the push destination to the checked-out task branch.
+
+    A syntactically valid wt/<task-id> belonging to a DIFFERENT task still
+    passes gate 1, so before any token is minted the destination must
+    match the branch this worktree actually has checked out, byte for
+    byte. Pushing to another task's branch from this worktree is refused
+    here, and so is anything else (for example a stray working branch
+    that never passed gate 1 in the first place).
+    """
+    checked_out = current_branch(repository_root)
+    if branch != checked_out:
+        raise AppError(
+            "push destination must be the task branch checked out in this "
+            "worktree; another task's branch is never pushable from here"
+        )
+
+
 def read_model_text(value, label):
     """Load model-authored text from stdin or a private file, never argv.
 
@@ -271,6 +343,7 @@ def read_model_text(value, label):
 
 
 def push_branch(config, args):
+    validate_task_branch(args.branch)
     validate_ref(args.branch, "branch")
     validate_ref(args.source, "source")
     repository = subprocess.run(
@@ -285,6 +358,12 @@ def push_branch(config, args):
     repository_root = repository.stdout.strip()
     if not repository_root or "\n" in repository_root:
         raise AppError("Git returned an invalid repository path")
+
+    # Gate 2 binds the destination to the branch this worktree actually
+    # has checked out (Git is the source of truth, not caller text), so
+    # another task's syntactically valid wt/ branch is rejected here --
+    # before the installation token is minted and before any push.
+    require_checked_out_branch(args.branch, repository_root)
 
     token = installation_token(config, args.repo)
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")

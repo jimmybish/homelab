@@ -45,6 +45,22 @@ the target against the configured repository allow-list, mints its own
 short-lived JWT and installation token, requests only `contents`,
 `pull_requests`, and `issues` write access, and never returns the token.
 
+`push-branch` enforces the destination in code BEFORE any token is minted,
+in two gates. Gate 1 (shape): `--branch` must fully match the task-branch
+convention `wt/<task-id>` (anchored pattern
+`^wt/[A-Za-z0-9][A-Za-z0-9._-]*$`), so `main`, `master`, `feature/...`,
+`refs/heads/...`, and traversal attempts such as `wt/../x` are rejected
+immediately with a non-zero exit and no network call. Gate 2 (binding): the
+destination must also equal the branch actually checked out in the current
+worktree, as reported by Git itself (`symbolic-ref --short HEAD`), never by
+card or command-line text. A syntactically valid `wt/` branch belonging to
+another task, and any push from a detached HEAD, are therefore rejected
+before the installation token is minted and before any push runs. The
+convention is hardcoded, not configurable, so no configuration edit can
+widen the push destination. Always run `push-branch` from inside your own
+task worktree, where the checked-out branch IS the branch you are allowed
+to push.
+
 ## Required GitHub App settings
 
 - Repository permissions: **Contents — Read and write**, **Pull requests —

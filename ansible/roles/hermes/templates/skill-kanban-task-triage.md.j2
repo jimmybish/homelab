@@ -80,7 +80,11 @@ this triage card (~15-20 turns, files children, then completes)
   └── Deploy card  parents=[A,B,C] (~40): one playbook run, idempotency
           rerun, service asserts, git add remainder, its own changelog
           entry (unstaged) — then the
-          review handoff (kanban_create copilot, parented to the last
+          review handoff (kanban_create copilot — body MUST carry the
+          exact staged file list, deploy/verify instructions, the
+          change-request card id, AND the root task branch + task
+          worktree path; the reviewer rejects a card without them —
+          parented to the last
           COMPLETED card e.g. dev B, then kanban_link review as parent
           of the deploy card so it auto-resumes on the verdict)
                 └── Review (round N) → copilot
