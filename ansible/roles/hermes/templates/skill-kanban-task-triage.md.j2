@@ -85,9 +85,16 @@ this triage card (~15-20 turns, files children, then completes)
           change-request card id, AND the root task branch + task
           worktree path; the reviewer rejects a card without them —
           parented to the last
-          COMPLETED card e.g. dev B, then kanban_link review as parent
-          of the deploy card so it auto-resumes on the verdict)
+          COMPLETED card e.g. dev B, kanban_link review as parent of
+          the deploy card, then kanban_block(kind: dependency) naming
+          the review card and STOP — link alone does not suspend a
+          running card)
                 └── Review (round N) → copilot
+                      ├── FAIL → fix card; link fix card AND every
+                      │          later review card as ADDITIONAL
+                      │          parents of the deploy card, which
+                      │          stays dependency-blocked (zero
+                      │          worktree edits) until a PASS
                       └── PASS → DELIVERY on the deploy card:
                             recheck staged tree == reviewed tree,
                             commit reviewed set to the task branch,
@@ -141,9 +148,23 @@ half-mapped job that dies without filing anything.
   running/blocked deploy card gates on that card's done, and the deploy card
   cannot complete without the PASS — neither ever promotes. Parent the review
   to the last COMPLETED card (dev card for round 1, completed fix card for
-  later rounds) and `kanban_link` the review as a parent of the waiting card
-  so it auto-resumes on the verdict. Reference failure: `t_bed2b4be` sat in
-  todo forever.
+  later rounds) and `kanban_link` the review as a parent of the waiting card.
+  Reference failure: `t_bed2b4be` sat in todo forever.
+- **Linking does not suspend the waiter.** In pinned Hermes `link_tasks` only
+  demotes `ready` cards and `recompute_ready` never promotes `running` or
+  `done` cards, so after `kanban_link` the waiter must end its run with
+  `kanban_block(kind: dependency)` naming the review card and stop without
+  completing; a waiter already explicitly blocked needs an orchestrator/human
+  unblock on the verdict. Do not `kanban_complete` a card that is waiting on a
+  review verdict.
+- **A FAIL releases the waiter alongside the fixer.** Copilot completes the
+  review card on PASS *and* FAIL, so on FAIL the completed-review edge alone
+  promotes the waiting deploy card while the fix card starts editing the same
+  worktree. Keep the whole chain gating: `kanban_link` each successive fix
+  card and every later review card as an ADDITIONAL parent of the waiter,
+  which stays dependency-blocked and makes zero worktree edits until the
+  newest review returns PASS. Post-PASS delivery checks do not serialize
+  fixer vs deployer — the parent gating does.
 - **Budget exhaustion is a design smell.** Today's reference failure: one
   90-turn card (drift analysis + 9 templates + vault + deploy + idempotency)
   died at ~85% twice; the disk state survived but two full runs burned

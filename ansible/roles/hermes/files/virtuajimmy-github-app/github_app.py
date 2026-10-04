@@ -37,6 +37,9 @@ REF_RE = re.compile(r"^(?![-/.])(?!.*(?:\.\.|//|@\{|\\))(?!.*[/.]$)[A-Za-z0-9._/
 # matches this regex, so the destination is additionally bound to the
 # branch actually checked out in the current worktree (see
 # require_checked_out_branch), which rejects other tasks' branches too.
+# The source side of the refspec is bound the same way (see
+# require_allowed_source): only HEAD or the checked-out branch is
+# publishable, so another task's commits can never ride along.
 # The convention is deliberately hardcoded rather than a config allow-list:
 # the destination rule is an invariant of the delivery contract, not a
 # per-deployment knob, so a config key could only weaken it.
@@ -243,12 +246,35 @@ def require_checked_out_branch(branch, repository_root):
     byte. Pushing to another task's branch from this worktree is refused
     here, and so is anything else (for example a stray working branch
     that never passed gate 1 in the first place).
+
+    Returns the Git-reported checked-out branch so the caller can bind
+    the push SOURCE with the same source of truth (gate 3).
     """
     checked_out = current_branch(repository_root)
     if branch != checked_out:
         raise AppError(
             "push destination must be the task branch checked out in this "
             "worktree; another task's branch is never pushable from here"
+        )
+    return checked_out
+
+
+def require_allowed_source(source, checked_out):
+    """Gate 3: bind the push source to HEAD or the checked-out branch.
+
+    The refspec is f"{source}:refs/heads/{branch}", so an unrestricted
+    source would let the correct worktree publish another task's
+    unreviewed commits (fast-forward, or a remote branch that does not
+    exist yet). Mirroring gate 2 with the same Git-reported branch name,
+    the source must be exactly "HEAD" (the default) or byte-for-byte the
+    checked-out task branch; an explicit wt/* for another task, a tag, a
+    commit sha, or any other ref is refused before the token is minted.
+    """
+    if source != "HEAD" and source != checked_out:
+        raise AppError(
+            "push source must be HEAD or the task branch checked out in "
+            "this worktree; another task's branch or any other ref is "
+            "never publishable through this wrapper"
         )
 
 
@@ -363,7 +389,13 @@ def push_branch(config, args):
     # has checked out (Git is the source of truth, not caller text), so
     # another task's syntactically valid wt/ branch is rejected here --
     # before the installation token is minted and before any push.
-    require_checked_out_branch(args.branch, repository_root)
+    checked_out = require_checked_out_branch(args.branch, repository_root)
+
+    # Gate 3 mirrors gate 2 for the source side of the refspec: only
+    # HEAD (the default) or the same Git-reported checked-out branch may
+    # be published, so this worktree can never push another task's
+    # unreviewed commits even from the correct directory.
+    require_allowed_source(args.source, checked_out)
 
     token = installation_token(config, args.repo)
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")
