@@ -14,25 +14,57 @@ backend executes every command over SSH as
 `{{ hermes_virtuajimmy_github_app_execution_host }}`; therefore the absolute
 wrapper and configuration paths below are management-host paths.
 
+Model-authored prose (PR titles, bodies, comments) must NEVER appear inline
+in a command line. Write it to a private file first (for example with your
+file-writing tool, mode 0600, owned by you, under a directory only you can
+read), then pass
+that path via `--title-file` / `--body-file`; `-` reads the text from stdin
+instead. The wrapper rejects inline text, any file with group or other
+access (0600 or stricter is required), files you do not own, symlinks, and
+anything that is not a regular file, so prose never lands in process argv.
+
 ```bash
 {{ hermes_virtuajimmy_github_app_wrapper_file }} \
   --config {{ hermes_virtuajimmy_github_app_config_file }} push-branch \
   --repo jimmybish/homelab --branch TASK_BRANCH --source TASK_BRANCH
 
+# TITLE_FILE and BODY_FILE are 0600 files you wrote beforehand; '-' = stdin
 {{ hermes_virtuajimmy_github_app_wrapper_file }} \
   --config {{ hermes_virtuajimmy_github_app_config_file }} open-pr \
   --repo jimmybish/homelab --head TASK_BRANCH --base main \
-  --title "TITLE" --body "BODY"
+  --title-file TITLE_FILE --body-file BODY_FILE
 
+# BODY_FILE holds the comment text; never pass the comment inline
 {{ hermes_virtuajimmy_github_app_wrapper_file }} \
   --config {{ hermes_virtuajimmy_github_app_config_file }} comment \
-  --repo jimmybish/homelab --pr PR_NUMBER --body "COMMENT"
+  --repo jimmybish/homelab --pr PR_NUMBER --body-file BODY_FILE
 ```
 
 The wrapper accepts only `push-branch`, `open-pr`, and `comment`. It validates
 the target against the configured repository allow-list, mints its own
 short-lived JWT and installation token, requests only `contents`,
 `pull_requests`, and `issues` write access, and never returns the token.
+
+`push-branch` enforces the refspec in code BEFORE any token is minted, on
+both sides. Gate 1 (shape): `--branch` must fully match the task-branch
+convention `wt/<task-id>` (anchored pattern
+`^wt/[A-Za-z0-9][A-Za-z0-9._-]*$`), so `main`, `master`, `feature/...`,
+`refs/heads/...`, and traversal attempts such as `wt/../x` are rejected
+immediately with a non-zero exit and no network call. Gate 2 (destination
+binding): the destination must also equal the branch actually checked out
+in the current worktree, as reported by Git itself
+(`symbolic-ref --short HEAD`), never by card or command-line text. A
+syntactically valid `wt/` branch belonging to another task, and any push
+from a detached HEAD, are therefore rejected before the installation
+token is minted and before any push runs. Gate 3 (source binding): the
+`--source` side of the refspec is bound to the same Git-reported checked-out
+branch — it must be exactly `HEAD` (the default) or byte-for-byte the
+checked-out task branch, so an explicit `--source wt/other-task`, a tag, a
+commit sha, or any other ref cannot publish another task's unreviewed
+commits from the correct worktree. The convention is hardcoded, not
+configurable, so no configuration edit can widen the push refspec. Always
+run `push-branch` from inside your own task worktree, where the
+checked-out branch IS the branch you are allowed to push.
 
 ## Required GitHub App settings
 

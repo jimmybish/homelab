@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-"""Constrained GitHub App client for VirtuaJimmy's pull-request workflow."""
+"""Constrained GitHub App client for VirtuaJimmy's pull-request workflow.
+
+Model-authored prose (PR titles, bodies, comments) is accepted only through
+the --title-file/--body-file options ('-' reads stdin), never as command-line
+text, so it never appears in process argv.
+"""
 
 import argparse
 import base64
+import errno
 import json
 import os
 import pathlib
@@ -23,11 +29,45 @@ TOKEN_PERMISSIONS = {
 }
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REF_RE = re.compile(r"^(?![-/.])(?!.*(?:\.\.|//|@\{|\\))(?!.*[/.]$)[A-Za-z0-9._/-]+$")
+# Push destinations are restricted to the per-task branch convention
+# wt/<task-id>: an anchored full match on exactly one 'wt/' prefix followed
+# by a safe id. This rejects main, master, arbitrary refs, and traversal
+# attempts regardless of what the caller passes. Shape alone is only the
+# first gate: a syntactically valid wt/ id belonging to another task still
+# matches this regex, so the destination is additionally bound to the
+# branch actually checked out in the current worktree (see
+# require_checked_out_branch), which rejects other tasks' branches too.
+# The source side of the refspec is bound the same way (see
+# require_allowed_source): only HEAD or the checked-out branch is
+# publishable, so another task's commits can never ride along.
+# The convention is deliberately hardcoded rather than a config allow-list:
+# the destination rule is an invariant of the delivery contract, not a
+# per-deployment knob, so a config key could only weaken it.
+TASK_BRANCH_RE = re.compile(r"^wt/[A-Za-z0-9][A-Za-z0-9._-]*$")
 COMMENT_MARKER = "<!-- virtuajimmy-github-app -->"
+MODEL_TEXT_LIMIT = 65_536
 
 
 class AppError(RuntimeError):
     """Safe, credential-free error suitable for stderr."""
+
+
+class SanitizedArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser that never echoes user-supplied values on usage errors.
+
+    argparse's default error() prints the offending arguments verbatim, so a
+    rejected inline draft (e.g. '--title SECRET-DRAFT-$(id)') still reaches
+    terminal logs even though it is never acted on. Usage failures here print
+    only this parser's fixed usage line and keep the exit-code-2 semantics.
+    """
+
+    def error(self, message):
+        # 'message' is deliberately dropped: it can contain raw argv text.
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: invalid command line (details suppressed "
+              "because rejected arguments may contain private text)",
+              file=sys.stderr)
+        raise SystemExit(2)
 
 
 def b64url(value):
@@ -155,7 +195,193 @@ def validate_ref(value, label):
         raise AppError(f"{label} is not a safe Git reference")
 
 
+def validate_task_branch(value):
+    """Gate 1: reject any push destination outside the wt/<task-id> shape.
+
+    Runs before any token is minted so a rejected destination never spends
+    an installation token or touches the network. main, master,
+    refs/heads/... forms, and traversal attempts all fail the anchored
+    full match. This gate checks shape only; gate 2 (binding to the
+    checked-out branch, see require_checked_out_branch) enforces
+    ownership of the task id.
+    """
+    if not TASK_BRANCH_RE.fullmatch(value):
+        raise AppError(
+            "push destination must be a task branch matching wt/<task-id>; "
+            "main, master, and other refs are never pushable through this "
+            "wrapper"
+        )
+
+
+def current_branch(repository_root):
+    """Ask Git which branch this worktree actually has checked out.
+
+    The answer comes from the repository itself via
+    `git -C <root> symbolic-ref --short HEAD`, never from card, model, or
+    command-line text, so it is the trustworthy source for the binding
+    gate. A detached HEAD makes symbolic-ref exit non-zero and raises.
+    """
+    branch = subprocess.run(
+        ["git", "-C", repository_root, "symbolic-ref", "--short", "HEAD"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    name = branch.stdout.strip()
+    if branch.returncode != 0 or not name or "\n" in name:
+        raise AppError(
+            "current worktree has no single checked-out branch; the push "
+            "destination must be bound to the task branch that is checked out"
+        )
+    return name
+
+
+def require_checked_out_branch(branch, repository_root):
+    """Gate 2: bind the push destination to the checked-out task branch.
+
+    A syntactically valid wt/<task-id> belonging to a DIFFERENT task still
+    passes gate 1, so before any token is minted the destination must
+    match the branch this worktree actually has checked out, byte for
+    byte. Pushing to another task's branch from this worktree is refused
+    here, and so is anything else (for example a stray working branch
+    that never passed gate 1 in the first place).
+
+    Returns the Git-reported checked-out branch so the caller can bind
+    the push SOURCE with the same source of truth (gate 3).
+    """
+    checked_out = current_branch(repository_root)
+    if branch != checked_out:
+        raise AppError(
+            "push destination must be the task branch checked out in this "
+            "worktree; another task's branch is never pushable from here"
+        )
+    return checked_out
+
+
+def require_allowed_source(source, checked_out):
+    """Gate 3: bind the push source to HEAD or the checked-out branch.
+
+    The refspec is f"{source}:refs/heads/{branch}", so an unrestricted
+    source would let the correct worktree publish another task's
+    unreviewed commits (fast-forward, or a remote branch that does not
+    exist yet). Mirroring gate 2 with the same Git-reported branch name,
+    the source must be exactly "HEAD" (the default) or byte-for-byte the
+    checked-out task branch; an explicit wt/* for another task, a tag, a
+    commit sha, or any other ref is refused before the token is minted.
+    """
+    if source != "HEAD" and source != checked_out:
+        raise AppError(
+            "push source must be HEAD or the task branch checked out in "
+            "this worktree; another task's branch or any other ref is "
+            "never publishable through this wrapper"
+        )
+
+
+def read_model_text(value, label):
+    """Load model-authored text from stdin or a private file, never argv.
+
+    PR/comment prose is model-derived and must never appear in a command
+    line (injection plus process-argument disclosure). Accepted values:
+    '-' for stdin, or the path of a private regular file owned by the
+    executing user with no group or other access (0600 or stricter).
+    Validation is bound to the opened descriptor: os.open() with
+    O_NOFOLLOW refuses symlinks at open time, and os.fstat() checks the
+    very descriptor that is read, so there is no interval where the
+    pathname could be swapped to a symlink after validation.
+    O_NONBLOCK keeps the open itself non-blocking: opening a FIFO for
+    reading without O_NONBLOCK would stall forever waiting for a writer,
+    so FIFOs are refused immediately (ENXIO with no writer, otherwise by
+    the fstat regular-file check on the opened descriptor). Stdin is
+    likewise bounded to MODEL_TEXT_LIMIT + 1 characters so an oversized
+    stream is rejected without buffering it in full.
+    """
+    if value == "-":
+        # stdin must never escape main() as a traceback: a traceback can
+        # echo input context, violating the never-echo-rejected-private-text
+        # guarantee. Covered: OSError (EBADF on a closed descriptor,
+        # BlockingIOError/EAGAIN on a non-blocking pipe), ValueError from a
+        # Python-level closed stream, UnicodeDecodeError (itself a
+        # UnicodeError/ValueError subclass) from the strict decoder, and a
+        # process started with no fd 0 at all (sys.stdin is None).
+        try:
+            if sys.stdin is None:
+                raise OSError("stdin is not attached to this process")
+            text = sys.stdin.read(MODEL_TEXT_LIMIT + 1)
+        except (OSError, ValueError):
+            raise AppError("cannot read text from stdin") from None
+    else:
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if nofollow is not None:
+            flags |= nofollow
+        try:
+            descriptor = os.open(value, flags)
+        except OSError as exc:
+            if getattr(exc, "errno", None) in (errno.ELOOP, errno.ENXIO):
+                # ELOOP: O_NOFOLLOW refused a symlink at open time.
+                # ENXIO: O_NONBLOCK refused a FIFO with no writer; a FIFO
+                # is not a regular file either way.
+                raise AppError(f"{label} must be a regular text file or '-'") from None
+            raise AppError(
+                f"{label} must be '-' for stdin or an existing text file; "
+                "inline text on the command line is not accepted"
+            ) from None
+        try:
+            try:
+                file_stat = os.fstat(descriptor)
+            except OSError as exc:
+                raise AppError(f"cannot read {label} file: {exc}") from None
+            if not stat.S_ISREG(file_stat.st_mode):
+                # Also covers ELOOP symlinks re-checked here and any
+                # non-regular descriptor that reached the open.
+                raise AppError(f"{label} must be a regular text file or '-'")
+            if stat.S_IMODE(file_stat.st_mode) & 0o077:
+                raise AppError(
+                    f"{label} file must be private: no group or other "
+                    "access (0600 or stricter) is required"
+                )
+            if file_stat.st_uid != os.getuid():
+                raise AppError(
+                    f"{label} file must be owned by the executing user"
+                )
+            if nofollow is None:  # exotic platform without O_NOFOLLOW
+                try:
+                    path_stat = os.lstat(value)
+                except OSError as exc:
+                    raise AppError(f"cannot read {label} file: {exc}") from None
+                if (
+                    stat.S_IFMT(path_stat.st_mode) != stat.S_IFREG
+                    or (path_stat.st_ino, path_stat.st_dev)
+                    != (file_stat.st_ino, file_stat.st_dev)
+                ):
+                    raise AppError(
+                        f"{label} must be a regular text file or '-'"
+                    )
+            try:
+                with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+                    descriptor = -1
+                    raw = handle.read(MODEL_TEXT_LIMIT + 1)
+            except (OSError, UnicodeError) as exc:
+                raise AppError(f"cannot read {label} file: {exc}") from None
+        finally:
+            if descriptor != -1:
+                os.close(descriptor)
+        text = raw
+    if len(text) > MODEL_TEXT_LIMIT:
+        raise AppError(f"{label} text exceeds {MODEL_TEXT_LIMIT} characters")
+    text = text.rstrip("\r\n")
+    if not text.strip():
+        raise AppError(f"{label} text must not be empty")
+    return text
+
+
 def push_branch(config, args):
+    validate_task_branch(args.branch)
     validate_ref(args.branch, "branch")
     validate_ref(args.source, "source")
     repository = subprocess.run(
@@ -170,6 +396,18 @@ def push_branch(config, args):
     repository_root = repository.stdout.strip()
     if not repository_root or "\n" in repository_root:
         raise AppError("Git returned an invalid repository path")
+
+    # Gate 2 binds the destination to the branch this worktree actually
+    # has checked out (Git is the source of truth, not caller text), so
+    # another task's syntactically valid wt/ branch is rejected here --
+    # before the installation token is minted and before any push.
+    checked_out = require_checked_out_branch(args.branch, repository_root)
+
+    # Gate 3 mirrors gate 2 for the source side of the refspec: only
+    # HEAD (the default) or the same Git-reported checked-out branch may
+    # be published, so this worktree can never push another task's
+    # unreviewed commits even from the correct directory.
+    require_allowed_source(args.source, checked_out)
 
     token = installation_token(config, args.repo)
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")
@@ -222,6 +460,8 @@ def push_branch(config, args):
 def open_pr(config, args):
     validate_ref(args.head, "head")
     validate_ref(args.base, "base")
+    title = read_model_text(args.title_file, "title")
+    body = read_model_text(args.body_file, "body")
     token = installation_token(config, args.repo)
     response = api_request(
         config,
@@ -229,10 +469,10 @@ def open_pr(config, args):
         f"/repos/{args.repo}/pulls",
         token,
         {
-            "title": args.title,
+            "title": title,
             "head": args.head,
             "base": args.base,
-            "body": args.body,
+            "body": body,
             "draft": args.draft,
         },
     )
@@ -245,13 +485,13 @@ def open_pr(config, args):
 
 
 def comment(config, args):
+    body = read_model_text(args.body_file, "body")
     token = installation_token(config, args.repo)
     issue = api_request(
         config, "GET", f"/repos/{args.repo}/issues/{args.pr}", token
     )
     if "pull_request" not in issue:
         raise AppError(f"#{args.pr} is an issue, not a pull request")
-    body = args.body
     if COMMENT_MARKER not in body:
         body = f"{body.rstrip()}\n\n{COMMENT_MARKER}"
     response = api_request(
@@ -270,29 +510,59 @@ def comment(config, args):
 
 
 def parser():
-    root = argparse.ArgumentParser(description=__doc__)
+    root = SanitizedArgumentParser(
+        description=__doc__,
+        usage="%(prog)s --config FILE {push-branch,open-pr,comment} ...",
+        allow_abbrev=False,
+    )
     root.add_argument("--config", required=True)
-    commands = root.add_subparsers(dest="operation", required=True)
+    commands = root.add_subparsers(
+        dest="operation", required=True, parser_class=SanitizedArgumentParser)
 
-    push = commands.add_parser("push-branch")
+    push = commands.add_parser(
+        "push-branch",
+        usage="%(prog)s --repo REPO --branch REF [--source REF]",
+        allow_abbrev=False,
+    )
     push.add_argument("--repo", required=True)
     push.add_argument("--branch", required=True)
     push.add_argument("--source", default="HEAD")
     push.set_defaults(handler=push_branch)
 
-    pull = commands.add_parser("open-pr")
+    pull = commands.add_parser(
+        "open-pr",
+        usage="%(prog)s --repo REPO --head REF [--base REF] "
+              "--title-file FILE --body-file FILE [--draft]",
+        allow_abbrev=False,
+    )
     pull.add_argument("--repo", required=True)
     pull.add_argument("--head", required=True)
     pull.add_argument("--base", default="main")
-    pull.add_argument("--title", required=True)
-    pull.add_argument("--body", required=True)
+    pull.add_argument(
+        "--title-file", required=True,
+        help="file holding the PR title, or '-' to read stdin; "
+             "inline title text on the command line is not accepted",
+    )
+    pull.add_argument(
+        "--body-file", required=True,
+        help="file holding the PR body, or '-' to read stdin; "
+             "inline body text on the command line is not accepted",
+    )
     pull.add_argument("--draft", action="store_true")
     pull.set_defaults(handler=open_pr)
 
-    note = commands.add_parser("comment")
+    note = commands.add_parser(
+        "comment",
+        usage="%(prog)s --repo REPO --pr NUMBER --body-file FILE",
+        allow_abbrev=False,
+    )
     note.add_argument("--repo", required=True)
     note.add_argument("--pr", type=int, required=True)
-    note.add_argument("--body", required=True)
+    note.add_argument(
+        "--body-file", required=True,
+        help="file holding the comment body, or '-' to read stdin; "
+             "inline comment text on the command line is not accepted",
+    )
     note.set_defaults(handler=comment)
     return root
 

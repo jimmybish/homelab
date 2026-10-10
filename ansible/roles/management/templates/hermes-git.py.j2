@@ -12,22 +12,47 @@ Security contract (argv discipline, mirroring plexibot-usermap):
   no ref, branch, or placeholder argument is ever accepted. The branch under
   work is derived from the CURRENT worktree (HEAD), never from caller text.
 - The only model-derived values accepted are:
-    * the task id, taken from the dispatcher env var HERMES_KANBAN_TASK (a
-      quoted-heredoc STDIN line is accepted only for manual recovery and is
-      validated against a strict task-id regex), and
+    * the task id, taken from the dispatcher env var HERMES_KANBAN_TASK when
+      present, else from a SINGLE raw line delivered on STDIN through a quoted
+      heredoc (byte-exact: the line content itself must match the task-id
+      regex, only a single trailing transport newline is allowed, and any
+      padding whitespace, blank line, or extra line is refused).
+      There is no argv form: a model-derived placeholder must never
+      appear in shell command text, and helper-side validation of an argv
+      value happens only AFTER the shell has parsed the command, so it is
+      not the shell boundary. The heredoc fallback exists because the Hermes
+      SSH terminal does not forward HERMES_KANBAN_TASK to this host; the
+      line must be exactly the card id from the worker's trusted kanban
+      context, is validated against the strict task-id regex, and a value
+      that contradicts the env var when both exist is refused, and
     * repo-relative paths and the commit subject, which must arrive on STDIN
       through a quoted heredoc (values are shell-literal inside the heredoc).
 - Every accepted value is validated against a strict whitelist regex before
-  it can reach a git argv list.
+  it can reach a git argv list. A missing, malformed, or forged task id
+  fails closed: no worktree, no branch.
 
 Usage (run inside a task worktree; the read subcommands take no arguments):
   hermes-git worktree    create or reuse the task worktree for the card id in
-                         the dispatcher env var HERMES_KANBAN_TASK (bare
-                         subcommand, no arguments of any kind). ROOT change
-                         request cards only: this always derives wt/<current
-                         card id> from the env, so DAG children and fix cards
-                         must NOT call it -- they cd into the shared worktree
-                         named in their card body.
+                         the dispatcher env var HERMES_KANBAN_TASK (preferred,
+                         bare subcommand). Where that env does not reach this
+                         host (Hermes SSH terminal sessions), the documented
+                         fallback is STILL the bare subcommand: the command
+                         line stays fixed and the single card-id line is
+                         delivered on stdin through a quoted heredoc (byte-
+                         exact: no padding whitespace, no extra or blank
+                         lines), e.g.
+                         `hermes-git worktree <<'EOF_T7K2'` followed by the
+                         id line and the `EOF_T7K2` terminator. The shell
+                         heredoc makes the id literal data that never enters
+                         command text. Pass ONLY your own card id exactly as
+                         it appears in your trusted kanban context -- the
+                         strict task-id regex rejects anything else and an
+                         env/stdin mismatch is fatal. Any task-id argument on
+                         the command line (such as `--task <id>`) is refused
+                         outright. (Root change request cards only: this
+                         always derives wt/<id> of ONE card, so DAG children
+                         and fix cards must NOT call it -- they cd into the
+                         shared worktree named in their card body.)
   hermes-git base        print the resolved base ref and its short SHA
   hermes-git files       changed file names between the base and HEAD
   hermes-git log         commit list between the base and HEAD (oneline)
@@ -119,12 +144,50 @@ def checked_path(value: str) -> str:
 
 def cmd_worktree(argv: list[str]) -> int:
     if argv:
-        die("worktree takes no arguments; the card id comes from HERMES_KANBAN_TASK")
-    task_id = os.environ.get("HERMES_KANBAN_TASK", "").strip()
+        # A model-derived placeholder on the command line is forbidden even
+        # though it is validated below: validation runs only AFTER the shell
+        # has parsed the command text, so argv can never be the boundary.
+        die(
+            "worktree takes no arguments; the card id comes from"
+            " HERMES_KANBAN_TASK or, when the env is absent, exactly ONE line"
+            " on stdin delivered through a quoted heredoc (never the command"
+            " line)"
+        )
+    env_id = os.environ.get("HERMES_KANBAN_TASK", "").strip()
+    stdin_id = ""
+    if not sys.stdin.isatty():
+        # Strict transport: the ONLY accepted stdin shape is zero bytes (env
+        # path) or exactly ONE raw line whose content itself matches the
+        # task-id regex, terminated by a single newline. No stripping, no
+        # blank-line filtering, no whitespace padding -- a value that needs
+        # cleaning before validation is not a value that gets validated.
+        raw = sys.stdin.buffer.read(65537)
+        if b"\x00" in raw:
+            die("stdin contains a NUL byte")
+        if len(raw) > 65536:
+            die("stdin exceeds the 64 KiB task-id transport cap")
+        if raw:
+            if not raw.endswith(b"\n") or b"\n" in raw[:-1] or b"\r" in raw:
+                die(
+                    "stdin must be exactly ONE raw line (a single task id"
+                    " plus one trailing newline); refusing multi-line input"
+                )
+            stdin_id = raw[:-1].decode("utf-8", errors="replace")
+            if TASK_ID_RE.fullmatch(stdin_id) is None:
+                # Validate even an empty line before any env fallback.
+                die("invalid task id (expected form t_<alphanumeric>, from your card context)")
+    if stdin_id and env_id and stdin_id != env_id:
+        # A dispatched worker always has the env; a stdin line that disagrees
+        # with it is a forgery attempt, not a transport workaround.
+        die("task id on stdin does not match HERMES_KANBAN_TASK; refusing to guess the card")
+    task_id = env_id or stdin_id
     if not task_id:
-        die("HERMES_KANBAN_TASK is unset; this subcommand only runs inside a dispatched worker")
+        die(
+            "HERMES_KANBAN_TASK is unset and stdin carried no task id line;"
+            " deliver your own card id as ONE quoted-heredoc line on stdin"
+        )
     if not TASK_ID_RE.match(task_id):
-        die("invalid task id in HERMES_KANBAN_TASK (expected form t_<alphanumeric>)")
+        die("invalid task id (expected form t_<alphanumeric>, from your card context)")
     branch = f"wt/{task_id}"
     path = os.path.join(WORKTREE_ROOT, task_id)
 
