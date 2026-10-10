@@ -173,9 +173,8 @@ def cmd_worktree(argv: list[str]) -> int:
                     " plus one trailing newline); refusing multi-line input"
                 )
             stdin_id = raw[:-1].decode("utf-8", errors="replace")
-            if stdin_id and TASK_ID_RE.match(stdin_id) is None:
-                # Checked before any comparison so padded/forged values can
-                # never match the env var or reach the regex check below.
+            if TASK_ID_RE.fullmatch(stdin_id) is None:
+                # Validate even an empty line before any env fallback.
                 die("invalid task id (expected form t_<alphanumeric>, from your card context)")
     if stdin_id and env_id and stdin_id != env_id:
         # A dispatched worker always has the env; a stdin line that disagrees
