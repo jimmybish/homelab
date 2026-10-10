@@ -1,7 +1,7 @@
 model:
 {{ hermes_model | to_nice_yaml(indent=2, sort_keys=false, width=4096) | indent(2, true) }}
 agent:
-  max_turns: 90
+  max_turns: 150
   disabled_toolsets:
     - computer_use
     - discord
@@ -65,8 +65,8 @@ tool_loop_guardrails:
     same_tool_failure: 8
     idempotent_no_progress: 5
 compression:
-  enabled: false
-  threshold: 0.5
+  enabled: true
+  threshold: 0.55
   target_ratio: 0.2
   protect_last_n: 20
   protect_first_n: 3
