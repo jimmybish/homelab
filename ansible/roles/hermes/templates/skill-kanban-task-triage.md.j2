@@ -109,6 +109,13 @@ Every child body must contain, and nothing more:
 - **Deliverable as verifiable on-disk state** — `git status` shows X
   staged, `--syntax-check` passes, `ansible-vault view` shows Y. The next
   worker checks with one command, never trusts a predecessor's prose.
+- **Workspace location fields: root task branch + task worktree path.**
+  Every child brief (dev, deploy, review, fix) must state the root task
+  branch (`wt/<root-card-id>`) AND the task worktree path, verbatim from the
+  root card's helper output — children are forbidden from creating or
+  guessing a worktree, so a brief without these fields births a card with no
+  workspace it is allowed to edit (reference failure: Immich fix card
+  `t_e20842ba` shipped without them).
 - **Changelog entry in the child's OWN deliverable** — every dev AND deploy
   child body ends its Deliverable with "append changelog entry (unstaged):
   `changelogs/week-YYYY-MM-DD/log_YYMMDD.md`, CAB format per the
@@ -174,9 +181,14 @@ half-mapped job that dies without filing anything.
   next triage can recalibrate.
 - **Children get fresh sessions, not your memory.** Anything not in the
   body or on disk does not exist.
-- **Workspace fields:** leave `workspace_kind`/`workspace_path` unset —
-  this repo is reached through the profile's SSH terminal at
-  `/srv/homelab` on mgmt, not through Hermes workspace checkouts.
+- **Workspace fields:** pass `workspace_kind: scratch` explicitly (or leave
+  it unset, which is scratch) and NEVER set `workspace_path` for this repo —
+  it is reached through the profile's SSH terminal at `/srv/homelab` on mgmt,
+  not through Hermes workspace checkouts. A `dir` workspace pointed at
+  `/srv/homelab` spawn-fails the worker with `[Errno 13]` and the dispatcher
+  respawn-storms (reference failure: `t_e20842ba`). The workspace is NOT the
+  git workspace: the branch + worktree path fields above still go in every
+  body.
 - **Loop cap unchanged:** rounds count on review card titles; round 4 →
   block and escalate, per SOUL.
 - **Skip-triage abuse:** "it looks small" is not a fit test — run the

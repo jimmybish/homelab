@@ -297,7 +297,19 @@ def read_model_text(value, label):
     stream is rejected without buffering it in full.
     """
     if value == "-":
-        text = sys.stdin.read(MODEL_TEXT_LIMIT + 1)
+        # stdin must never escape main() as a traceback: a traceback can
+        # echo input context, violating the never-echo-rejected-private-text
+        # guarantee. Covered: OSError (EBADF on a closed descriptor,
+        # BlockingIOError/EAGAIN on a non-blocking pipe), ValueError from a
+        # Python-level closed stream, UnicodeDecodeError (itself a
+        # UnicodeError/ValueError subclass) from the strict decoder, and a
+        # process started with no fd 0 at all (sys.stdin is None).
+        try:
+            if sys.stdin is None:
+                raise OSError("stdin is not attached to this process")
+            text = sys.stdin.read(MODEL_TEXT_LIMIT + 1)
+        except (OSError, ValueError):
+            raise AppError("cannot read text from stdin") from None
     else:
         flags = (
             os.O_RDONLY

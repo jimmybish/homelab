@@ -398,6 +398,82 @@ class WrapperTests(unittest.TestCase):
             ):
                 self.wrapper.read_model_text("-", "body")
 
+    def test_model_text_stdin_read_errors_become_app_errors(self):
+        class ExplodingStdin:
+            def __init__(self, error):
+                self.error = error
+
+            def read(self, size=-1):
+                raise self.error
+
+        for error in (
+            OSError(11, "would block"),
+            OSError(9, "bad file descriptor"),
+            ValueError("I/O operation on closed file"),
+            UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+        ):
+            with mock.patch.object(
+                self.wrapper.sys, "stdin", ExplodingStdin(error)
+            ):
+                with self.assertRaisesRegex(
+                    self.wrapper.AppError, "cannot read text from stdin"
+                ):
+                    self.wrapper.read_model_text("-", "title")
+
+    def test_model_text_none_stdin_is_a_clean_app_error(self):
+        with mock.patch.object(self.wrapper.sys, "stdin", None):
+            with self.assertRaisesRegex(
+                self.wrapper.AppError, "cannot read text from stdin"
+            ):
+                self.wrapper.read_model_text("-", "title")
+
+    def test_main_rejects_invalid_utf8_stdin_without_traceback_or_echo(self):
+        # End-to-end through main(): invalid UTF-8 on stdin must exit via the
+        # AppError path (rc 1, one 'error:' line) and must never print a
+        # traceback or echo any of the rejected private bytes.
+        sentinel = "PRIVATESENTINELtext"
+        payload = sentinel.encode() + b"\xff\xfe\x80 not-utf8"
+        completed = subprocess.run(
+            [
+                sys.executable, str(MODULE_PATH), "--config", self.write_config(),
+                "open-pr", "--repo", "jimmybish/homelab", "--head", "wt/t_1",
+                "--title-file", "-", "--body-file", self.write_text("body.md", "b"),
+            ],
+            input=payload,
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(completed.returncode, 1, completed.stderr.decode(errors="replace"))
+        stderr = completed.stderr.decode(errors="replace")
+        self.assertNotIn("Traceback", stderr)
+        self.assertNotIn(sentinel, stderr)
+        self.assertNotIn(sentinel, completed.stdout.decode(errors="replace"))
+        self.assertEqual(stderr, "error: cannot read text from stdin\n")
+
+    def test_main_closed_stdin_is_a_clean_error_exit(self):
+        # fd 0 closed before main runs: the read raises EBADF and must
+        # surface as the generic AppError exit, not a traceback.
+        script = (
+            "import importlib.util, os, sys\n"
+            "spec = importlib.util.spec_from_file_location('github_app', sys.argv[1])\n"
+            "mod = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(mod)\n"
+            "os.close(0)\n"
+            "sys.exit(mod.main(['--config', sys.argv[2], 'open-pr', '--repo',"
+            " 'jimmybish/homelab', '--head', 'wt/t_1', '--title-file', '-',"
+            " '--body-file', sys.argv[3]]))\n"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", script, str(MODULE_PATH), self.write_config(),
+             self.write_text("body.md", "b")],
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(completed.returncode, 1, completed.stderr.decode(errors="replace"))
+        stderr = completed.stderr.decode(errors="replace")
+        self.assertNotIn("Traceback", stderr)
+        self.assertEqual(stderr, "error: cannot read text from stdin\n")
+
     def test_push_destination_rejects_non_task_branches_before_token_mint(self):
         # The destination must match wt/<task-id>; anything else (protected
         # branches, feature branches, raw refs, traversal attempts) fails
