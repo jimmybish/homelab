@@ -1,0 +1,56 @@
+## Hermes Kanban UI (Hermes kanban board web dashboard)
+# Custom config - no LinuxServer pre-built config available.
+# Includes WebSocket support for the /api/kanban/events live tail.
+# Auth is the app's own HttpOnly session cookie; nginx only proxies.
+#
+# ROUND-4/5 FINDING 1 TRUST MARKER (placement per round-5): this vhost
+# is normalized to 0664 by the SWAG tree convention, so it MUST NOT
+# contain secret material. The bearer value lives only in the dedicated
+# include below, deployed mode 0600 (nginx's root-privilege master
+# process reads it at config load; the worker never needs read access).
+# proxy_set_header REPLACES any client-supplied header of this name, so
+# the value can only originate here; the kanban-ui app additionally
+# requires the REAL TCP peer to be this proxy host and the
+# vault-provisioned marker to match its own 0400 file. Keep the include
+# in BOTH location blocks below (proxy.conf re-declares proxy_set_header
+# inside each location, which suppresses server-level inheritance).
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+
+    server_name kanban.{{ internal_domain }};
+
+    include /config/nginx/ssl.conf;
+
+    client_max_body_size 64m;
+
+    location / {
+        include /config/nginx/proxy.conf;
+        include /config/nginx/resolver.conf;
+        include /config/kanban_ui_marker.conf;
+        set $upstream_app {{ kanban_ui_bind_ip }};
+        set $upstream_port {{ kanban_ui_port }};
+        set $upstream_proto http;
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+    }
+
+    # Live event stream (WebSocket upgrade; cookie passes through untouched).
+    # Mirrors the guacamole sibling pattern: proxy.conf already sets
+    # Upgrade/Connection and proxy_read_timeout, so re-declaring them here
+    # is either a duplicate directive (nginx -t fail, broke SWAG reload in
+    # the first deploy of this config) or a doubled header value.
+    location /api/kanban/events {
+        include /config/nginx/proxy.conf;
+        include /config/nginx/resolver.conf;
+        include /config/kanban_ui_marker.conf;
+        set $upstream_app {{ kanban_ui_bind_ip }};
+        set $upstream_port {{ kanban_ui_port }};
+        set $upstream_proto http;
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+
+        proxy_buffering off;
+        proxy_set_header Connection $http_connection;
+        access_log off;
+    }
+}

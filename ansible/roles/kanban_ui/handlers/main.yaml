@@ -1,0 +1,28 @@
+---
+- name: Restart Kanban UI
+  community.docker.docker_compose_v2:
+    project_src: "{{ kanban_ui_folder }}"
+    build: never
+    state: restarted
+    remove_orphans: true
+    wait: true
+    wait_timeout: 600
+  # In check mode the project dir may not exist yet and no real change
+  # was applied, so there is nothing meaningful to restart.
+  when: not ansible_check_mode
+
+- name: Restart Homepage
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ homepage_folder }}"
+    state: restarted
+  delegate_to: "{{ groups['homepage_host'][0] }}"
+
+- name: Restart Swag Internal
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ proxy_folder }}"
+    services:
+      - swag_internal
+    state: restarted
+  delegate_to: "{{ groups['proxy_host'][0] }}"

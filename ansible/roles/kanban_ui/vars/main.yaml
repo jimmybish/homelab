@@ -1,0 +1,160 @@
+---
+# Research Notes - Kanban UI (Hermes kanban WebUI)
+# Source: proof-of-concept WebUI (originally a manual host process); vendored
+#           into files/app/ and rebuilt. server.py mounts the real kanban
+#           plugin router from the hermes-agent checkout
+#           (plugins/kanban/dashboard/plugin_api.py).
+# Image base: docker.io/library/python:3.11.10-slim (matches host venv ABI 3.11)
+# Last researched: 2026-10-10
+#
+# Architecture notes (why this role looks different from homepage/firecrawl):
+# - The app imports the REAL hermes-agent checkout, so the container mounts
+#   the host checkout read-only. Never fork plugin_api.py.
+# - Least-privilege kanban state mounts (see docker_compose.yaml.j2): the
+#   container gets ONLY <hermes_home>/kanban (board DBs, workspaces,
+#   attachments, logs, current) plus the legacy read-only <hermes_home>/
+#   kanban.db, all anchored by HERMES_KANBAN_HOME. Config, profiles,
+#   memories, sessions, and credential-bearing paths under the Hermes home
+#   are NOT mounted at all. SQLite requires same-host bind mounts only
+#   (no NFS-style remotes).
+# - The container runs as the NUMERIC uid/gid owning the board files
+#   (resolved at deploy time via getent from the existing owning_user
+#   variable; never hardcoded) with HOME/HERMES_HOME pointed OUTSIDE the
+#   host user's tree: kanban_db resolves board state from
+#   HERMES_KANBAN_HOME, while config.yaml/profiles lookups resolve to a
+#   nonexistent path and degrade to documented defaults. Deviation from
+#   the usual PUID/PGID convention is deliberate.
+# - Auth model: the vaulted bootstrap token is only ever POSTed to /login
+#   (JSON body) and swapped for an HttpOnly SameSite=strict Secure session
+#   cookie. /login is reached ONLY through the trusted SWAG vhost, gated
+#   by a THREE-way AND enforced before any credential touch
+#   (round-4/round-5 finding 1):
+#     1. X-Kanban-Proxy-Marker: a vaulted shared secret nginx injects
+#        via proxy_set_header (REPLACES any client-supplied copy). At
+#        REST it lives ONLY in the dedicated include
+#        /config/kanban_ui_marker.conf deployed 0600 docker_user at
+#        the /config root -- outside /config/nginx, which the SWAG
+#        init-permissions service chmods -R g+w on every container
+#        start (round-7: that sweep drifted the old nginx/ placement
+#        0600->0620 forever, breaking playbook idempotency). The owner
+#        uid == the container's abc uid, so SWAG's lsiown init does not
+#        churn it; the root nginx master is the only reader at
+#        config-parse time) and the app-side 0400 bind-mount. The 0664
+#        proxy-confs vhost merely includes the file and carries ZERO
+#        secret material (round-5 blocking finding: the directive used
+#        to be rendered INTO the 0664 vhost).
+#     2. Real TCP peer == the proxy host's address (KANBAN_UI_TRUSTED_
+#        PROXY_IP compose env, resolved from inventory facts; loopback
+#        allowed for this host's verifier; unset = dev runs only).
+#        Cross-host topology (SWAG on 'proxy', app on 'hermes') rules
+#        out a shared docker network, so reachability confinement is
+#        the UFW source-restricted FORWARD rule (proved live: without
+#        it a LAN client gets Connection refused) and this predicate is
+#        the app-level backstop that survives any firewall churn.
+#     3. X-Forwarded-Proto: https from SWAG's $scheme (round-3; alone
+#        spoofable on a direct socket, hence never trusted alone).
+#   Threat boundary, stated plainly for review: an off-host attacker
+#   must break (a) the UFW FORWARD restriction to reach the port, (b)
+#   the 0600/0400 file protections to read the marker (root or
+#   docker_user ON the proxy host only), and (c) cannot fake the real
+#   source IP of the proxy from another machine via plain TCP (IP
+#   spoofing of a full handshake is impractical and SWAG's replies would
+#   never route back to the forger). The residual trust root is the
+#   SWAG host itself (root/docker_user there can read the 0600 marker
+#   and originate as its own IP) -- the same estate-wide trust root
+#   every proxied service already shares, and strictly tighter than the
+#   0664 world-readable vhost of round 5. Upstream stays plain http per
+#   the estate-wide SWAG convention (TLS terminates at SWAG); the
+#   marker crosses it inside the LAN's proxy-only firewall envelope,
+#   same posture as every sibling service's cookies/tokens.
+#   Secure cookie is the
+#   DEFAULT (round-2 finding 2): the compose below
+#   deliberately never sets KANBAN_UI_COOKIE_INSECURE, which is the local
+#   loopback-development opt-out only. The deploy-time verification
+#   (verify_session.sh) speaks HTTPS ONLY through the SWAG URL and refuses
+#   any http:// base, feeds the token to curl via a 0600 file inside a
+#   private mktemp dir (never argv, never a predictable /tmp path), and
+#   runs a live /proc argv watcher as a regression gate. The token never
+#   appears in HTML, JS, URLs, or stdout. Sessions are
+#   in-process; a container restart simply requires re-login. uvicorn
+#   log records pass through credential-redacting filters installed on
+#   BOTH dictConfig handlers (access lines go through uvicorn.access;
+#   rejected WS upgrades are logged by the websockets protocol through
+#   uvicorn.error child loggers - a formatter-only redaction leaked
+#   exactly those in build 2026.10.10g), so stale tabs replaying an
+#   old ?token= URL cannot write the secret into the container
+#   json-file logs (verified by tests/test_log_redaction.py).
+# - The bootstrap token file persists at {{ kanban_ui_token_file }} on the
+#   host and is mounted read-only at /app/token.txt. server.py never writes
+#   or mints it: deploy the vault value (force: false) or the container
+#   refuses to start (loud, not secret-shaped).
+# - Known degradation: plugin endpoints that read profiles/config.yaml see
+#   defaults (their imports are wrapped and degrade gracefully by design);
+#   board reads/writes, comments, attachments, and dispatcher-presence
+#   warnings are unaffected. Worker spawn via /dispatch cannot run inside
+#   this slim image either way (the image ships only the pinned web deps),
+#   which matches the POC's effective behavior.
+# - The UI is served behind SWAG Internal + pfSense DNS at
+#   https://kanban.<internal_domain> per the new-service runbook (proxy,
+#   DNS, Homepage phases). Credential transport is HTTPS-ONLY: login is
+#   verified exclusively through the SWAG URL and the Secure-by-default
+#   session cookie makes a plaintext login impossible to complete (a
+#   browser discards a Secure cookie received over http). The published
+#   host port exists for the SWAG upstream and the credential-free
+#   anonymous gate probe only -- it is not a credential ops path.
+# - Host port mapping pins the docker DNAT to the host's primary IPv4
+#   (resolved from ansible_facts at deploy time, never hardcoded), so the
+#   Docker forwarding path cannot be reached via 0.0.0.0/8, which UFW does
+#   not filter for published ports.
+# - All host-side paths below derive from the pre-existing global
+#   owning_user variable; no user-identifying plaintext is introduced.
+
+kanban_ui_version: "2026.10.11a"
+
+# Host port (POC port kept so existing bookmarks keep working)
+kanban_ui_port: 9470
+
+kanban_ui_folder: "{{ docker_storage_folder }}/kanban-ui"
+kanban_ui_compose_file: "{{ kanban_ui_folder }}/docker-compose.yaml"
+kanban_ui_token_file: "{{ kanban_ui_folder }}/token.txt"
+# Proxy trust marker (round-4 finding 1): the app-side half of the shared
+# secret; the proxy-side half is stamped into the SWAG vhost template from
+# the same vault variable (kanban_ui_proxy_secret in group_vars/all).
+kanban_ui_proxy_marker_file: "{{ kanban_ui_folder }}/proxy_marker.txt"
+
+# Feature flags (all mandatory runbook phases enabled)
+kanban_ui_configure_proxy: true
+kanban_ui_configure_dns: true
+kanban_ui_is_proxied: true
+kanban_ui_configure_homepage: true
+
+# Host user owning the Hermes home (numeric ids resolved via getent).
+kanban_ui_run_user: "{{ owning_user }}"
+
+# Hermes integration paths derived from the existing global username.
+kanban_ui_hermes_home: "/home/{{ owning_user }}/.hermes"
+kanban_ui_hermes_repo: "/home/{{ owning_user }}/.hermes/hermes-agent"
+kanban_ui_default_board: "homelab"
+
+# Proof-of-concept cleanup: the manually-launched POC must release :9470
+# before the container can bind it. Path derives from owning_user; the kill
+# helper additionally pins the exact port in /proc/<pid>/cmdline.
+kanban_ui_poc_dir: "/home/{{ owning_user }}/kanban-ui"
+
+kanban_ui_base_image: "docker.io/library/python:3.11.10-slim"
+kanban_ui_build_timeout: 1800
+kanban_ui_readiness_retries: 30
+kanban_ui_readiness_delay: 5
+
+# Exact pins mirroring the host hermes-agent venv (pip freeze on hermes,
+# 2026-10-10). Keeping the UI on identical versions to the CLI that writes
+# the same SQLite boards avoids serialization drift.
+kanban_ui_pip_packages:
+  - "fastapi==0.133.1"
+  - "starlette==1.3.1"
+  - "uvicorn==0.41.0"
+  - "pydantic==2.13.4"
+  - "python-multipart==0.0.32"
+  - "pyyaml==6.0.3"
+  - "websockets==15.0.1"
+  - "anyio==4.15.0"

@@ -1,0 +1,12 @@
+# PRIVATE FILE - deployed mode 0600 by role kanban_ui, never 0664.
+# This include is loaded by BOTH location blocks of
+# nginx/proxy-confs/kanban_ui.subdomain.conf. Round-7: it lives at the
+# TOP of the /config volume (NOT under /config/nginx), because SWAG's
+# init-permissions service runs `chmod -R g+w /config/nginx` on every
+# container start and would drift this file 0600 -> 0620 forever. The
+# vhost that includes it is world-readable by SWAG convention and MUST
+# stay credential-free; the marker directive lives here so nginx's root
+# master process (config parse time) is the only reader. Rotating the
+# value = vault edit + playbook rerun; this file and the app-side 0400
+# copy render from the same vault variable.
+proxy_set_header X-Kanban-Proxy-Marker "{{ kanban_ui_proxy_secret }}";

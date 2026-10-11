@@ -1,0 +1,33 @@
+---
+- name: Collect proxy host facts for the upstream firewall rule
+  # The published kanban-ui port is UFW-restricted to the SWAG proxy's
+  # address, resolved in the role via hostvars[groups['proxy_host'][0]].
+  # Those facts only exist if gathered; the master playbook's earlier proxy
+  # play covers that, but a STANDALONE run of this playbook must gather them
+  # too or the set_fact blows up undefined (same pattern as
+  # deploy_tronbyt_vllm_thinking.yaml's Grafana-facts play).
+  hosts: proxy_host
+  gather_facts: true
+  become: false
+
+- name: Install Kanban UI
+  hosts: hermes_host
+  become: true
+  pre_tasks:
+    - name: Silence Grafana alerts
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Deploying Kanban UI"
+      when: >-
+        not
+        (hostvars['localhost']['grafana_master_silence_active']
+         | default(false))
+  roles:
+    - kanban_ui
+  post_tasks:
+    - name: Remove Grafana alert silence
+      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+      when: >-
+        not
+        (hostvars['localhost']['grafana_master_silence_active']
+         | default(false))

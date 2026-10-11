@@ -46,7 +46,7 @@
     url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override"
     method: POST
     headers:
-      X-API-Key: "{{ pfsense_api_key }}"
+      X-API-Key: "*** pfsense_api_key }}"
       Content-Type: "application/json"
     body_format: json
     body:
@@ -60,6 +60,11 @@
   register: _dns_host_override_result
   when:
     - _dns_configure | bool
+    # uri has no check-mode support, so every GET that feeds this fact
+    # chain was skipped under --check and _dns_deployment_override is
+    # undefined; skip the create too (real-mode semantics unchanged --
+    # the task still fails loudly if a live GET returns no data).
+    - not ansible_check_mode
     - _dns_deployment_override | length == 0
 
 - name: Apply DNS changes after host override creation
