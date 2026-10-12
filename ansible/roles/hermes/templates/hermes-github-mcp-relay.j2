@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""{{ ansible_managed }}
+
+stdio relay enforcing the VirtuaJimmy GitHub MCP write policy.
+
+The pinned github-mcp-server binary is launched behind this relay instead of
+directly. Every JSON-RPC frame the gateway sends passes through here and
+every frame the server answers with passes back. The relay is a
+fail-closed message filter with exactly one job:
+
+  * tools/call for a tool outside the deployed allowlist is refused locally
+    (the allowlist is an EXTRA boundary; the binary's own --tools whitelist
+    with an empty --toolsets is the primary registration filter).
+  * tools/call for pull_request_review_write is permitted only for the
+    sub-methods the owner authorized (resolve_thread / unresolve_thread).
+    Upstream v2.0.2 cannot split this one composite tool's methods with
+    --exclude-tools, so the split is enforced here. create, submit_pending,
+    and delete_pending are refused.
+  * every other write tool in the allowlist (currently only the plain
+    review-comment reply) passes through.
+  * if a request frame cannot be parsed, the relay closes the session rather
+    than forwarding unclassifiable data (fail closed).
+
+Nothing else is inspected, rewritten, or logged. No credential material is
+read or emitted. The relay never terminates itself while frames flow; it
+exits when either pipe closes or the child dies.
+
+The token is minted upstream (hermes-github-mcp-launch) and lives only in
+the inherited environment; this relay does not touch it.
+"""
+import json
+import os
+import subprocess
+import sys
+import threading
+
+ALLOWED_TOOLS = set({{ hermes_mcp_github_allowed_tools_json }})
+WRITE_TOOLS = set({{ hermes_mcp_github_write_tools | sort | to_json }})
+REVIEW_WRITE_METHODS = set({{ hermes_mcp_github_review_methods_allowed | sort | to_json }})
+
+child_argv = [{{ hermes_mcp_github_bin | to_json }}] + sys.argv[1:]
+
+
+def refuse(msg_id, reason):
+    """Emit a JSON-RPC error for an outbound call we decline to forward."""
+    reply = {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "error": {
+            "code": -32600,
+            "message": (
+                "denied by the virtuajimmy github-mcp relay policy: "
+                + reason
+                + ". Remote writes other than review-thread reply/resolve"
+                " must go through the github-app-workflow wrapper."
+            ),
+        },
+    }
+    sys.stdout.write(json.dumps(reply) + "\n")
+    sys.stdout.flush()
+
+
+def classify(message):
+    """Return (allowed, tool_name, reason). Only tools/call is policed."""
+    if not isinstance(message, dict) or message.get("method") != "tools/call":
+        return True, None, ""
+    tool = (message.get("params") or {}).get("name")
+    tool_id = message.get("id")
+    if not isinstance(tool, str):
+        return False, None, "malformed tools/call (missing tool name)"
+    if tool not in ALLOWED_TOOLS:
+        return False, tool, "tool is outside the deployed allowlist"
+    if tool not in WRITE_TOOLS:
+        return True, tool, ""
+    if tool == "pull_request_review_write":
+        method = ((message.get("params") or {}).get("arguments") or {}).get("method")
+        if method not in REVIEW_WRITE_METHODS:
+            return False, tool, (
+                "pull_request_review_write method "
+                + repr(method)
+                + " is not owner-authorized (allowed: "
+                + ", ".join(sorted(REVIEW_WRITE_METHODS))
+                + ")"
+            )
+    return True, tool, ""
+
+
+def pump_child_out(child):
+    """Server -> gateway: answers flow straight through, unmodified."""
+    for line in child.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    try:
+        sys.stdout.flush()
+    except (BrokenPipeError, ValueError):
+        pass
+
+
+def main():
+    if "--version" in child_argv[1:]:
+        # Version probe fast path: replace this process with the binary so
+        # deployments get the pinned version string with no piping race.
+        os.execv(child_argv[0], child_argv)
+    child = subprocess.Popen(
+        child_argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        # Server stderr keeps its inherited stderr (gateway log). No secrets
+        # are logged there by this binary unless --enable-command-logging is
+        # set, which the managed args never do.
+        stderr=sys.stderr,
+        text=True,
+        bufsize=1,
+    )
+
+    out_thread = threading.Thread(target=pump_child_out, args=(child,), daemon=True)
+    out_thread.start()
+
+    try:
+        for line in sys.stdin:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                # Fail closed: an unparseable frame cannot be classified,
+                # so the whole session is torn down instead of forwarding.
+                sys.stderr.write(
+                    "hermes-github-mcp-relay: unparseable frame;"
+                    " closing session (fail closed)\n"
+                )
+                child.kill()
+                return 1
+            allowed, tool, reason = classify(message)
+            if not allowed:
+                refuse(message.get("id") if isinstance(message, dict) else None, reason)
+                sys.stderr.write(
+                    "hermes-github-mcp-relay: denied tools/call"
+                    " tool=" + repr(tool) + "\n"
+                )
+                continue
+            child.stdin.write(line + "\n")
+            child.stdin.flush()
+    except (BrokenPipeError, ValueError):
+        pass
+    finally:
+        try:
+            child.stdin.close()
+        except ValueError:
+            pass
+        child.terminate()
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=5)
+
+
+if __name__ == "__main__":
+    if os.environ.get("HERMES_GITHUB_MCP_RELAY_SELFCHECK") == "1":
+        # Offline policy self-test: no child process, no network, no token.
+        # Exercises the classifier against the exact deny/allow matrix and
+        # exits non-zero on any mismatch.
+        cases = [
+            ({"method": "tools/call", "id": 1,
+              "params": {"name": "pull_request_review_write",
+                         "arguments": {"method": "create"}}}, False),
+            ({"method": "tools/call", "id": 2,
+              "params": {"name": "pull_request_review_write",
+                         "arguments": {"method": "submit_pending"}}}, False),
+            ({"method": "tools/call", "id": 3,
+              "params": {"name": "pull_request_review_write",
+                         "arguments": {"method": "delete_pending"}}}, False),
+            ({"method": "tools/call", "id": 4,
+              "params": {"name": "pull_request_review_write",
+                         "arguments": {"method": "resolve_thread"}}}, True),
+            ({"method": "tools/call", "id": 5,
+              "params": {"name": "pull_request_review_write",
+                         "arguments": {"method": "unresolve_thread"}}}, True),
+            ({"method": "tools/call", "id": 6,
+              "params": {"name": "pull_request_review_write",
+                         "arguments": {}}}, False),
+            ({"method": "tools/call", "id": 7,
+              "params": {"name": "add_reply_to_pull_request_comment",
+                         "arguments": {"body": "x", "commentId": 1}}}, True),
+            ({"method": "tools/call", "id": 8,
+              "params": {"name": "push_files", "arguments": {}}}, False),
+            ({"method": "tools/call", "id": 9,
+              "params": {"name": "create_pull_request",
+                         "arguments": {}}}, False),
+            ({"method": "tools/call", "id": 10,
+              "params": {"name": "issue_write", "arguments": {}}}, False),
+            ({"method": "tools/call", "id": 11,
+              "params": {"name": "merge_pull_request",
+                         "arguments": {}}}, False),
+            ({"method": "tools/call", "id": 12,
+              "params": {"name": "update_pull_request",
+                         "arguments": {}}}, False),
+            ({"method": "tools/call", "id": 13,
+              "params": {"name": "add_issue_comment",
+                         "arguments": {}}}, False),
+            ({"method": "tools/call", "id": 14,
+              "params": {"name": "add_comment_to_pending_review",
+                         "arguments": {}}}, False),
+            ({"method": "tools/call", "id": 15,
+              "params": {"name": "delete_file", "arguments": {}}}, False),
+            ({"method": "tools/call", "id": 16,
+              "params": {"name": "list_issues", "arguments": {}}}, True),
+            ({"method": "tools/call", "id": 17,
+              "params": {"name": "pull_request_read",
+                         "arguments": {"method": "get_files"}}}, True),
+            ({"method": "initialize", "id": 18, "params": {}}, True),
+            ({"method": "notifications/initialized"}, True),
+            ({"jsonrpc": "2.0", "id": 19, "result": {}}, True),
+        ]
+        failures = 0
+        for message, expected in cases:
+            allowed, tool, _reason = classify(message)
+            if allowed is not expected:
+                failures += 1
+                name = message.get("params", {}).get("name", message.get("method"))
+                print(f"SELFCHECK FAIL: {name} allowed={allowed}"
+                      f" expected={expected}", file=sys.stderr)
+        if failures:
+            print(f"SELFCHECK: {failures} case(s) failed", file=sys.stderr)
+            sys.exit(1)
+        print(f"SELFCHECK: {len(cases)} cases passed")
+        sys.exit(0)
+    main()

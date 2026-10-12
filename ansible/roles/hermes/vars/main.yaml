@@ -52,4 +52,24 @@ hermes_mcp_grafana_archive_path: >-
 hermes_mcp_grafana_install_dir: >-
   {{ hermes_mcp_grafana_install_root }}/{{ hermes_mcp_grafana_version }}
 
+# GitHub MCP server: https://github.com/github/github-mcp-server/releases/tag/v2.0.2
+# Checksums verified against the upstream github-mcp-server_2.0.2_checksums.txt
+# release asset on 2026-10-12 (Linux_x86_64 sha256 also re-verified locally).
+hermes_mcp_github_version: "2.0.2"
+hermes_mcp_github_archive_arch: >-
+  {{ {'x86_64': 'x86_64', 'aarch64': 'arm64'}[ansible_architecture] }}
+hermes_mcp_github_archive_name: >-
+  github-mcp-server_Linux_{{ hermes_mcp_github_archive_arch }}.tar.gz
+hermes_mcp_github_archive_url: >-
+  https://github.com/github/github-mcp-server/releases/download/v{{ hermes_mcp_github_version }}/{{ hermes_mcp_github_archive_name }}
+hermes_mcp_github_archive_checksums:
+  x86_64: 815e27d931c796af0c97f24fd211e14f8a4607d4528377719a5ad2352086b0b0
+  aarch64: 73f5e76c6a3b5e0d731e1134a7c38575df6ec96c646192095a3be2d4d0d6c1fc
+hermes_mcp_github_archive_checksum: >-
+  sha256:{{ hermes_mcp_github_archive_checksums[ansible_architecture] }}
+hermes_mcp_github_archive_path: >-
+  /var/tmp/github-mcp-server-{{ hermes_mcp_github_version }}-linux-{{ hermes_mcp_github_archive_arch }}.tar.gz
+hermes_mcp_github_install_dir: >-
+  {{ hermes_mcp_github_install_root }}/{{ hermes_mcp_github_version }}
+
 ...

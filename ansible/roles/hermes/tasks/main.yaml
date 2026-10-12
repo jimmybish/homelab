@@ -51,6 +51,8 @@
       mode: '0700'
     - path: "{{ hermes_mcp_grafana_install_dir }}"
       mode: '0755'
+    - path: "{{ hermes_mcp_github_install_dir }}"
+      mode: '0755'
     - path: "{{ hermes_user_systemd_dir }}"
       mode: '0755'
 
@@ -97,6 +99,48 @@
     hermes_mcp_grafana_version_result.rc != 0 or
     hermes_mcp_grafana_version not in
     (hermes_mcp_grafana_version_result.stdout + hermes_mcp_grafana_version_result.stderr)
+
+- name: Download pinned GitHub MCP server archive
+  ansible.builtin.get_url:
+    url: "{{ hermes_mcp_github_archive_url }}"
+    dest: "{{ hermes_mcp_github_archive_path }}"
+    checksum: "{{ hermes_mcp_github_archive_checksum }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install pinned GitHub MCP server
+  ansible.builtin.unarchive:
+    src: "{{ hermes_mcp_github_archive_path }}"
+    dest: "{{ hermes_mcp_github_install_dir }}"
+    remote_src: true
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0755'
+    creates: "{{ hermes_mcp_github_install_dir }}/github-mcp-server"
+
+- name: Link GitHub MCP server into the Hermes executable path
+  ansible.builtin.file:
+    src: "{{ hermes_mcp_github_install_dir }}/github-mcp-server"
+    dest: "{{ hermes_mcp_github_bin }}"
+    state: link
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    force: true
+
+- name: Verify GitHub MCP server version
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_mcp_github_bin }}"
+      - --version
+  become: true
+  become_user: "{{ hermes_user }}"
+  register: hermes_mcp_github_version_result
+  changed_when: false
+  failed_when: >-
+    hermes_mcp_github_version_result.rc != 0 or
+    hermes_mcp_github_version not in
+    (hermes_mcp_github_version_result.stdout + hermes_mcp_github_version_result.stderr)
 
 - name: Create managed Hermes profile directories
   ansible.builtin.file:
@@ -639,6 +683,47 @@
   when: hermes_virtuajimmy_github_app_enabled | bool
   notify: Restart Hermes VirtuaJimmy gateway
 
+- name: Create VirtuaJimmy GitHub MCP skill directory
+  ansible.builtin.file:
+    path: "{{ hermes_virtuajimmy_github_mcp_skill_dir }}"
+    state: directory
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0700'
+  when: hermes_virtuajimmy_github_app_enabled | bool
+
+- name: Deploy VirtuaJimmy GitHub MCP skill
+  ansible.builtin.template:
+    src: skill-github-mcp.md.j2
+    dest: "{{ hermes_virtuajimmy_github_mcp_skill_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  when: hermes_virtuajimmy_github_app_enabled | bool
+  notify: Restart Hermes VirtuaJimmy gateway
+
+- name: Inspect deployed VirtuaJimmy GitHub MCP profile-local skill
+  ansible.builtin.stat:
+    path: "{{ hermes_virtuajimmy_github_mcp_skill_file }}"
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: hermes_virtuajimmy_github_mcp_skill_stat
+  when: hermes_virtuajimmy_github_app_enabled | bool
+
+- name: Assert deployed VirtuaJimmy GitHub MCP profile-local skill
+  ansible.builtin.assert:
+    that:
+      - hermes_virtuajimmy_github_mcp_skill_stat.stat.isreg | default(false)
+      - hermes_virtuajimmy_github_mcp_skill_stat.stat.pw_name == hermes_user
+      - hermes_virtuajimmy_github_mcp_skill_stat.stat.gr_name == hermes_user
+      - hermes_virtuajimmy_github_mcp_skill_stat.stat.mode == '0600'
+    fail_msg: >-
+      The profile-local GitHub MCP skill has unexpected type, ownership, or
+      mode.
+  when: hermes_virtuajimmy_github_app_enabled | bool
+  changed_when: false
+
 - name: Inspect deployed VirtuaJimmy GitHub App profile-local skill
   ansible.builtin.stat:
     path: "{{ hermes_virtuajimmy_github_app_skill_file }}"
@@ -698,6 +783,61 @@
   when: hermes_virtuajimmy_github_app_enabled | bool
   no_log: true
   changed_when: false
+
+- name: Deploy GitHub MCP review-write policy relay
+  ansible.builtin.template:
+    src: hermes-github-mcp-relay.j2
+    dest: "{{ hermes_mcp_github_relay_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0750'
+    validate: >-
+      /usr/bin/python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' %s
+  when: hermes_virtuajimmy_github_app_enabled | bool
+  notify: Restart Hermes VirtuaJimmy gateway
+
+- name: Self-test GitHub MCP relay write policy
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_mcp_github_relay_file }}"
+      - stdio
+  environment:
+    HERMES_GITHUB_MCP_RELAY_SELFCHECK: "1"
+  become: true
+  become_user: "{{ hermes_user }}"
+  register: hermes_mcp_github_relay_selfcheck
+  changed_when: false
+  failed_when: >-
+    hermes_mcp_github_relay_selfcheck.rc != 0 or
+    'cases passed' not in hermes_mcp_github_relay_selfcheck.stdout
+  when: hermes_virtuajimmy_github_app_enabled | bool
+
+- name: Deploy GitHub MCP token launcher
+  ansible.builtin.template:
+    src: hermes-github-mcp-launch.j2
+    dest: "{{ hermes_mcp_github_launcher_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0750'
+    validate: >-
+      /usr/bin/bash -n %s
+  when: hermes_virtuajimmy_github_app_enabled | bool
+  notify: Restart Hermes VirtuaJimmy gateway
+
+- name: Verify GitHub MCP launcher token transport
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_mcp_github_launcher_file }}"
+      - --version
+  become: true
+  become_user: "{{ hermes_user }}"
+  register: hermes_mcp_github_launcher_result
+  changed_when: false
+  failed_when: >-
+    hermes_mcp_github_launcher_result.rc != 0 or
+    hermes_mcp_github_version not in
+    (hermes_mcp_github_launcher_result.stdout + hermes_mcp_github_launcher_result.stderr)
+  when: hermes_virtuajimmy_github_app_enabled | bool
 
 - name: Deploy VirtuaJimmy profile environment
   ansible.builtin.template:
@@ -1027,7 +1167,55 @@
       - hermes_virtuajimmy_config.platform_toolsets.keys() | list | sort == ['discord']
       - hermes_virtuajimmy_config.platform_toolsets.discord == ['hermes-discord', 'kanban']
       - "'kanban' not in hermes_virtuajimmy_config.agent.disabled_toolsets"
-      - hermes_virtuajimmy_config.mcp_servers.keys() | list | sort == ['context7', 'grafana', 'local_tools', 'radarr', 'sonarr', 'tracearr']
+      - >-
+        hermes_virtuajimmy_config.mcp_servers.keys() | list | sort ==
+        (['context7', 'github', 'grafana', 'local_tools', 'radarr', 'sonarr',
+        'tracearr'] if hermes_virtuajimmy_github_app_enabled | bool else
+        ['context7', 'grafana', 'local_tools', 'radarr', 'sonarr', 'tracearr'])
+      - >-
+        (not hermes_virtuajimmy_github_app_enabled | bool) or
+        (hermes_virtuajimmy_config.mcp_servers.github.command ==
+        hermes_mcp_github_launcher_file and
+        hermes_virtuajimmy_config.mcp_servers.github.args ==
+        (['stdio', '--toolsets', '', '--tools',
+        hermes_mcp_github_allowed_tools_csv] +
+        (['--lockdown-mode'] if hermes_mcp_github_lockdown_mode | bool else [])) and
+        hermes_mcp_github_read_tools | difference(
+        hermes_virtuajimmy_config.mcp_servers.github.tools.include) | length == 0 and
+        hermes_mcp_github_write_tools | difference(
+        hermes_virtuajimmy_config.mcp_servers.github.tools.include) | length == 0 and
+        hermes_virtuajimmy_config.mcp_servers.github.tools.include | difference(
+        hermes_mcp_github_read_tools + hermes_mcp_github_write_tools) | length == 0 and
+        'stdio' == hermes_virtuajimmy_config.mcp_servers.github.args[0] and
+        '--toolsets' in hermes_virtuajimmy_config.mcp_servers.github.args and
+        hermes_virtuajimmy_config.mcp_servers.github.args[
+        hermes_virtuajimmy_config.mcp_servers.github.args.index('--toolsets') + 1] == '' and
+        '--tools' in hermes_virtuajimmy_config.mcp_servers.github.args and
+        hermes_virtuajimmy_config.mcp_servers.github.args[
+        hermes_virtuajimmy_config.mcp_servers.github.args.index('--tools') + 1
+        ].split(',') | sort == (hermes_mcp_github_read_tools +
+        hermes_mcp_github_write_tools) | sort and
+        '--read-only' not in hermes_virtuajimmy_config.mcp_servers.github.args and
+        '--lockdown-mode' in hermes_virtuajimmy_config.mcp_servers.github.args and
+        hermes_virtuajimmy_config.mcp_servers.github.tools.resources == false and
+        hermes_virtuajimmy_config.mcp_servers.github.tools.prompts == false and
+        hermes_virtuajimmy_config.mcp_servers.github.max_lifetime_seconds | int <= 3540 and
+        'env' not in hermes_virtuajimmy_config.mcp_servers.github and
+        hermes_virtuajimmy_config.mcp_servers.github.enabled)
+      - >-
+        (not hermes_virtuajimmy_github_app_enabled | bool) or
+        ('add_reply_to_pull_request_comment' in
+        hermes_mcp_github_write_tools and
+        'pull_request_review_write' in hermes_mcp_github_write_tools and
+        hermes_mcp_github_write_tools | length == 2 and
+        hermes_mcp_github_review_methods_allowed == ['resolve_thread', 'unresolve_thread'] and
+        ['push_files', 'create_or_update_file', 'delete_file', 'create_branch',
+        'fork_repository', 'create_pull_request', 'merge_pull_request',
+        'update_pull_request', 'update_pull_request_branch', 'add_issue_comment',
+        'update_issue_comment', 'issue_write', 'sub_issue_write',
+        'add_comment_to_pending_review', 'create_repository']
+        | intersect(hermes_mcp_github_read_tools + hermes_mcp_github_write_tools)
+        | length == 0)
       - hermes_virtuajimmy_config.mcp_servers.grafana.args == ['--enabled-tools', 'datasource,prometheus,loki', '--disable-write', '--disable-proxied']
       - hermes_virtuajimmy_config.mcp_servers.local_tools.command == hermes_install_dir ~ '/venv/bin/python'
       - hermes_virtuajimmy_config.mcp_servers.local_tools.args == hermes_virtuajimmy_local_tools_args

@@ -67,6 +67,10 @@ hermes_virtuajimmy_github_app_skill_dir: >-
   {{ hermes_virtuajimmy_profile_dir }}/skills/github-app-workflow
 hermes_virtuajimmy_github_app_skill_file: >-
   {{ hermes_virtuajimmy_github_app_skill_dir }}/SKILL.md
+hermes_virtuajimmy_github_mcp_skill_dir: >-
+  {{ hermes_virtuajimmy_profile_dir }}/skills/github-mcp
+hermes_virtuajimmy_github_mcp_skill_file: >-
+  {{ hermes_virtuajimmy_github_mcp_skill_dir }}/SKILL.md
 hermes_virtuajimmy_github_app_execution_host: "{{ groups['mgmt_hosts'][0] }}"
 hermes_virtuajimmy_github_app_execution_user: "{{ hermes_virtuajimmy_ssh_user }}"
 hermes_virtuajimmy_github_app_execution_group: >-
@@ -87,6 +91,70 @@ hermes_virtuajimmy_local_documents:
   triage_skill: "{{ hermes_virtuajimmy_triage_skill_file }}"
 hermes_mcp_grafana_install_root: "{{ hermes_user_home }}/.local/lib/mcp-grafana"
 hermes_mcp_grafana_bin: "{{ hermes_bin_dir }}/mcp-grafana"
+# GitHub MCP server for the VirtuaJimmy profile. The gateway launches it via
+# the rendered launcher (see hermes_mcp_github_launcher_file), which mints a
+# fresh App installation token from mgmt and exports it as
+# GITHUB_PERSONAL_ACCESS_TOKEN before exec'ing the pinned binary.
+hermes_mcp_github_install_root: "{{ hermes_user_home }}/.local/lib/github-mcp-server"
+hermes_mcp_github_bin: "{{ hermes_bin_dir }}/github-mcp-server"
+hermes_mcp_github_launcher_file: "{{ hermes_bin_dir }}/hermes-github-mcp-launch"
+# The stdio relay enforces the write-method policy for the one composite
+# review-write tool that upstream cannot split (owner-authorized resolve /
+# unresolve only). See templates/hermes-github-mcp-relay.j2.
+hermes_mcp_github_relay_file: "{{ hermes_bin_dir }}/hermes-github-mcp-relay"
+hermes_mcp_github_lockdown_mode: true
+# Capability boundary: the server registers ONLY these read tools (--tools
+# whitelist with an empty --toolsets), Hermes re-filters the same list via
+# mcp_servers.github.tools.include, and the relay denies every write except
+# the two owner-authorized review-thread operations below. All other remote
+# writes stay with the github-app-workflow wrapper.
+hermes_mcp_github_read_tools:
+  - get_commit
+  - get_file_contents
+  - get_label
+  - get_latest_release
+  - get_me
+  - get_release_by_tag
+  - get_tag
+  - get_team_members
+  - get_teams
+  - issue_read
+  - list_branches
+  - list_commits
+  - list_issue_fields
+  - list_issue_types
+  - list_issues
+  - list_pull_requests
+  - list_releases
+  - list_repository_collaborators
+  - list_tags
+  - pull_request_read
+  - search_code
+  - search_commits
+  - search_issues
+  - search_pull_requests
+  - search_repositories
+  - ui_get
+hermes_mcp_github_write_tools:
+  - add_reply_to_pull_request_comment
+  - pull_request_review_write
+# Sub-methods the relay allows on pull_request_review_write. Everything else
+# the tool exposes (create, submit_pending, delete_pending) is denied.
+hermes_mcp_github_review_methods_allowed:
+  - resolve_thread
+  - unresolve_thread
+# Derived forms of the same allowlist, kept as strings so template and
+# assertion codepaths render identically under Ansible's native-Jinja rules.
+hermes_mcp_github_allowed_tools_csv: >-
+  {{ (hermes_mcp_github_read_tools + hermes_mcp_github_write_tools)
+  | sort | join(',') }}
+hermes_mcp_github_allowed_tools_json: >-
+  {{ (hermes_mcp_github_read_tools + hermes_mcp_github_write_tools)
+  | sort | to_json }}
+# Recycle the stdio session well before the minted installation token can
+# expire (~1h), so lazy reconnect always respawns the launcher with a fresh
+# mint. Documented Hermes stdio lifecycle key.
+hermes_mcp_github_max_lifetime_seconds: 3000
 hermes_plexibot_mcp_tracearr_url: "{{ internal_mcp_tracearr_url }}"
 hermes_plexibot_mcp_sonarr_url: "{{ internal_mcp_sonarr_url }}"
 hermes_plexibot_mcp_radarr_url: "{{ internal_mcp_radarr_url }}"

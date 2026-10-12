@@ -178,6 +178,23 @@ mcp_servers:
       GRAFANA_URL: "{{ internal_grafana_url }}"
       GRAFANA_SERVICE_ACCOUNT_TOKEN_FILE: "{{ hermes_virtuajimmy_grafana_token_file }}"
     enabled: true
+{% if hermes_virtuajimmy_github_app_enabled | bool %}
+  github:
+    command: "{{ hermes_mcp_github_launcher_file }}"
+    args:
+      - stdio
+      - --toolsets
+      - ""
+      - --tools
+      - "{{ hermes_mcp_github_allowed_tools_csv }}"
+      - --lockdown-mode
+    tools:
+      include: {{ hermes_mcp_github_allowed_tools_json }}
+      resources: false
+      prompts: false
+    max_lifetime_seconds: {{ hermes_mcp_github_max_lifetime_seconds }}
+    enabled: true
+{% endif %}
   tracearr:
     url: "{{ hermes_virtuajimmy_mcp_tracearr_url }}/mcp"
     enabled: true
