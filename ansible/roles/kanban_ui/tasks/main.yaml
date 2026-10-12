@@ -67,6 +67,38 @@
   tags:
     - kanban_ui
 
+- name: Read revision of the mounted Hermes checkout
+  # PR#13 review finding (comment 4244239739, stale-import class): server.py
+  # imports plugin_api.py ONCE at startup, so a Hermes upgrade landing in the
+  # read-only bind mount leaves a running WebUI serving the old router even
+  # though state: present sees no config change. The revision is embedded as
+  # a Compose label (see docker_compose.yaml.j2), which turns any checkout
+  # revision change into a compose-file change -> template task re-fires ->
+  # Restart Kanban UI handler re-imports the mounted modules. HEAD is the
+  # authoritative identity: the hermes role pins and asserts an exact commit,
+  # so uncommitted drift inside the checkout is explicitly out of scope.
+  # Run as the checkout owner: the play's become:root would trip Git's
+  # dubious-ownership protection (same pattern as the hermes/firecrawl
+  # rev-parse tasks and the directory-setup pitfall note).
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ kanban_ui_hermes_repo }}"
+      - rev-parse
+      - HEAD
+  become: true
+  become_user: "{{ kanban_ui_run_user }}"
+  environment:
+    HOME: "/home/{{ owning_user }}"
+  register: kanban_ui_checkout_revision
+  changed_when: false
+  # Read-only inspection: run even under --check so a dry run renders the
+  # compose file with the REAL revision instead of the 'unknown' fallback.
+  check_mode: false
+  tags:
+    - kanban_ui
+
 # 3. Firewall (UFW) — the ONLY legitimate consumer of the published port is
 # the SWAG proxy (verified: with UFW active and no rule, a LAN client gets
 # Connection refused on 9470 while proxy-sourced traffic passes). The rule

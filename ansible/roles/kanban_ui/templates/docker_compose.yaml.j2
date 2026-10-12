@@ -8,6 +8,21 @@ services:
       context: "{{ kanban_ui_folder }}/app"
       dockerfile: Dockerfile
     container_name: kanban-ui
+    labels:
+      # PR#13 review finding (comment 4244239739): pin the mounted Hermes
+      # checkout revision into the Compose model. The container mounts the
+      # checkout read-only and server.py imports plugin_api.py once at
+      # startup, so without this a Hermes upgrade changes neither the image
+      # nor this file and the old router stays resident in memory. With it,
+      # a revision change re-renders this compose file, the template task
+      # reports changed, and its Restart Kanban UI notification re-imports
+      # the mounted modules (the build task additionally rebuilds). The
+      # label is deploy-time metadata only (docker inspect shows what code
+      # generation the container last started against); the app never reads
+      # it. The 'unknown' fallback (StrictUndefined-safe chain) can never
+      # appear in a real run: the rev-parse task is fatal on failure and
+      # runs even in check mode.
+      kanban-ui.hermes-checkout-revision: "{{ (kanban_ui_checkout_revision | default({})).stdout | default('unknown') | trim }}"
     # Runs as the numeric uid/gid that owns the board files (resolved from
     # the inventory host at deploy time; see vars notes).
     user: "{{ kanban_ui_run_uid }}:{{ kanban_ui_run_gid }}"
@@ -28,6 +43,15 @@ services:
       # the key being present is what activates the peer check.
       KANBAN_UI_TRUSTED_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
       KANBAN_UI_DEFAULT_BOARD: "{{ kanban_ui_default_board }}"
+      # PR-review finding (comment 4244239544): the /events WebSocket only
+      # accepts upgrades whose Origin header equals this exact value.
+      # SameSite=strict is site-scoped, so a compromised sibling subdomain
+      # of the internal domain gets the session cookie on its own WS
+      # upgrade; the Origin check pins the stream to the Kanban origin.
+      # Rendered from the same HTTPS base the UI is served from, so an
+      # operator's real tab always matches. server.py denies ALL upgrades
+      # when this is unset (deny-by-default; never relax it to a wildcard).
+      KANBAN_UI_WS_ALLOWED_ORIGIN: "{{ kanban_ui_url_base }}"
       # NOTE: KANBAN_UI_COOKIE_INSECURE is deliberately ABSENT. The
       # session cookie is Secure by default (server.py); this template
       # must never opt out, and no plaintext credential/session fallback

@@ -46,7 +46,7 @@
     url: "https://{{ groups['pfsense_host'][0] }}/api/v2/services/dns_resolver/host_override"
     method: POST
     headers:
-      X-API-Key: "*** pfsense_api_key }}"
+      X-API-Key: "{{ pfsense_api_key }}"
       Content-Type: "application/json"
     body_format: json
     body:
@@ -57,6 +57,7 @@
     validate_certs: false
     status_code: [200, 201]
   delegate_to: localhost
+  no_log: true
   register: _dns_host_override_result
   when:
     - _dns_configure | bool

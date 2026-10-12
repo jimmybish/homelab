@@ -96,7 +96,15 @@
 #   which matches the POC's effective behavior.
 # - The UI is served behind SWAG Internal + pfSense DNS at
 #   https://kanban.<internal_domain> per the new-service runbook (proxy,
-#   DNS, Homepage phases). Credential transport is HTTPS-ONLY: login is
+#   DNS, Homepage phases). The /events WebSocket gate is cookie AND an
+#   exact Origin match (PR review comment 4244239544: SameSite=strict is
+#   site-scoped, so a compromised sibling subdomain's JS receives the
+#   session cookie on its own WS upgrade; the Origin header, which
+#   browsers always send and scripts cannot forge on an upgrade, is
+#   matched against KANBAN_UI_WS_ALLOWED_ORIGIN -- the same HTTPS base
+#   below -- deny-by-default when unset, regression-locked by
+#   tests/test_ws_origin.py and verify_session.sh step 8b). Credential
+#   transport is HTTPS-ONLY: login is
 #   verified exclusively through the SWAG URL and the Secure-by-default
 #   session cookie makes a plaintext login impossible to complete (a
 #   browser discards a Secure cookie received over http). The published
@@ -109,7 +117,7 @@
 # - All host-side paths below derive from the pre-existing global
 #   owning_user variable; no user-identifying plaintext is introduced.
 
-kanban_ui_version: "2026.10.11a"
+kanban_ui_version: "2026.10.12a"
 
 # Host port (POC port kept so existing bookmarks keep working)
 kanban_ui_port: 9470

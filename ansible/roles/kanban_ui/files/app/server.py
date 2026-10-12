@@ -23,9 +23,15 @@ Auth model (no shared bearer token is ever delivered to a client):
 - Every /api/ request must present a valid session cookie AND the custom
   request header that the JS sets (double-submit CSRF guard against
   cross-site form/JSON POSTs — cookie alone is not enough).
-- The /events WebSocket is authenticated by cookie only (browsers send
-  cookies on same-origin WS upgrades). There is NO query-parameter token
-  path at all: no credential ever rides in a URL.
+- The /events WebSocket is authenticated by cookie AND Origin (PR review
+  comment 4244239544): SameSite=strict is SITE-scoped, so JS on a
+  compromised sibling subdomain of the internal domain still gets the
+  cookie on its WS upgrade. The gate therefore ALSO requires the upgrade
+  Origin header to equal the exact configured Kanban origin
+  (KANBAN_UI_WS_ALLOWED_ORIGIN; deny-by-default when unset, same
+  philosophy as the proxy marker, with the loopback-dev opt-out the only
+  exception). There is NO query-parameter token path at all: no
+  credential ever rides in a URL.
 
 Board: the UI defaults to DEFAULT_BOARD and always sends ?board=...
 explicitly, so nothing depends on the global current-board pointer.
@@ -71,6 +77,12 @@ MARKER_FILE = Path(os.environ.get("KANBAN_UI_PROXY_MARKER_FILE", str(HERE / "pro
 # sets it from the resolved inventory fact.
 TRUSTED_PROXY_IP = os.environ.get("KANBAN_UI_TRUSTED_PROXY_IP", "")
 DEFAULT_BOARD = os.environ.get("KANBAN_UI_DEFAULT_BOARD", "homelab")
+# PR-review finding (comment 4244239544): the ONLY origin allowed to open
+# the /events WebSocket. The deployment compose always sets this to the
+# exact SWAG-served URL (https://kanban.<internal_domain>); an unset value
+# denies every WS upgrade (deny-by-default, same philosophy as the proxy
+# marker) unless the loopback-dev opt-out is active.
+WS_ALLOWED_ORIGIN = os.environ.get("KANBAN_UI_WS_ALLOWED_ORIGIN", "")
 
 SESSION_COOKIE = "kanban_ui_session"
 SESSION_HEADER = "X-Kanban-UI"
@@ -179,6 +191,36 @@ def login_transport_allowed(forwarded_proto: str, allow_insecure_dev: bool) -> b
     # client-facing protocol set by the outermost trusted proxy.
     first = (forwarded_proto or "").split(",")[0].strip().lower()
     return first == "https"
+
+
+# PR-review finding (comment 4244239544): SameSite=strict is SITE-scoped,
+# not origin-scoped -- JS on a compromised sibling subdomain of the
+# internal domain gets the session cookie on ITS WebSocket upgrade and
+# would read the task event stream on a cookie-only gate. Browsers always
+# send the non-client-forgeable Origin on a WS upgrade, so the gate
+# requires it to equal the exact configured Kanban origin (scheme://host,
+# the value the compose renders from the same https URL the UI is served
+# from). Deny-by-default: an unset allowed origin refuses every upgrade
+# (dev runs that want the loopback path set KANBAN_UI_COOKIE_INSECURE,
+# which is already the single sanctioned opt-out for every other gate).
+def ws_origin_allowed(origin: str, allowed_origin: str, allow_insecure_dev: bool) -> bool:
+    """Pure predicate: does this WS upgrade Origin match the Kanban origin?"""
+    if allow_insecure_dev:
+        return True
+    if not allowed_origin:
+        return False
+    pres = (origin or "").strip().rstrip("/").lower()
+    if not pres:
+        # Non-browser clients may omit Origin; every cookie-authenticated
+        # WS consumer here IS a browser, so absence is not a pass. A
+        # cookie-only upgrade would also re-admit exactly the sibling-
+        # subdomain attack this gate exists to close.
+        return False
+    exp = allowed_origin.strip().rstrip("/").lower()
+    try:
+        return secrets.compare_digest(pres.encode("latin-1"), exp.encode("utf-8"))
+    except (UnicodeEncodeError, TypeError):
+        return False
 
 
 def redact_credentials(msg: str, secret: str) -> str:
@@ -345,7 +387,7 @@ def load_proxy_marker() -> str:
     return MARKER_FILE.read_text().strip()
 
 
-def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = ""):
+def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_allowed_origin: str = ""):
     from fastapi import FastAPI, Request
     from fastapi.responses import FileResponse, JSONResponse, Response
 
@@ -409,11 +451,20 @@ def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = ""):
     # import fails in this slim image, where the upstream default would
     # fail OPEN -- unacceptable). stream_events resolves this module global
     # at call time, so replacing it here is authoritative. Authorization is
-    # the session cookie ONLY: browsers send it on the same-origin WS
-    # upgrade, and no credential ever rides in a URL (no browser history,
-    # no access logs, no query-param fallback of any kind).
+    # the session cookie AND an exact-Origin match (PR review comment
+    # 4244239544): SameSite=strict is site- not origin-scoped, so a
+    # compromised sibling subdomain's JS would otherwise get the cookie on
+    # its WS upgrade; the browser-supplied Origin pins the upgrade to the
+    # Kanban origin itself. No credential ever rides in a URL (no browser
+    # history, no access logs, no query-param fallback of any kind).
     def _ws_gate(ws):
-        return _session_valid(ws.cookies.get(SESSION_COOKIE, ""))
+        if not _session_valid(ws.cookies.get(SESSION_COOKIE, "")):
+            return False
+        return ws_origin_allowed(
+            ws.headers.get("origin", ""),
+            ws_allowed_origin,
+            bool(os.environ.get("KANBAN_UI_COOKIE_INSECURE")),
+        )
 
     plugin._ws_upgrade_authorized = _ws_gate
 
@@ -563,7 +614,20 @@ def main() -> None:
             "that no request can satisfy."
         )
 
-    app = build_app(secret, proxy_marker, TRUSTED_PROXY_IP)
+    app = build_app(secret, proxy_marker, TRUSTED_PROXY_IP, WS_ALLOWED_ORIGIN)
+
+    # Loud-not-secret-shaped again (same philosophy as the marker gate),
+    # but WARN rather than refuse: an unset WS origin degrades only the
+    # live event tail (every upgrade denied), while login and the board
+    # still work -- unlike a missing marker, it must not lock the
+    # operator out of the very UI they need to fix the deploy.
+    if not WS_ALLOWED_ORIGIN and not os.environ.get("KANBAN_UI_COOKIE_INSECURE"):
+        print(
+            "WARNING: KANBAN_UI_WS_ALLOWED_ORIGIN is unset; the /events "
+            "WebSocket will refuse every upgrade (deny-by-default). The "
+            "deployment compose always renders it from the SWAG HTTPS URL.",
+            flush=True,
+        )
 
     import uvicorn
 

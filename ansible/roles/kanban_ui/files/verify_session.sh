@@ -42,6 +42,8 @@
 #   7. mutations without the session marker header are 403 (CSRF guard),
 #      and with it the request passes the gate (handler-level status)
 #   8. the WS upgrade is refused; the REAL token in the URL buys nothing
+#   8b. the WS upgrade with the valid session cookie but a FORGED Origin
+#       is refused (PR review comment 4244239544 sibling-subdomain gate)
 #   9. container logs since this container start are free of token material
 set -u
 
@@ -221,6 +223,30 @@ chmod 600 "$WORK/ws.conf"
 C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 --http1.1 \
   --config "$WORK/ws.conf")
 [ "$C" != "101" ] || fail "WS upgrade accepted with a URL token"
+
+# 8b. PR-review finding (comment 4244239544): the WS gate is cookie AND
+# exact-Origin. Replay the legitimate session cookie (minted in step 5,
+# exactly what a compromised sibling subdomain's JS gets, because
+# SameSite is site-scoped) behind a FORGED upgrade Origin and require
+# rejection. Cookie-only acceptance was the finding; 101 here fails.
+# The correct-Origin leg cannot be exercised from here: curl cannot
+# complete a WS handshake, and a live 101 probe would need a real
+# browser. Its evidence is threefold: (a) the sibling probe below is the
+# SAME request with only the Origin changed, so an Origin-blind gate
+# would answer 101 to it too; (b) the operator's live browser tab keeps
+# its event stream after this deploy (dashboard live tail watched
+# green); (c) the pure predicate is locked by tests/test_ws_origin.py.
+{
+  printf 'url = "%s/api/kanban/%s?board=%s"\n' "$BASE" 'events' "$KANBAN_UI_VERIFY_BOARD"
+  printf 'header = "Cookie: kanban_ui_session=%s"\n' "$SESS"
+  printf 'header = "Origin: https://sibling-not-the-kanban-origin.invalid"\n'
+  printf 'header = "Upgrade: websocket"\nheader = "Connection: Upgrade"\n'
+  printf 'header = "Sec-WebSocket-Version: 13"\nheader = "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="\n'
+} > "$WORK/ws-origin.conf"
+chmod 600 "$WORK/ws-origin.conf"
+C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 --http1.1 \
+  --config "$WORK/ws-origin.conf")
+[ "$C" != "101" ] || fail "WS upgrade accepted with a forged Origin and a replayed session cookie"
 
 # 9. container logs since this container start are free of token material.
 # The old bearer-token image printed the token at startup; its retained

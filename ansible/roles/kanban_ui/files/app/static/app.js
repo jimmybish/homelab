@@ -166,8 +166,13 @@ function render() {
    payload signature is unchanged the DOM is not touched at all. */
 function fp(x, r) { return JSON.stringify(x, r); }
 function cardSig(t) {
+  // Stale-threshold bucket, NOT raw age: age ticks every fetch but the stale
+  // class in applyCard only flips when started_age_seconds crosses 3600. A
+  // boolean keeps the signature stable between ticks while forcing a
+  // re-render at the exact crossing (see tickAges fast path).
+  const stale = !!(t.status === "running" && t.age && t.age.started_age_seconds > 3600);
   return fp([t.title, t.status, t.assignee, t.priority, t.progress, t.link_counts, t.comment_count,
-    t.warnings, t.tenant, t.created_at, t.completed_at, t.latest_summary, S.sel.has(t.id)]);
+    t.warnings, t.tenant, t.created_at, t.completed_at, t.latest_summary, S.sel.has(t.id), stale]);
 }
 function findTask(id) {
   for (const c of ((S.data || {}).columns) || []) for (const t of c.tasks || []) if (t.id === id) return t;
