@@ -38,12 +38,33 @@ anything that is not a regular file, so prose never lands in process argv.
 {{ hermes_virtuajimmy_github_app_wrapper_file }} \
   --config {{ hermes_virtuajimmy_github_app_config_file }} comment \
   --repo jimmybish/homelab --pr PR_NUMBER --body-file BODY_FILE
+
+# Reply to a review comment; BODY_FILE holds the reply text (0600 or '-')
+{{ hermes_virtuajimmy_github_app_wrapper_file }} \
+  --config {{ hermes_virtuajimmy_github_app_config_file }} review-reply \
+  --repo jimmybish/homelab --pr PR_NUMBER --comment-id COMMENT_ID \
+  --body-file BODY_FILE
+
+# Resolve a review thread by its GraphQL node id (PRRT_...)
+{{ hermes_virtuajimmy_github_app_wrapper_file }} \
+  --config {{ hermes_virtuajimmy_github_app_config_file }} resolve-thread \
+  --repo jimmybish/homelab --thread-id THREAD_NODE_ID
 ```
 
-The wrapper accepts only `push-branch`, `open-pr`, and `comment`. It validates
+The wrapper accepts only `push-branch`, `open-pr`, `comment`, `review-reply`,
+and `resolve-thread`. It validates
 the target against the configured repository allow-list, mints its own
 short-lived JWT and installation token, requests only `contents`,
 `pull_requests`, and `issues` write access, and never returns the token.
+
+`review-reply` posts to the REST replies endpoint for the given numeric
+review-comment id and appends the loop marker to the body, exactly like
+`comment`. `--comment-id` must be a positive integer and `--thread-id` must
+be a GraphQL node id matching `PRRT_` plus URL-safe base64; both are
+validated locally BEFORE any token is minted, and the thread id is sent only
+as JSON variable data to a hardcoded `resolveReviewThread` mutation, never
+interpolated into query text. A GraphQL `errors` response or a mutation that
+does not confirm `isResolved: true` exits non-zero with a generic message.
 
 `push-branch` enforces the refspec in code BEFORE any token is minted, on
 both sides. Gate 1 (shape): `--branch` must fully match the task-branch
