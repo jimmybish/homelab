@@ -46,6 +46,21 @@ REF_RE = re.compile(r"^(?![-/.])(?!.*(?:\.\.|//|@\{|\\))(?!.*[/.]$)[A-Za-z0-9._/
 TASK_BRANCH_RE = re.compile(r"^wt/[A-Za-z0-9][A-Za-z0-9._-]*$")
 COMMENT_MARKER = "<!-- virtuajimmy-github-app -->"
 MODEL_TEXT_LIMIT = 65_536
+# Strict shapes for the two review-reconciliation targets. Comment ids are
+# the numeric REST pull-request-review ids; thread ids are GraphQL node ids
+# prefixed 'PRRT_' whose payload is URL-safe base64. Both are validated
+# before any installation token is minted. The JSON encoder is what keeps
+# these values out of query text; the patterns are defense-in-depth so a
+# malformed or hostile id fails locally with no network call at all.
+REVIEW_COMMENT_ID_RE = re.compile(r"^[1-9][0-9]{0,18}$")
+REVIEW_THREAD_ID_RE = re.compile(r"^PRRT_[A-Za-z0-9_-]{1,128}={0,2}$")
+GRAPHQL_RESOLVE_MUTATION = (
+    "mutation($input: ResolveReviewThreadInput!) {"
+    " resolveReviewThread(input: $input) {"
+    " thread { isResolved }"
+    " }"
+    "}"
+)
 
 
 class AppError(RuntimeError):
@@ -193,6 +208,22 @@ def validate_repo(config, repository):
 def validate_ref(value, label):
     if not REF_RE.fullmatch(value):
         raise AppError(f"{label} is not a safe Git reference")
+
+
+def validate_comment_id(value):
+    if not REVIEW_COMMENT_ID_RE.fullmatch(value):
+        raise AppError(
+            "comment id must be a positive integer pull-request review "
+            "comment id"
+        )
+
+
+def validate_thread_id(value):
+    if not REVIEW_THREAD_ID_RE.fullmatch(value):
+        raise AppError(
+            "thread id must be a GraphQL pull-request review thread node "
+            "id (PRRT_ followed by URL-safe base64)"
+        )
 
 
 def validate_task_branch(value):
@@ -509,10 +540,63 @@ def comment(config, args):
     }
 
 
+def review_reply(config, args):
+    validate_comment_id(args.comment_id)
+    body = read_model_text(args.body_file, "body")
+    if COMMENT_MARKER not in body:
+        body = f"{body.rstrip()}\n\n{COMMENT_MARKER}"
+    token = installation_token(config, args.repo)
+    response = api_request(
+        config,
+        "POST",
+        f"/repos/{args.repo}/pulls/{args.pr}/comments/{args.comment_id}/replies",
+        token,
+        {"body": body},
+    )
+    return {
+        "operation": "review-reply",
+        "repository": args.repo,
+        "pull_request": args.pr,
+        "comment_id": response.get("id"),
+        "url": response.get("html_url"),
+    }
+
+
+def resolve_thread(config, args):
+    validate_thread_id(args.thread_id)
+    token = installation_token(config, args.repo)
+    response = api_request(
+        config,
+        "POST",
+        "/graphql",
+        token,
+        {
+            "query": GRAPHQL_RESOLVE_MUTATION,
+            "variables": {"input": {"threadId": args.thread_id}},
+        },
+    )
+    if response.get("errors"):
+        # GraphQL failures arrive as HTTP 200 with an 'errors' array. The
+        # array text is deliberately not echoed: it can quote submitted
+        # variables, and nothing in it is actionable without credentials.
+        raise AppError("GraphQL resolveReviewThread was rejected by GitHub")
+    thread = (
+        (response.get("data") or {}).get("resolveReviewThread") or {}
+    ).get("thread") or {}
+    if thread.get("isResolved") is not True:
+        raise AppError("resolveReviewThread did not report a resolved thread")
+    return {
+        "operation": "resolve-thread",
+        "repository": args.repo,
+        "thread_resolved": True,
+    }
+
+
 def parser():
     root = SanitizedArgumentParser(
         description=__doc__,
-        usage="%(prog)s --config FILE {push-branch,open-pr,comment} ...",
+        usage="%(prog)s --config FILE {push-branch,open-pr,comment,"
+              "review-reply,resolve-thread} ...",
         allow_abbrev=False,
     )
     root.add_argument("--config", required=True)
@@ -564,6 +648,39 @@ def parser():
              "inline comment text on the command line is not accepted",
     )
     note.set_defaults(handler=comment)
+
+    reply = commands.add_parser(
+        "review-reply",
+        usage="%(prog)s --repo REPO --pr NUMBER --comment-id ID "
+              "--body-file FILE",
+        allow_abbrev=False,
+    )
+    reply.add_argument("--repo", required=True)
+    reply.add_argument("--pr", type=int, required=True)
+    reply.add_argument(
+        "--comment-id", required=True,
+        help="numeric id of the review comment being replied to; validated "
+             "against a strict integer pattern before any token is minted",
+    )
+    reply.add_argument(
+        "--body-file", required=True,
+        help="file holding the reply body, or '-' to read stdin; "
+             "inline reply text on the command line is not accepted",
+    )
+    reply.set_defaults(handler=review_reply)
+
+    resolve = commands.add_parser(
+        "resolve-thread",
+        usage="%(prog)s --repo REPO --thread-id NODE_ID",
+        allow_abbrev=False,
+    )
+    resolve.add_argument("--repo", required=True)
+    resolve.add_argument(
+        "--thread-id", required=True,
+        help="GraphQL node id of the review thread (PRRT_...); validated "
+             "against a strict pattern before any token is minted",
+    )
+    resolve.set_defaults(handler=resolve_thread)
     return root
 
 
