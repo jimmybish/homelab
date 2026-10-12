@@ -833,6 +833,233 @@ class WrapperTests(unittest.TestCase):
             "--config", "cfg", "comment", "--repo", "jimmybish/homelab",
             "--pr", "3", "--body-file", body_file,
         ])
+        reply = self.wrapper.parser().parse_args([
+            "--config", "cfg", "review-reply", "--repo", "jimmybish/homelab",
+            "--pr", "3", "--comment-id", "55", "--body-file", body_file,
+        ])
+        self.assertEqual(reply.body_file, body_file)
+        self.assertFalse(any(text in value for value in
+                             [reply.repo, reply.comment_id,
+                              reply.body_file]))
+
+    # ------------------------------------------------------------------
+    # review-reply
+    # ------------------------------------------------------------------
+
+    def test_review_reply_uses_replies_endpoint_and_never_leaks_token(self):
+        requests = []
+
+        def fake_request(config, method, path, bearer, payload=None):
+            requests.append((method, path, bearer, payload))
+            return {"id": 56, "html_url": "https://github.com/example/c/56"}
+
+        args = argparse.Namespace(
+            repo="jimmybish/homelab", pr=9, comment_id="55",
+            body_file=self.write_text("reply.md", "Fixed in the next push."),
+        )
+        with mock.patch.object(
+            self.wrapper, "installation_token", return_value="installation-secret"
+        ), mock.patch.object(
+            self.wrapper, "api_request", side_effect=fake_request
+        ):
+            result = self.wrapper.review_reply(self.config, args)
+        self.assertEqual(requests[0][0:2], (
+            "POST", "/repos/jimmybish/homelab/pulls/9/comments/55/replies"
+        ))
+        # The bearer is the installation token; it must be exactly the
+        # minted token here and must never appear in the returned result.
+        self.assertEqual(requests[0][2], "installation-secret")
+        self.assertEqual(
+            requests[0][3]["body"],
+            "Fixed in the next push.\n\n" + self.wrapper.COMMENT_MARKER,
+        )
+        self.assertNotIn("installation-secret", json.dumps(result))
+        self.assertEqual(result["operation"], "review-reply")
+        self.assertEqual(result["comment_id"], 56)
+
+    def test_review_reply_rejects_malformed_comment_ids_before_token_mint(self):
+        for rejected in (
+            "0", "-5", "abc", "55; rm -rf /", "$(id)", "", "1e3", " 55",
+            "55 ", "9" * 20, "007", "PRRT_x", "55\n",
+        ):
+            with self.subTest(comment_id=rejected):
+                with mock.patch.object(self.wrapper, "installation_token") as mint:
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        result = self.wrapper.main([
+                            "--config", self.write_config(),
+                            "review-reply", "--repo", "jimmybish/homelab",
+                            "--pr", "9", "--comment-id", rejected,
+                            "--body-file", self.write_text("r.md", "text"),
+                        ])
+                    self.assertEqual(result, 1)
+                    mint.assert_not_called()
+                    self.assertIn("comment id", stderr.getvalue())
+
+    def test_review_reply_accepts_large_numeric_comment_id(self):
+        self.assertTrue(self.wrapper.REVIEW_COMMENT_ID_RE.fullmatch("1234567890123456789"))
+        self.assertFalse(self.wrapper.REVIEW_COMMENT_ID_RE.fullmatch("12345678901234567890"))
+
+    def test_review_reply_rejects_inline_body_without_echoing_it(self):
+        hostile = "SECRET-REPLY-DRAFT-$(id)-`whoami`"
+        argv = [
+            "--config", self.write_config(),
+            "review-reply", "--repo", "jimmybish/homelab",
+            "--pr", "9", "--comment-id", "55",
+            "--body-file", self.write_text("r.md", "safe"),
+            "--body", hostile,
+        ]
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), \
+                contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as caught:
+                self.wrapper.main(argv)
+        self.assertEqual(caught.exception.code, 2)
+        self.assertNotIn(hostile, stdout.getvalue() + stderr.getvalue())
+        self.assertIn("invalid command line", stderr.getvalue())
+
+    def test_review_reply_http_error_never_contains_token(self):
+        def boom(config, method, path, bearer, payload=None):
+            raise self.wrapper.AppError(
+                f"GitHub API returned HTTP 404 for {method} {path}"
+            )
+
+        args = argparse.Namespace(
+            repo="jimmybish/homelab", pr=9, comment_id="55",
+            body_file=self.write_text("r.md", "text"),
+        )
+        with mock.patch.object(
+            self.wrapper, "installation_token", return_value="installation-secret"
+        ), mock.patch.object(self.wrapper, "api_request", side_effect=boom):
+            with self.assertRaises(self.wrapper.AppError) as caught:
+                self.wrapper.review_reply(self.config, args)
+        self.assertNotIn("installation-secret", str(caught.exception))
+
+    # ------------------------------------------------------------------
+    # resolve-thread
+    # ------------------------------------------------------------------
+
+    def test_resolve_thread_uses_graphql_and_never_leaks_token(self):
+        requests = []
+
+        def fake_request(config, method, path, bearer, payload=None):
+            requests.append((method, path, bearer, payload))
+            return {
+                "data": {
+                    "resolveReviewThread": {"thread": {"isResolved": True}}
+                }
+            }
+
+        args = argparse.Namespace(
+            repo="jimmybish/homelab", thread_id="PRRT_abc-123_XY=="
+        )
+        with mock.patch.object(
+            self.wrapper, "installation_token", return_value="installation-secret"
+        ), mock.patch.object(
+            self.wrapper, "api_request", side_effect=fake_request
+        ):
+            result = self.wrapper.resolve_thread(self.config, args)
+        self.assertEqual(requests[0][0:2], ("POST", "/graphql"))
+        self.assertEqual(requests[0][2], "installation-secret")
+        self.assertEqual(
+            requests[0][3],
+            {
+                "query": self.wrapper.GRAPHQL_RESOLVE_MUTATION,
+                "variables": {"input": {"threadId": "PRRT_abc-123_XY=="}},
+            },
+        )
+        # The node id travels only as JSON-encoded variable data, never
+        # interpolated into the fixed mutation text.
+        self.assertNotIn("PRRT_", requests[0][3]["query"])
+        self.assertNotIn("installation-secret", json.dumps(result))
+        self.assertEqual(result["operation"], "resolve-thread")
+        self.assertTrue(result["thread_resolved"])
+
+    def test_resolve_thread_rejects_malformed_thread_ids_before_token_mint(self):
+        for rejected in (
+            "", "prtl_abc", "PRT_abc", "PRRT_", "PRRT_ abc",
+            "PRRT_abc\" }", "PRRT_abc'--", "PRRT_ä", "x" * 200,
+            "PRRT_" + "a" * 129, "I_abc123", "PRRT_abc==extra",
+        ):
+            with self.subTest(thread_id=rejected):
+                with mock.patch.object(self.wrapper, "installation_token") as mint:
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        result = self.wrapper.main([
+                            "--config", self.write_config(),
+                            "resolve-thread", "--repo", "jimmybish/homelab",
+                            "--thread-id", rejected,
+                        ])
+                    self.assertEqual(result, 1)
+                    mint.assert_not_called()
+                    self.assertIn("thread id", stderr.getvalue())
+        for accepted in ("PRRT_Kv0", "PRRT_abc-123_XY==", "PRRT_abc=",
+                         "PRRT_" + "a" * 128):
+            self.assertTrue(
+                self.wrapper.REVIEW_THREAD_ID_RE.fullmatch(accepted), accepted
+            )
+
+    def test_resolve_thread_graphql_errors_are_generic(self):
+        def fake_request(config, method, path, bearer, payload=None):
+            return {
+                "errors": [
+                    {"message": "Could not resolve node PRRT_secret_thing"}
+                ]
+            }
+
+        args = argparse.Namespace(
+            repo="jimmybish/homelab", thread_id="PRRT_secret_thing"
+        )
+        with mock.patch.object(
+            self.wrapper, "installation_token", return_value="installation-secret"
+        ), mock.patch.object(
+            self.wrapper, "api_request", side_effect=fake_request
+        ):
+            with self.assertRaises(self.wrapper.AppError) as caught:
+                self.wrapper.resolve_thread(self.config, args)
+        message = str(caught.exception)
+        self.assertNotIn("PRRT_secret_thing", message)
+        self.assertNotIn("installation-secret", message)
+        self.assertIn("rejected by GitHub", message)
+
+    def test_resolve_thread_requires_resolved_confirmation(self):
+        # A mutation that answers without isResolved true is treated as a
+        # failure rather than a silent success.
+        for payload in (
+            {"data": {"resolveReviewThread": {"thread": {"isResolved": False}}}},
+            {"data": {}},
+            {},
+        ):
+            with self.subTest(payload=payload):
+                with mock.patch.object(
+                    self.wrapper, "installation_token", return_value="secret"
+                ), mock.patch.object(
+                    self.wrapper, "api_request", return_value=payload
+                ):
+                    with self.assertRaisesRegex(
+                        self.wrapper.AppError, "did not report a resolved thread"
+                    ):
+                        self.wrapper.resolve_thread(
+                            self.config,
+                            argparse.Namespace(
+                                repo="jimmybish/homelab",
+                                thread_id="PRRT_abc",
+                            ),
+                        )
+
+    def test_disallowed_repo_rejected_for_new_operations(self):
+        for argv in (
+            ["--config", self.write_config(), "review-reply",
+             "--repo", "someone/else", "--pr", "1", "--comment-id", "5",
+             "--body-file", self.write_text("r.md", "t")],
+            ["--config", self.write_config(), "resolve-thread",
+             "--repo", "someone/else", "--thread-id", "PRRT_abc"],
+        ):
+            with mock.patch.object(self.wrapper, "installation_token") as mint:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    result = self.wrapper.main(argv)
+            self.assertEqual(result, 1)
+            mint.assert_not_called()
 
     def write_text(self, name, content):
         path = pathlib.Path(self.tempdir.name) / name
