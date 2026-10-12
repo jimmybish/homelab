@@ -784,6 +784,18 @@
   no_log: true
   changed_when: false
 
+- name: Deploy GitHub App private key for GitHub MCP native auth
+  ansible.builtin.copy:
+    content: "{{ hermes_virtuajimmy_github_app_private_key | trim }}{{ '\n' }}"
+    dest: "{{ hermes_mcp_github_app_private_key_file }}"
+    owner: "{{ hermes_user }}"
+    group: "{{ hermes_user }}"
+    mode: '0600'
+  no_log: true
+  diff: false
+  when: hermes_virtuajimmy_github_app_enabled | bool
+  notify: Restart Hermes VirtuaJimmy gateway
+
 - name: Deploy GitHub MCP review-write policy relay
   ansible.builtin.template:
     src: hermes-github-mcp-relay.j2
@@ -812,7 +824,7 @@
     'cases passed' not in hermes_mcp_github_relay_selfcheck.stdout
   when: hermes_virtuajimmy_github_app_enabled | bool
 
-- name: Deploy GitHub MCP token launcher
+- name: Deploy GitHub MCP native app-auth launcher
   ansible.builtin.template:
     src: hermes-github-mcp-launch.j2
     dest: "{{ hermes_mcp_github_launcher_file }}"
@@ -824,7 +836,7 @@
   when: hermes_virtuajimmy_github_app_enabled | bool
   notify: Restart Hermes VirtuaJimmy gateway
 
-- name: Verify GitHub MCP launcher token transport
+- name: Verify GitHub MCP launcher native auth transport
   ansible.builtin.command:
     argv:
       - "{{ hermes_mcp_github_launcher_file }}"
@@ -1199,7 +1211,7 @@
         '--lockdown-mode' in hermes_virtuajimmy_config.mcp_servers.github.args and
         hermes_virtuajimmy_config.mcp_servers.github.tools.resources == false and
         hermes_virtuajimmy_config.mcp_servers.github.tools.prompts == false and
-        hermes_virtuajimmy_config.mcp_servers.github.max_lifetime_seconds | int <= 3540 and
+        'max_lifetime_seconds' not in hermes_virtuajimmy_config.mcp_servers.github and
         'env' not in hermes_virtuajimmy_config.mcp_servers.github and
         hermes_virtuajimmy_config.mcp_servers.github.enabled)
       - >-
@@ -1247,13 +1259,22 @@
 - name: Inspect VirtuaJimmy private files
   ansible.builtin.stat:
     path: "{{ item }}"
-  loop:
-    - "{{ hermes_virtuajimmy_config_file }}"
-    - "{{ hermes_virtuajimmy_soul_file }}"
-    - "{{ hermes_virtuajimmy_env_file }}"
-    - "{{ hermes_virtuajimmy_ssh_private_key_file }}"
-    - "{{ hermes_virtuajimmy_grafana_token_file }}"
-    - "{{ hermes_virtuajimmy_pii_skill_file }}"
+  loop: >-
+    {{
+      (
+        [
+          hermes_virtuajimmy_config_file,
+          hermes_virtuajimmy_soul_file,
+          hermes_virtuajimmy_env_file,
+          hermes_virtuajimmy_ssh_private_key_file,
+          hermes_virtuajimmy_grafana_token_file,
+          hermes_virtuajimmy_pii_skill_file,
+        ]
+        +
+        ([hermes_mcp_github_app_private_key_file]
+         if hermes_virtuajimmy_github_app_enabled | bool else [])
+      )
+    }}
   register: hermes_virtuajimmy_private_files
   no_log: true
 

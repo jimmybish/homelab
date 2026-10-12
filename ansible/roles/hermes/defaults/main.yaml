@@ -92,12 +92,18 @@ hermes_virtuajimmy_local_documents:
 hermes_mcp_grafana_install_root: "{{ hermes_user_home }}/.local/lib/mcp-grafana"
 hermes_mcp_grafana_bin: "{{ hermes_bin_dir }}/mcp-grafana"
 # GitHub MCP server for the VirtuaJimmy profile. The gateway launches it via
-# the rendered launcher (see hermes_mcp_github_launcher_file), which mints a
-# fresh App installation token from mgmt and exports it as
-# GITHUB_PERSONAL_ACCESS_TOKEN before exec'ing the pinned binary.
+# the rendered launcher (see hermes_mcp_github_launcher_file), which exports
+# the NATIVE GitHub App auth variables (GITHUB_APP_ID,
+# GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY_PATH) before exec'ing
+# the pinned binary. The pinned server signs its own JWTs and refreshes
+# installation tokens itself, so there is no launcher-minted token and no
+# expiry-recycle timer. The vault-managed App PEM is deployed to this
+# host, owner-only, at the path below; the key contents never enter the
+# launcher, any env value, or argv.
 hermes_mcp_github_install_root: "{{ hermes_user_home }}/.local/lib/github-mcp-server"
 hermes_mcp_github_bin: "{{ hermes_bin_dir }}/github-mcp-server"
 hermes_mcp_github_launcher_file: "{{ hermes_bin_dir }}/hermes-github-mcp-launch"
+hermes_mcp_github_app_private_key_file: "{{ hermes_secrets_dir }}/virtuajimmy-github-app.pem"
 # The stdio relay enforces the write-method policy for the one composite
 # review-write tool that upstream cannot split (owner-authorized resolve /
 # unresolve only). See templates/hermes-github-mcp-relay.j2.
@@ -151,10 +157,6 @@ hermes_mcp_github_allowed_tools_csv: >-
 hermes_mcp_github_allowed_tools_json: >-
   {{ (hermes_mcp_github_read_tools + hermes_mcp_github_write_tools)
   | sort | to_json }}
-# Recycle the stdio session well before the minted installation token can
-# expire (~1h), so lazy reconnect always respawns the launcher with a fresh
-# mint. Documented Hermes stdio lifecycle key.
-hermes_mcp_github_max_lifetime_seconds: 3000
 hermes_plexibot_mcp_tracearr_url: "{{ internal_mcp_tracearr_url }}"
 hermes_plexibot_mcp_sonarr_url: "{{ internal_mcp_sonarr_url }}"
 hermes_plexibot_mcp_radarr_url: "{{ internal_mcp_radarr_url }}"

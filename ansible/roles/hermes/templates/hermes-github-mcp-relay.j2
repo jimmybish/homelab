@@ -25,8 +25,10 @@ Nothing else is inspected, rewritten, or logged. No credential material is
 read or emitted. The relay never terminates itself while frames flow; it
 exits when either pipe closes or the child dies.
 
-The token is minted upstream (hermes-github-mcp-launch) and lives only in
-the inherited environment; this relay does not touch it.
+The GitHub App auth environment (ID, installation ID, and the private-key
+PATH) is exported upstream by hermes-github-mcp-launch; the server binary
+mints and refreshes its own installation tokens. This relay does not touch
+any of it.
 """
 import json
 import os

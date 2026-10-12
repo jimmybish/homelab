@@ -2,34 +2,34 @@
 # {{ ansible_managed }}
 # Launcher for the pinned GitHub MCP server used by the Hermes gateway.
 #
-# The gateway launches this instead of the binary directly because the
-# credential is a GitHub App installation token that expires roughly one
-# hour after it is minted. Every launch mints a FRESH token by invoking the
-# VirtuaJimmy GitHub App wrapper module over SSH on
-# {{ hermes_virtuajimmy_github_app_execution_host }} as
-# {{ hermes_virtuajimmy_github_app_execution_user }}. The App private key
-# never leaves that host: only the short-lived bearer token crosses back,
-# it lives solely in this process environment, and it is never echoed,
-# logged, or written to disk.
+# The gateway launches this instead of the binary directly so the GitHub
+# App auth environment lives in exactly one managed file. The pinned
+# github-mcp-server ({{ hermes_mcp_github_version }}) supports NATIVE GitHub
+# App authentication in stdio mode: it signs short-lived JWTs with the App
+# private key and mints and refreshes installation access tokens itself
+# (upstream docs/github-app-auth.md at the pinned tag). This launcher
+# therefore exports only the three auth variables the server reads:
+# GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and
+# GITHUB_APP_PRIVATE_KEY_PATH.
 #
-# The token is exported, then this script execs hermes-github-mcp-relay,
-# which runs the pinned binary as a child and filters JSON-RPC frames in
-# both directions. That relay is the technical capability boundary; the
-# gateway config additionally restricts registration with --tools,
-# --toolsets "", and the Hermes-side tools.include filter.
+# The private key is a vault-managed PEM deployed to THIS host at
+# {{ hermes_mcp_github_app_private_key_file }} with owner-only mode. Its
+# contents never enter this script, any environment variable value, argv,
+# or any log. No personal access token is exported: upstream treats a token
+# and App auth as mutually exclusive, and the previous launcher-minted
+# installation-token-as-PAT transport (with its ~1h staleness window and
+# stdio recycle) is retired.
 #
-# Transport flags mirror the role's strict-SSH verification tasks exactly:
-# BatchMode, StrictHostKeyChecking against the pinned known_hosts file, and
-# IdentitiesOnly with the profile's own key.
+# The launcher is kept (instead of putting the env in the gateway config)
+# so the key path appears in one 0750 managed file and the profile config
+# keeps no credential-adjacent env block at all.
 #
-# Token expiry is handled WITHOUT any manual step: the gateway config sets
-# max_lifetime_seconds ({{ hermes_mcp_github_max_lifetime_seconds }}s), so
-# Hermes recycles this stdio session well before the ~1h token dies and the
-# lazy respawn re-runs this launcher with a fresh mint. If GitHub tools
-# still return 401/BAD_CREDENTIALS, send /reload-mcp in-session (with the
-# approval confirmation) to reconnect every MCP server; a gateway deploy
-# restart is the fallback. Do NOT try to restart services from the terminal
-# and never mint or paste a token by hand.
+# After exporting the auth environment this script execs
+# hermes-github-mcp-relay, which runs the pinned binary as a child and
+# filters JSON-RPC frames in both directions. That relay is the technical
+# capability boundary; the gateway config additionally restricts
+# registration with --tools, --toolsets "", and the Hermes-side
+# tools.include filter.
 #
 # All arguments given to this launcher are forwarded verbatim to the relay
 # and then to the pinned binary, so the gateway configuration owns the MCP
@@ -40,51 +40,13 @@ set -o pipefail
 export HOME="{{ hermes_user_home }}"
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-token="$(
-  /usr/bin/ssh \
-    -o BatchMode=yes \
-    -o StrictHostKeyChecking=yes \
-    -o UserKnownHostsFile={{ hermes_virtuajimmy_known_hosts_file | quote }} \
-    -o IdentitiesOnly=yes \
-    -o ConnectTimeout=10 \
-    -i {{ hermes_virtuajimmy_ssh_private_key_file | quote }} \
-    {{ hermes_virtuajimmy_ssh_user | quote }}@{{ hermes_virtuajimmy_ssh_host | quote }} \
-    /usr/bin/python3 - <<'HERMES_GITHUB_MCP_MINT'
-import importlib.util
+export GITHUB_APP_ID={{ hermes_virtuajimmy_github_app_id | string | to_json }}
+export GITHUB_APP_INSTALLATION_ID={{ hermes_virtuajimmy_github_app_installation_id | string | to_json }}
+export GITHUB_APP_PRIVATE_KEY_PATH={{ hermes_mcp_github_app_private_key_file | to_json }}
 
-# Import the deployed wrapper module and reuse its own key handling and
-# token mint. Nothing here duplicates JWT signing or key parsing, and no
-# secret material is present in this file.
-spec = importlib.util.spec_from_file_location(
-    "virtuajimmy_github_app_wrapper",
-    {{ hermes_virtuajimmy_github_app_wrapper_file | to_json }},
-)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-config = module.load_config(
-    {{ hermes_virtuajimmy_github_app_config_file | to_json }}
-)
-print(
-    module.installation_token(
-        config,
-        {{ hermes_virtuajimmy_github_app_allowed_repositories | first | to_json }},
-    )
-)
-HERMES_GITHUB_MCP_MINT
-)"
-
-token="$(printf '%s' "$token" | tr -d '[:space:]')"
-token_length="$(printf '%s' "$token" | wc -c)"
-if [[ -z "$token" || "$token_length" -lt 32 ]]; then
-  echo "hermes-github-mcp-launch: mint returned no usable token" >&2
+if [[ ! -r "$GITHUB_APP_PRIVATE_KEY_PATH" ]]; then
+  echo "hermes-github-mcp-launch: App private key file is missing or unreadable" >&2
   exit 1
 fi
-if [[ "$token" != gh[su]_* ]]; then
-  echo "hermes-github-mcp-launch: mint returned an unexpected token shape" >&2
-  exit 1
-fi
-
-export GITHUB_PERSONAL_ACCESS_TOKEN="$token"
-unset token
 
 exec {{ hermes_mcp_github_relay_file | quote }} "$@"
