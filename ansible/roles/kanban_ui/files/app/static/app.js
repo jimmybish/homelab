@@ -196,7 +196,7 @@ function renderInner() {
   const cols = S.data.columns || [];
   const byName = Object.fromEntries(cols.map(c => [c.name, c]));
   const names = cols.map(c => c.name).filter(n => COLS.includes(n) || n === "archived");
-  if (!S.mobileCol && names.length) {
+  if (names.length && !names.includes(S.mobileCol)) { // unset, or column no longer present (e.g. Archived hidden)
     const first = names.find(n => visibleTasks((byName[n] || {}).tasks || []).length) || names[0];
     S.mobileCol = first;
   }
