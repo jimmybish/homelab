@@ -9,6 +9,11 @@
     state: restarted
 
 - name: Restart Hermes gateway
+  # WARNING: this unit hosts the embedded kanban dispatcher; restarting it
+  # kills the dispatcher that spawned any running deploy worker. The unit is
+  # managed with KillMode=process so in-flight workers survive the restart
+  # (see hermes-gateway.service.j2). Do not weaken that without moving the
+  # dispatcher out of this cgroup.
   ansible.builtin.systemd_service:
     name: "{{ hermes_gateway_service_name }}"
     state: restarted

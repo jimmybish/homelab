@@ -10,6 +10,17 @@ EnvironmentFile={{ hermes_env_file }}
 ExecStart={{ hermes_bin }} gateway
 Restart=on-failure
 RestartSec=5
+# The embedded kanban dispatcher spawns worker processes as children of this
+# unit (incident 2026-10-13: a gateway restart reaped every in-flight kanban
+# worker, including the worker running the deploy itself). KillMode=process
+# limits stop/restart to the main process so in-flight workers survive a
+# gateway restart; the restarted dispatcher reconciles claims on its next
+# tick. Do NOT remove without relocating the dispatcher out of this cgroup.
+# With this directive in effect, restarting the unit (including the deploy
+# handler "Restart Hermes gateway") is the tested supported path; workers are
+# only reaped if KillMode regresses to control-group, which the deploy
+# playbook asserts against before completing.
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target

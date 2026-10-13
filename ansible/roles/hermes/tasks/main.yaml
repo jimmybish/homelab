@@ -1445,8 +1445,15 @@
       - hermes_gateway_service_status.status.UnitFileState == 'enabled'
       - hermes_gateway_service_status.status.FragmentPath == hermes_gateway_service_unit_path
       - hermes_gateway_service_status.status.MainPID | int > 0
-    fail_msg: "Hermes gateway is not active and enabled from the managed unit."
-    success_msg: "Hermes gateway is active and enabled at boot."
+      # Kanban isolation guard: the embedded kanban dispatcher spawns worker
+      # processes inside this unit's cgroup. Any KillMode other than 'process'
+      # means a gateway restart reaps every in-flight kanban worker (incident
+      # 2026-10-13, t_b4ed43b4). Fail loudly rather than silently regress.
+      - hermes_gateway_service_status.status.KillMode == 'process'
+    fail_msg: >-
+      Hermes gateway is not active and enabled from the managed unit, or its
+      KillMode is not 'process' (kanban workers would be reaped on restart).
+    success_msg: "Hermes gateway is active, enabled at boot, and restart-safe for kanban workers."
 
 - name: Assert Hermes Plexibot gateway service state
   ansible.builtin.assert:
