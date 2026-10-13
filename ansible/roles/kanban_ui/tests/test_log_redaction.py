@@ -154,14 +154,23 @@ class TestRedactCredentials(unittest.TestCase):
         if ilu.find_spec("uvicorn") is None:
             self.skipTest("uvicorn not importable on this control node")
 
+        spec["use_colors"] = False
         fmt = server.RedactingAccessFormatter(**spec)
+        # Round-1 fix (review t_c93e7724): AccessFormatter.formatMessage in
+        # the pinned uvicorn 0.41.0 UNCONDITIONALLY unpacks the 5-tuple
+        # (client_addr, method, full_path, http_version, status_code) from
+        # record.args (uvicorn/logging.py L99-105); an empty-args record
+        # raised ValueError instead of exercising the formatter. Build the
+        # record in the real shape the h11 protocol emits, hostile path in
+        # the full_path slot.
         record = logging.LogRecord(
             "uvicorn.access", logging.INFO, __file__, 0,
-            "WebSocket /api/kanban/events", (), None,
+            '%s - "%s %s HTTP/%s" %s',
+            ("192.0.2.1:1", "GET",
+             "/api/kanban/events" + QKEY + SECRET + "&board=homelab",
+             "1.1", 101),
+            None,
         )
-        record.client_addr = "192.0.2.1:1"
-        record.request_line = hostile_line()
-        record.status_code = 101
         out = fmt.format(record)
         self.assertNotIn(SECRET, out)
         self.assertIn("[redacted]", out)
@@ -197,6 +206,73 @@ class TestRedactCredentials(unittest.TestCase):
         src = SERVER.read_text()
         self.assertIn("log_config=access_log_config(secret)", src)
         self.assertNotIn("install_access_log_redaction", src)
+
+
+class TestAccessRecordTuplePreservation(unittest.TestCase):
+    """PR#13 review comment 4244239564: for uvicorn.access records the
+    handler filter must preserve the 5-tuple record.args (AccessFormatter
+    in the pinned uvicorn 0.41.0 unpacks it unconditionally) and redact
+    the string fields IN PLACE; only default-formatter records collapse.
+    """
+
+    def _access_record(self):
+        # The exact call shape uvicorn's h11 protocol makes per request.
+        return logging.LogRecord(
+            "uvicorn.access", logging.INFO, __file__, 0,
+            '%s - "%s %s HTTP/%s" %s',
+            ("192.0.2.10:59238", "GET",
+             "/api/kanban/events" + QKEY + SECRET + "&board=homelab",
+             "1.1", 403),
+            None,
+        )
+
+    def test_filter_preserves_tuple_and_scrubs_path(self):
+        server.configure_ui_secret(SECRET)
+        filt = server.RedactingLogFilter()
+        rec = self._access_record()
+        self.assertTrue(filt.filter(rec))
+        self.assertIsInstance(rec.args, tuple)
+        self.assertEqual(len(rec.args), 5)
+        client_addr, method, full_path, http_version, status = rec.args  # AccessFormatter's unpack
+        self.assertEqual(method, "GET")
+        self.assertEqual(http_version, "1.1")
+        self.assertEqual(status, 403)
+        self.assertNotIn(SECRET, full_path)
+        self.assertIn("board=homelab", full_path)
+        line = rec.getMessage()
+        self.assertNotIn(SECRET, line)
+        self.assertIn("[redacted]", line)
+
+    def test_access_formatter_emits_redacted_line_without_exception(self):
+        import importlib.util as ilu
+        if ilu.find_spec("uvicorn") is None:
+            self.skipTest("uvicorn not importable on this control node")
+        server.configure_ui_secret(SECRET)
+        cfg = server.access_log_config(SECRET)
+        spec = dict(cfg["formatters"]["access"])
+        spec.pop("()")
+        spec["use_colors"] = False
+        fmt = server.RedactingAccessFormatter(**spec)
+        rec = self._access_record()
+        server.RedactingLogFilter().filter(rec)
+        out = fmt.format(rec)  # raised TypeError pre-fix
+        self.assertNotIn(SECRET, out)
+        self.assertIn("[redacted]", out)
+        self.assertIn("board=homelab", out)
+
+    def test_default_formatter_record_still_collapses(self):
+        # uvicorn.error-style record whose FORMAT string itself carries
+        # the secret: tuple scrubbing cannot help, so the collapse path
+        # (msg replaced, args cleared) must still run for these.
+        server.configure_ui_secret(SECRET)
+        rec = logging.LogRecord(
+            "uvicorn.error", logging.INFO, __file__, 0,
+            hostile_line("INFO: "), None, None,
+        )
+        self.assertTrue(server.RedactingLogFilter().filter(rec))
+        self.assertIsNone(rec.args)
+        self.assertNotIn(SECRET, rec.getMessage())
+        self.assertIn("[redacted]", rec.getMessage())
 
 
 class TestSessionCookieSecureDefault(unittest.TestCase):

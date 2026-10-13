@@ -271,6 +271,33 @@ class RedactingLogFilter:
                 return True
             red = redact_credentials(msg, _UI_SECRET)
             if red != msg:
+                # PR#13 review comment 4244239564: never blank record.args
+                # wholesale -- uvicorn 0.41.0's AccessFormatter.formatMessage
+                # unconditionally unpacks the 5-tuple (client_addr, method,
+                # full_path, http_version, status_code), and the
+                # credential-bearing access records are EXACTLY the ones
+                # this filter exists to scrub; clearing args turned each
+                # such request into a logging exception, not a redaction.
+                # Redact the string fields inside the tuple (arity kept);
+                # only records whose format string itself carries the
+                # material (DefaultFormatter-style uvicorn.error records)
+                # collapse to the single-message form.
+                args = record.args
+                if isinstance(args, tuple) and args:
+                    scrubbed = tuple(
+                        redact_credentials(a, _UI_SECRET)
+                        if isinstance(a, str) else a
+                        for a in args
+                    )
+                    record.args = scrubbed
+                    try:
+                        new_msg = record.getMessage()
+                    except Exception:
+                        record.args = args
+                    else:
+                        if redact_credentials(new_msg, _UI_SECRET) == new_msg:
+                            return True
+                        record.args = args
                 record.msg = red
                 record.args = None
             return True
