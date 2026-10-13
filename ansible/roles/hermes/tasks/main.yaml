@@ -796,6 +796,33 @@
   when: hermes_virtuajimmy_github_app_enabled | bool
   notify: Restart Hermes VirtuaJimmy gateway
 
+- name: Remove GitHub MCP native app-auth private key when disabled
+  ansible.builtin.file:
+    path: "{{ hermes_mcp_github_app_private_key_file }}"
+    state: absent
+  when: not (hermes_virtuajimmy_github_app_enabled | bool)
+  notify: Restart Hermes VirtuaJimmy gateway
+
+- name: Inspect GitHub MCP native app-auth private key when disabled
+  ansible.builtin.stat:
+    path: "{{ hermes_mcp_github_app_private_key_file }}"
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: hermes_mcp_github_app_key_disabled_stat
+  when: not (hermes_virtuajimmy_github_app_enabled | bool)
+  changed_when: false
+
+- name: Assert GitHub MCP native app-auth private key absent when disabled
+  ansible.builtin.assert:
+    that:
+      - not (hermes_mcp_github_app_key_disabled_stat.stat.exists | default(false))
+    fail_msg: >-
+      The GitHub App private key for GitHub MCP native auth is still present
+      although the integration is disabled.
+  when: not (hermes_virtuajimmy_github_app_enabled | bool)
+  changed_when: false
+
 - name: Deploy GitHub MCP review-write policy relay
   ansible.builtin.template:
     src: hermes-github-mcp-relay.j2
@@ -1208,7 +1235,8 @@
         ].split(',') | sort == (hermes_mcp_github_read_tools +
         hermes_mcp_github_write_tools) | sort and
         '--read-only' not in hermes_virtuajimmy_config.mcp_servers.github.args and
-        '--lockdown-mode' in hermes_virtuajimmy_config.mcp_servers.github.args and
+        (('--lockdown-mode' in hermes_virtuajimmy_config.mcp_servers.github.args) ==
+        (hermes_mcp_github_lockdown_mode | bool)) and
         hermes_virtuajimmy_config.mcp_servers.github.tools.resources == false and
         hermes_virtuajimmy_config.mcp_servers.github.tools.prompts == false and
         'max_lifetime_seconds' not in hermes_virtuajimmy_config.mcp_servers.github and
