@@ -1020,12 +1020,22 @@
       - hermes_virtuajimmy_config.platforms.webhook.enabled
       - hermes_virtuajimmy_config.platforms.webhook.extra.host == hermes_virtuajimmy_webhook_bind_address
       - hermes_virtuajimmy_config.platforms.webhook.extra.port == hermes_virtuajimmy_webhook_port
-      - hermes_virtuajimmy_config.platforms.webhook.extra.routes.github.events == ['pull_request', 'issue_comment']
+      - >-
+        hermes_virtuajimmy_config.platforms.webhook.extra.routes.github.events
+        == ['pull_request', 'issue_comment', 'pull_request_review',
+        'pull_request_review_comment']
       - hermes_virtuajimmy_config.platforms.webhook.extra.routes.github.deliver == 'log'
       - hermes_virtuajimmy_config.platforms.webhook.extra.routes.github.secret is not defined
       - hermes_virtuajimmy_config.toolsets == ['kanban']
-      - hermes_virtuajimmy_config.platform_toolsets.keys() | list | sort == ['discord']
+      - hermes_virtuajimmy_config.platform_toolsets.keys() | list | sort == ['discord', 'webhook']
       - hermes_virtuajimmy_config.platform_toolsets.discord == ['hermes-discord', 'kanban']
+      - hermes_virtuajimmy_config.platform_toolsets.webhook == ['kanban', 'web', 'no_mcp']
+      - "'terminal' not in hermes_virtuajimmy_config.platform_toolsets.webhook"
+      - "'no_mcp' in hermes_virtuajimmy_config.platform_toolsets.webhook"
+      - "'sonarr' not in hermes_virtuajimmy_config.platform_toolsets.webhook"
+      - "'radarr' not in hermes_virtuajimmy_config.platform_toolsets.webhook"
+      - "'tracearr' not in hermes_virtuajimmy_config.platform_toolsets.webhook"
+      - "hermes_virtuajimmy_config.platform_toolsets.webhook | intersect(hermes_virtuajimmy_config.mcp_servers.keys() | list) == []"
       - "'kanban' not in hermes_virtuajimmy_config.agent.disabled_toolsets"
       - hermes_virtuajimmy_config.mcp_servers.keys() | list | sort == ['context7', 'grafana', 'local_tools', 'radarr', 'sonarr', 'tracearr']
       - hermes_virtuajimmy_config.mcp_servers.grafana.args == ['--enabled-tools', 'datasource,prometheus,loki', '--disable-write', '--disable-proxied']
