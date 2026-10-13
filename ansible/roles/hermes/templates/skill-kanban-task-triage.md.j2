@@ -103,6 +103,10 @@ this triage card (~15-20 turns, files children, then completes)
                             --body-file only, never inline text) with
                             merge-order + branch-protection notes,
                             then block awaiting Jimmy's merge
+                            (PR-owner card ONLY: a fix/slice card that
+                            self-delivers onto an EXISTING PR completes
+                            after push+reply+resolve, never blocks on
+                            the merge webhook)
 ```
 
 Every child body must contain, and nothing more:
@@ -135,7 +139,15 @@ Every child body must contain, and nothing more:
   body must note merge-order dependencies (changed-file overlap with other
   open PRs) AND Jimmy's optional branch-protection follow-up (his own console
   action, never via API), then `kanban_block` awaiting Jimmy's merge. Dev
-  cards never commit or push.
+  cards never commit or push. The merge-webhook block belongs ONLY to the
+  PR-owning card that ran `open-pr`. A fix/slice card that self-delivers onto
+  an EXISTING PR (commit + `push-branch` advancing the head + `review-reply` +
+  `resolve-thread`) `kanban_complete`s right after its changelog entry — it
+  never blocks awaiting merge (the PR merges only after the whole chain, so
+  that webhook can't fire for it alone; reference failure `t_505b63ef`). A fix
+  card that IS the sole owner of an unmerged PR may block, but with kind
+  `needs_input`, never `dependency` (dependency blocks on all-parents-done
+  cards get re-promoted by `recompute_ready` and respawn-storm).
 - Pointers, not payloads: vault var names, playbook paths, doc paths — not
   file contents (children read the disk themselves; copying contents into
   briefs goes stale).
