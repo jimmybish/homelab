@@ -1,0 +1,98 @@
+---
+name: kanban-ui
+
+services:
+  kanban-ui:
+    image: local/kanban-ui:{{ kanban_ui_version }}
+    build:
+      context: "{{ kanban_ui_folder }}/app"
+      dockerfile: Dockerfile
+    container_name: kanban-ui
+    labels:
+      # PR#13 review finding (comment 4244239739): pin the mounted Hermes
+      # checkout revision into the Compose model. The container mounts the
+      # checkout read-only and server.py imports plugin_api.py once at
+      # startup, so without this a Hermes upgrade changes neither the image
+      # nor this file and the old router stays resident in memory. With it,
+      # a revision change re-renders this compose file, the template task
+      # reports changed, and its Restart Kanban UI notification re-imports
+      # the mounted modules (the build task additionally rebuilds). The
+      # label is deploy-time metadata only (docker inspect shows what code
+      # generation the container last started against); the app never reads
+      # it. The 'unknown' fallback (StrictUndefined-safe chain) can never
+      # appear in a real run: the rev-parse task is fatal on failure and
+      # runs even in check mode.
+      kanban-ui.hermes-checkout-revision: "{{ (kanban_ui_checkout_revision | default({})).stdout | default('unknown') | trim }}"
+    # Runs as the numeric uid/gid that owns the board files (resolved from
+    # the inventory host at deploy time; see vars notes).
+    user: "{{ kanban_ui_run_uid }}:{{ kanban_ui_run_gid }}"
+    environment:
+      # HOME/HERMES_HOME deliberately point at a nonexistent path OUTSIDE
+      # the mounted tree: config/profile lookups degrade to defaults, and
+      # any stray git/gitconfig writes land nowhere persistent. The board
+      # state itself is anchored via HERMES_KANBAN_HOME below.
+      HOME: "/tmp"
+      HERMES_HOME: "/tmp/kanban-ui-nohome"
+      HERMES_KANBAN_HOME: "{{ kanban_ui_hermes_home }}"
+      KANBAN_UI_HERMES_REPO: "{{ kanban_ui_hermes_repo }}"
+      KANBAN_UI_TOKEN_FILE: "/app/token.txt"
+      KANBAN_UI_PROXY_MARKER_FILE: "/app/proxy_marker.txt"
+      # Round-5 finding 1: /login additionally requires the REAL TCP
+      # peer to be the SWAG proxy host (resolved from inventory facts,
+      # same value the UFW source rule uses). No plaintext dev default:
+      # the key being present is what activates the peer check.
+      KANBAN_UI_TRUSTED_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
+      KANBAN_UI_DEFAULT_BOARD: "{{ kanban_ui_default_board }}"
+      # PR-review finding (comment 4244239544): the /events WebSocket only
+      # accepts upgrades whose Origin header equals this exact value.
+      # SameSite=strict is site-scoped, so a compromised sibling subdomain
+      # of the internal domain gets the session cookie on its own WS
+      # upgrade; the Origin check pins the stream to the Kanban origin.
+      # Rendered from the same HTTPS base the UI is served from, so an
+      # operator's real tab always matches. server.py denies ALL upgrades
+      # when this is unset (deny-by-default; never relax it to a wildcard).
+      KANBAN_UI_WS_ALLOWED_ORIGIN: "{{ kanban_ui_url_base }}"
+      # NOTE: KANBAN_UI_COOKIE_INSECURE is deliberately ABSENT. The
+      # session cookie is Secure by default (server.py); this template
+      # must never opt out, and no plaintext credential/session fallback
+      # is advertised anywhere in the deployment.
+    ports:
+      # DNAT pinned to the host's primary IPv4: published ports bypass UFW
+      # via the Docker forwarding path, and 0.0.0.0/8 must stay unreachable.
+      - "{{ kanban_ui_bind_ip }}:{{ kanban_ui_port }}:{{ kanban_ui_port }}"
+    volumes:
+      # Same-host bind mounts only: SQLite WAL cannot live on NFS-style
+      # remotes. Repo checkout is read-only. Kanban state is the ONLY part
+      # of the Hermes home that is mounted (read-write for the board DBs,
+      # workspaces, attachments, logs, and board pointer); everything else
+      # under the Hermes home (config, profiles, memories, sessions,
+      # credentials) stays unavailable to the container.
+      - "{{ kanban_ui_hermes_repo }}:{{ kanban_ui_hermes_repo }}:ro"
+      - "{{ kanban_ui_hermes_home }}/kanban:{{ kanban_ui_hermes_home }}/kanban"
+      # Legacy pre-boards default board DB (read-only; the homelab board
+      # lives under kanban/boards/ and is covered by the mount above).
+      - "{{ kanban_ui_hermes_home }}/kanban.db:{{ kanban_ui_hermes_home }}/kanban.db:ro"
+      # Bootstrap secret: read-only; server.py never writes it back.
+      - "{{ kanban_ui_token_file }}:/app/token.txt:ro"
+      # Proxy trust marker (round-4 finding 1): read-only. The SWAG vhost
+      # stamps this vaulted value on every proxied request; /login is
+      # refused without it. Rotating it means re-running this playbook
+      # (both the app file and the vhost config come from the same vault
+      # variable, so a single run keeps both sides in step).
+      - "{{ kanban_ui_proxy_marker_file }}:/app/proxy_marker.txt:ro"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # Liveness = the session gate is enforcing (anonymous /api must be 401).
+      test: ["CMD", "python", "/app/healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+        compress: "true"

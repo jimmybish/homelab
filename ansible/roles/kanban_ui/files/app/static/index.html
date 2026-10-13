@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hermes Kanban</title>
+<link rel="stylesheet" href="/app.css?v=2">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='8' y='8' width='24' height='84' rx='6' fill='%236366f1'/%3E%3Crect x='38' y='8' width='24' height='58' rx='6' fill='%2322d3ee'/%3E%3Crect x='68' y='8' width='24' height='38' rx='6' fill='%2334d399'/%3E%3C/svg%3E">
+</head>
+<body data-board="__BOARD__">
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 100 100" width="22" height="22" aria-hidden="true"><rect x="8" y="8" width="24" height="84" rx="6" fill="var(--accent)"/><rect x="38" y="8" width="24" height="58" rx="6" fill="var(--accent-2)"/><rect x="68" y="8" width="24" height="38" rx="6" fill="var(--ok)"/></svg>
+    <span class="brand-name">Hermes<span class="brand-thin">Kanban</span></span>
+  </div>
+  <div class="board-picker-wrap">
+    <button id="boardBtn" class="board-btn" title="Switch board">
+      <span id="boardIcon" class="board-icon">▦</span>
+      <span id="boardName">…</span>
+      <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 3l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  <div class="search-wrap">
+    <svg width="14" height="14" viewBox="0 0 24 24" class="search-ic"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search tasks…" autocomplete="off" spellcheck="false">
+  </div>
+  <div class="topbar-actions">
+    <button id="newTaskBtn" class="btn btn-accent" title="New task">＋ <span class="hide-sm">New task</span></button>
+    <button id="workersBtn" class="btn btn-ghost" title="Active workers"><span class="live-dot" id="workersDot" hidden></span>◉ <span class="hide-sm">Workers</span> <span id="workersCount" class="pill" hidden></span></button>
+    <button id="nudgeBtn" class="btn btn-ghost" title="Nudge dispatcher — run a dispatch pass now">⇢ <span class="hide-sm">Nudge dispatcher</span></button>
+    <button id="filterBtn" class="btn btn-ghost active-when" title="Filters">⚟ <span class="hide-sm">Filters</span></button>
+    <button id="settingsBtn" class="btn btn-ghost" title="Settings">⚙</button>
+    <button id="themeBtn" class="btn btn-ghost" title="Toggle theme">◐</button>
+  </div>
+</header>
+
+<div id="filterBar" class="filterbar" hidden>
+  <label class="fsel"><span>Tenant</span>
+    <select id="tenantSel"><option value="">All</option></select></label>
+  <label class="fsel"><span>Assignee</span>
+    <select id="assigneeSel"><option value="">All</option></select></label>
+  <label class="fchk"><input type="checkbox" id="lanesChk" checked> Lanes by profile</label>
+  <label class="fchk"><input type="checkbox" id="archivedChk"> Show archived</label>
+  <button id="clearFilters" class="btn btn-quiet btn-sm">Clear filters</button>
+  <div class="stats-strip" id="statsStrip"></div>
+</div>
+
+<div class="coltabs" id="colTabs" role="tablist"></div>
+
+<main id="board" class="board" aria-label="Kanban board"></main>
+<div id="trashZone" class="trash" hidden>🗑 Drop to archive</div>
+
+<div id="drawerScrim" class="scrim" hidden></div>
+<aside id="drawer" class="drawer" hidden aria-label="Task details"></aside>
+<div id="modalRoot"></div>
+<div id="toasts" class="toasts"></div>
+
+<script src="/md.js?v=1"></script>
+<script src="/app.js?v=6"></script>
+</body>
+</html>
