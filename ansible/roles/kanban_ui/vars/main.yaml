@@ -166,3 +166,9 @@ kanban_ui_pip_packages:
   - "pyyaml==6.0.3"
   - "websockets==15.0.1"
   - "anyio==4.15.0"
+  # Added 2026-10-16: the mounted hermes-agent checkout's kanban_db import
+  # chain (kanban_db_workspace -> worktree_ops -> utils -> hermes_yaml) now
+  # imports ruamel.yaml at module load; the container crashes without it.
+  # Pins mirror the host hermes-agent venv (pip freeze on hermes, 2026-10-16).
+  - "ruamel.yaml==0.18.17"
+  - "ruamel.yaml.clib==0.2.15"

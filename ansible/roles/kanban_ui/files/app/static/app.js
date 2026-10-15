@@ -10,6 +10,9 @@ const API = "/api/kanban";
 // headers, and SameSite=strict keeps the cookie off any cross-site request).
 
 const COLS = ["triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done"];
+// POST /tasks accepts only `triage: bool` (no general status field), so those two
+// columns are the only ones the create API can honor. Other columns get no "+" CTA.
+const CREATEABLE_COLS = new Set(["triage", "todo"]);
 const COL_LABEL = { triage: "Triage", todo: "Todo", scheduled: "Scheduled", ready: "Ready", running: "Running", blocked: "Blocked", review: "Review", done: "Done", archived: "Archived" };
 
 const S = {
@@ -234,7 +237,9 @@ function renderInner() {
       const el = h("div", { class: `column col-${name}`, "data-col": name });
       el.append(h("div", { class: "col-head" },
         h("span", { class: "col-dot" }), COL_LABEL[name] || name, count,
-        h("button", { class: "col-add", title: "Create task in this column", onclick: () => openCreateModal({ column: name }) }, "＋")));
+        ...(CREATEABLE_COLS.has(name)
+          ? [h("button", { class: "col-add", title: "Create task in this column", onclick: () => openCreateModal({ column: name }) }, "＋")]
+          : [])));
       const body = h("div", { class: "col-body" }); el.append(body);
       el.addEventListener("dragover", e => { e.preventDefault(); el.classList.add("drag-over"); });
       el.addEventListener("dragleave", e => { if (!el.contains(e.relatedTarget)) el.classList.remove("drag-over"); });
@@ -458,6 +463,7 @@ function confirmModal(text, cb) {
 
 async function openCreateModal({ column } = {}) {
   column = column || "todo";
+  if (!CREATEABLE_COLS.has(column)) column = "todo"; // mobile fab / keyboard-n pass S.mobileCol (any column); create only honors triage|todo
   await loadAssignees();
   const title = h("input", { type: "text", placeholder: "Task title" });
   const body = h("textarea", { placeholder: "Description / brief (markdown ok)" });
