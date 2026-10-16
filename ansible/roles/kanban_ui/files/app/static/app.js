@@ -716,6 +716,16 @@ async function switchBoard(slug) {
   try {
     await api(`/boards/${slug}/switch`, { method: "POST", board: false });
   } catch (e) { /* switch is global; UI works purely via ?board= anyway */ }
+  // Each board has its own SQLite event sequence, so the old board's cursor is
+  // meaningless on the new one. Tear the socket down and zero the cursor BEFORE
+  // loading the board: loadBoard() would otherwise Math.max() the stale cursor
+  // into place, and the WS would then request events after a sequence the new
+  // board never had (live refresh dead until it caught up). Reset backoff too.
+  // close() only starts the closing handshake (CLOSING, not CLOSED), so an
+  // already-queued old-board message could still fire afterwards: clear BOTH
+  // onmessage and onclose before closing so no stale cursor can be restored.
+  if (S.ws) { try { S.ws.onmessage = null; S.ws.onclose = null; S.ws.close(); } catch {} S.ws = null; }
+  S.wsCursor = 0; S.wsBackoff = 1000; S.wsStale = false;
   S.board = slug; localStorage.setItem("kboard", slug);
   S.sel.clear(); closeDrawer(); S.remount = true;
   await Promise.all([loadBoard(), loadBoards(), loadAssignees()]);
@@ -1111,7 +1121,7 @@ function showLogin() {
 
 /* ---------------- live events ---------------- */
 function connectWS() {
-  if (S.ws) { try { S.ws.onclose = null; S.ws.close(); } catch {} S.ws = null; }
+  if (S.ws) { try { S.ws.onmessage = null; S.ws.onclose = null; S.ws.close(); } catch {} S.ws = null; }
   if (document.hidden) { S.wsStale = true; return; }   // reconnect on visibility
   const proto = location.protocol === "https:" ? "wss" : "ws";
   // Same-origin WS upgrade authenticates with the HttpOnly session cookie;
@@ -1120,6 +1130,10 @@ function connectWS() {
   const ws = new WebSocket(url);
   S.ws = ws;
   ws.onmessage = e => {
+    // Identity guard: if this socket is no longer the current one (board was
+    // switched / socket replaced), its events are stale and must not touch
+    // global cursor or trigger refreshes for the new board.
+    if (S.ws !== ws) return;
     try {
       const msg = JSON.parse(e.data);
       if (msg.cursor) S.wsCursor = Math.max(S.wsCursor, msg.cursor);
