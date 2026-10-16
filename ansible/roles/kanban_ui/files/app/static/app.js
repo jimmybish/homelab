@@ -578,12 +578,12 @@ function openDepModal(t) {
 }
 function existingDepsBox(t) {
   const box = h("div", { style: "margin-top:10px" });
-  (async () => {
+  const render = async () => {
     try {
       const d = await api(`/tasks/${t.id}` + qs());
       const parents = (d.links && d.links.parents) || [];
       const children = (d.links && d.links.children) || [];
-      const line = (rel, x, unlink) => {
+      const line = (rel, x) => {
         const row = h("div", { class: "wrow" },
           h("span", { class: "chip" }, rel),
           h("span", { class: "t" }, x.title || x.id),
@@ -591,14 +591,17 @@ function existingDepsBox(t) {
           h("button", { class: "btn btn-sm btn-quiet", onclick: async () => {
             const link = rel === "parent" ? { parent_id: x.id, child_id: t.id } : { parent_id: t.id, child_id: x.id };
             await act(api(`/links?parent_id=${link.parent_id}&child_id=${link.child_id}&board=${encodeURIComponent(S.board)}`, { method: "DELETE" }), "Unlinked");
-            await loadBoard(true); m.close();
+            await loadBoard(true);
+            await render();
           } }, "Remove dependency"));
         return row;
       };
-      box.append(...parents.map(p => line("parent", p)), ...children.map(c => line("child", c)));
-      if (!parents.length && !children.length) box.append(h("div", { class: "col-empty" }, "no dependencies"));
+      const rows = [...parents.map(p => line("parent", p)), ...children.map(c => line("child", c))];
+      if (!rows.length) rows.push(h("div", { class: "col-empty" }, "no dependencies"));
+      box.replaceChildren(...rows);
     } catch {}
-  })();
+  };
+  render();
   return box;
 }
 
@@ -659,7 +662,7 @@ async function openSettings() {
       }, board: false }), "Settings saved");
     } }, "Save orchestration"));
   const pageProf = h("div", { hidden: true }, profBox);
-  const pageBoard = h("div", { hidden: true }, boardsPage());
+  const pageBoard = h("div", { hidden: true }, boardsPage(() => m.close()));
   const mkTab = (label, page) => {
     const b = h("button", { class: "btn btn-ghost btn-sm" }, label);
     b.onclick = () => { [pageOrch, pageProf, pageBoard].forEach(p => p.hidden = p !== page); $$(".btn", tabs).forEach(x => x.classList.remove("on")); b.classList.add("on"); };
@@ -670,7 +673,7 @@ async function openSettings() {
     [h("button", { class: "btn btn-quiet", onclick: () => m.close() }, "Close")]);
 }
 
-function boardsPage() {
+function boardsPage(closeCb) {
   const list = h("div", {});
   const slug = h("input", { type: "text", placeholder: "new-board-slug" });
   const name = h("input", { type: "text", placeholder: "Display name" });
@@ -680,7 +683,7 @@ function boardsPage() {
     await loadBoards();
     list.replaceChildren(...S.boards.map(b => h("div", {
       class: "board-list-item" + (b.slug === S.board ? " current" : ""),
-      onclick: async () => { if (!b.is_current) { await switchBoard(b.slug); m.close(); } },
+      onclick: async () => { if (!b.is_current) { await switchBoard(b.slug); if (closeCb) closeCb(); } },
     },
       h("span", { class: "board-icon" }, b.icon || "▦"),
       h("span", { class: "bname" }, b.name || b.slug),
@@ -695,7 +698,6 @@ function boardsPage() {
     )));
   };
   refresh();
-  const m = list; // modal shell references below use closure
   return h("div", {},
     list,
     h("label", {}, "New board slug"), slug,
@@ -722,7 +724,7 @@ async function switchBoard(slug) {
 }
 
 function openBoardSwitcher() {
-  const page = boardsPage();
+  const page = boardsPage(() => m.close());
   const m = modalShell("Switch kanban board", page, [h("button", { class: "btn btn-quiet", onclick: () => m.close() }, "Close")]);
 }
 
