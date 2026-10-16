@@ -466,10 +466,15 @@
         | selectattr('item.private')
         | map(attribute='stat.mode') | reject('match', '0[0-7]00$')
         | list | count == 0
+      # PR#13 REVIEW (comment 4244239718): the previous predicate first
+      # selected only modes with nonzero world bits, so drift such as
+      # 0600/0620/0640 slipped through. Exact equality, no prefilter:
+      # the credential-free vhost MUST be exactly 0664 (template task
+      # installs mode '0664'; SWAG tree normalizes to exactly that).
       - >-
         kanban_ui_secret_stats.results
         | rejectattr('item.private') | map(attribute='stat.mode')
-        | select('match', '0[0-7][0-7][1-7]$') | reject('equalto', '0664')
+        | reject('equalto', '0664')
         | list | count == 0
     fail_msg: >-
       A kanban-ui secret-bearing file has group/world-readable bits
