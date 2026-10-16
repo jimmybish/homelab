@@ -436,12 +436,16 @@ function openCardMenu(t, x, y) {
 function closeMenus() { if (window.__menuClose) window.__menuClose(); }
 
 /* ---------------- modals ---------------- */
-function modalShell(title, body, actions) {
+function modalShell(title, body, actions, opts = {}) {
   const scrim = h("div", { class: "modal-wrap", onclick: e => { if (e.target === scrim) close(); } });
   const box = h("div", { class: "modal" }, h("h2", {}, title), body, actions ? h("div", { class: "modal-actions" }, ...actions) : null);
   scrim.append(box);
   $("#modalRoot").append(scrim);
-  function close() { scrim.remove(); document.removeEventListener("keydown", onKey); }
+  let closed = false;
+  // close() is what the scrim and Escape paths invoke (see onKey below), NOT the
+  // returned m.close. Cleanup registered via opts.onClose therefore fires on
+  // every close path (button, scrim, Escape), guarded once so repeated calls are safe.
+  function close() { if (closed) return; closed = true; scrim.remove(); document.removeEventListener("keydown", onKey); if (opts.onClose) opts.onClose(); }
   function onKey(e) { if (e.key === "Escape") close(); }
   document.addEventListener("keydown", onKey);
   return { close, box };
@@ -764,8 +768,9 @@ function openWorkers() {
   };
   refresh();
   const timer = setInterval(refresh, 5000);
-  const m = modalShell("Active workers", box, [h("button", { class: "btn btn-quiet", onclick: () => { clearInterval(timer); m.close(); } }, "Close")]);
-  const oldClose = m.close; m.close = () => { clearInterval(timer); oldClose(); };
+  // onClose fires from modalShell's internal close() for every path (Close
+  // button, scrim click, Escape), so the 5s poll can no longer outlive the modal.
+  const m = modalShell("Active workers", box, [h("button", { class: "btn btn-quiet", onclick: () => m.close() }, "Close")], { onClose: () => clearInterval(timer) });
 }
 async function inspectRun(runId) {
   try {
