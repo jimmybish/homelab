@@ -1,4 +1,37 @@
 ---
+- name: Derive Open WebUI Hermes provider connections
+  ansible.builtin.set_fact:
+    open_webui_openai_api_base_urls_hermes: "{{ (open_webui_openai_api_base_urls_hermes | default([])) + [endpoint.base_url] }}"
+    open_webui_openai_api_keys_hermes: "{{ (open_webui_openai_api_keys_hermes | default([])) + [endpoint.key] }}"
+    open_webui_provider_configs_hermes: "{{ (open_webui_provider_configs_hermes | default([])) + [endpoint.config] }}"
+    open_webui_openai_api_configs: "{{ (open_webui_openai_api_configs | default({})) | combine({((idx | int) + 1) | string: endpoint.config}) }}"
+  vars:
+    endpoint:
+      base_url: >-
+        {{ internal_hermes_api_url if item == 'default'
+           else internal_hermes_api_url | regex_replace('/v1$', '/p/' ~ item ~ '/v1') }}
+      key: "{{ open_webui_hermes_profile_keys[item] | default(hermes_api_server_key) }}"
+      config:
+        enable: "{{ item not in (open_webui_hermes_disabled_profiles | default([])) }}"
+        prefix_id: "{{ open_webui_hermes_profile_prefixes[item] | default(item) }}"
+  loop: "{{ open_webui_hermes_profiles }}"
+  loop_control:
+    index_var: idx
+    label: "{{ item }}"
+  no_log: true
+
+- name: Compose Open WebUI OpenAI provider lists
+  ansible.builtin.set_fact:
+    open_webui_openai_api_base_urls: "{{ [open_webui_sparky_base_url] + (open_webui_openai_api_base_urls_hermes | default([])) }}"
+    open_webui_openai_api_keys: "{{ [''] + (open_webui_openai_api_keys_hermes | default([])) }}"
+    open_webui_openai_api_configs: >-
+      {{ {'0': {'enable': true, 'prefix_id': 'sparky'}}
+         | combine(open_webui_openai_api_configs | default({})) }}
+    open_webui_expected_provider_configs: >-
+      {{ [{'enable': true, 'prefix_id': 'sparky'}]
+         + (open_webui_provider_configs_hermes | default([])) }}
+  no_log: true
+
 - name: Check whether Open WebUI is already installed
   ansible.builtin.stat:
     path: "{{ open_webui_database_path }}"
@@ -245,16 +278,22 @@
   ansible.builtin.assert:
     that:
       - open_webui_persisted_config['openai.api_base_urls'] == open_webui_openai_api_base_urls
-      - open_webui_persisted_config['openai.api_keys'] | length == 2
-      - open_webui_persisted_config['openai.api_keys'][0] == ''
-      - open_webui_persisted_config['openai.api_keys'][1] == hermes_api_server_key
-      - open_webui_persisted_config['openai.api_configs']['0']['enable'] | bool
-      - open_webui_persisted_config['openai.api_configs']['0']['prefix_id'] == 'sparky'
-      - open_webui_persisted_config['openai.api_configs']['1']['enable'] | bool
-      - open_webui_persisted_config['openai.api_configs']['1']['prefix_id'] == 'hermes'
+      - open_webui_persisted_config['openai.api_keys'] | length == open_webui_openai_api_keys | length
+      - open_webui_persisted_config['openai.api_keys'] == open_webui_openai_api_keys
+      - open_webui_persisted_config['openai.api_configs'] | length == open_webui_expected_provider_configs | length
+      - (range(open_webui_expected_provider_configs | length) | map('string')
+         | map('extract', open_webui_persisted_config['openai.api_configs'])
+         | map(attribute='enable') | map('bool') | list)
+        == (open_webui_expected_provider_configs | map(attribute='enable') | map('bool') | list)
+      - (range(open_webui_expected_provider_configs | length) | map('string')
+         | map('extract', open_webui_persisted_config['openai.api_configs'])
+         | map(attribute='prefix_id') | list)
+        == (open_webui_expected_provider_configs | map(attribute='prefix_id') | list)
       - not (open_webui_persisted_config['ui.enable_signup'] | bool)
-    fail_msg: Open WebUI did not persist the managed dual-provider configuration.
-    success_msg: Open WebUI persisted both managed prefixed providers with signup disabled.
+    fail_msg: Open WebUI did not persist the managed multi-provider configuration.
+    success_msg: >-
+      Open WebUI persisted all {{ open_webui_openai_api_base_urls | length }}
+      managed prefixed providers with signup disabled.
   no_log: true
   when: not ansible_check_mode
 

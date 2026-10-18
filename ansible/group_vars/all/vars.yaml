@@ -719,6 +719,33 @@ hermes_api_server_port: 8642
 
 hermes_virtuajimmy_webhook_port: 8644
 
+# Hermes profiles exposed to Open WebUI as OpenAI-compatible connections.
+# The multiplexed API server (gateway.multiplex_profiles: true) routes
+# /p/<profile>/v1 on hermes_api_server_port; the 'default' profile keeps the
+# unprefixed endpoint and the legacy 'hermes' prefix. Profiles without a
+# usable per-profile API_SERVER_KEY in ~/.hermes/profiles/<name>/.env must be
+# listed in open_webui_hermes_disabled_profiles until provisioned, so Open
+# WebUI shows the connection disabled instead of failing with 401s.
+open_webui_hermes_profiles:
+  - default
+  - virtuajimmy
+  - copilot
+  - plexibot
+  - hass
+
+open_webui_hermes_disabled_profiles:
+  - virtuajimmy
+  - copilot
+  - plexibot
+
+# Optional per-profile prefix overrides (defaults to the profile name).
+open_webui_hermes_profile_prefixes:
+  default: hermes
+
+# Optional per-profile API key overrides (defaults to hermes_api_server_key,
+# which is correct for profiles whose .env key is identical to default's).
+open_webui_hermes_profile_keys: {}
+
 # File Shares
 fs_backups: "/Backups"
 
