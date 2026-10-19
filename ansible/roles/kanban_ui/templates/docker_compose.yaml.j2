@@ -56,6 +56,13 @@ services:
       # session cookie is Secure by default (server.py); this template
       # must never opt out, and no plaintext credential/session fallback
       # is advertised anywhere in the deployment.
+      # PR#13 review finding (comment 4301554497): the healthcheck probe
+      # must target the SAME port the server listener renders from
+      # (kanban_ui_port). Without this the probe falls back to
+      # healthcheck.py's hardcoded 9470 default, so any non-default port
+      # override leaves the container permanently unhealthy and fails the
+      # role's readiness waits.
+      KANBAN_UI_HEALTH_PORT: "{{ kanban_ui_port }}"
     ports:
       # DNAT pinned to the host's primary IPv4: published ports bypass UFW
       # via the Docker forwarding path, and 0.0.0.0/8 must stay unreachable.
