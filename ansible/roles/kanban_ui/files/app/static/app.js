@@ -708,7 +708,12 @@ function boardsPage(closeCb) {
     await loadBoards();
     list.replaceChildren(...S.boards.map(b => h("div", {
       class: "board-list-item" + (b.slug === S.board ? " current" : ""),
-      onclick: async () => { if (!b.is_current) { await switchBoard(b.slug); if (closeCb) closeCb(); } },
+      // PR#13 review finding 4301554450: b.is_current is the GLOBAL Hermes
+      // board pointer (e.g. what the CLI last selected), not this tab's
+      // view. Keying clickability off it meant a board that was globally
+      // current but not shown here could not be clicked into. Compare the
+      // slug with S.board, exactly like the row highlight above.
+      onclick: async () => { if (b.slug !== S.board) { await switchBoard(b.slug); if (closeCb) closeCb(); } },
     },
       h("span", { class: "board-icon" }, b.icon || "▦"),
       h("span", { class: "bname" }, b.name || b.slug),
