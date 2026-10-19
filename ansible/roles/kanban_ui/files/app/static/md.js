@@ -56,7 +56,17 @@
     // 5. markdown inline: bold, headings, bare urls
     s = s.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
     s = s.replace(/^#{1,4} (.*)$/gm, "<b>$1</b>");
-    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, pre, url) => pre + '<a href="' + esc(safeUrl(url) || "#") + '" target="_blank" rel="noopener">' + esc(url) + "</a>");
+    // Bare URLs here arrive ALREADY escaped by step 3 (esc(s)), so undo that
+    // escaping once (unent) before sanitizing and re-escaping the href;
+    // otherwise `?a=1&b=2` becomes `&amp;amp;` in the href and the browser
+    // requests `amp;b`. safeUrl still gates the scheme on the escaped form
+    // (the ^https?: anchor is entity-free, so the gate is unchanged) and
+    // quotes become %22 before escaping, so attribute break-out stays blocked.
+    // The label reuses the already-escaped `url` -- it is never re-escaped.
+    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, pre, url) => {
+      const href = safeUrl(url) ? esc(safeUrl(unent(url))) : "#";
+      return pre + '<a href="' + href + '" target="_blank" rel="noopener">' + url + "</a>";
+    });
     // 6. markdown lists: group consecutive bullet/numbered lines (incl. wrapped continuations)
     const lines = s.split("\n");
     const out = [];
