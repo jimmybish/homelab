@@ -116,8 +116,17 @@ async function act(promise, okMsg) {
 /* ---------------- data loads ---------------- */
 async function loadBoard(partialOk = false) {
   if (document.hidden) return;   // visibility handler catches up on return
+  // Identity guard (PR#13 review 4301554435): capture the requested board at
+  // request time. api() reads S.board when building the URL, so if switchBoard()
+  // flips the selection while this fetch is in flight, the awaited payload
+  // belongs to the OLD board. Without the guard its assignments would render
+  // A's tasks under B's name and Math.max() A's event cursor into place (the
+  // WS identity guard only covers socket messages, not HTTP responses).
+  const requestedBoard = S.board;
   try {
-    S.data = await api(`/board?include_archived=${S.archived}`);
+    const d = await api(`/board?include_archived=${S.archived}`);
+    if (S.board !== requestedBoard) return;   // selection changed while awaiting — discard
+    S.data = d;
     S.wsCursor = Math.max(S.wsCursor, S.data.latest_event_id || 0);
     render();
   } catch (e) { if (!partialOk) toast("Board load failed: " + e.message, "err"); }
