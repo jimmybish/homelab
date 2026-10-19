@@ -1,10 +1,22 @@
 ---
+# set_fact values survive later plays for the same host, so the accumulators
+# below are reset on every role execution before the derive loop appends to
+# them. Without this, a second execution in one playbook run would double the
+# list accumulators while the keyed api_configs dict only merges.
+- name: Reset Open WebUI Hermes connection accumulators
+  ansible.builtin.set_fact:
+    open_webui_openai_api_base_urls_hermes: []
+    open_webui_openai_api_keys_hermes: []
+    open_webui_provider_configs_hermes: []
+    open_webui_openai_api_configs: {}
+  no_log: true
+
 - name: Derive Open WebUI Hermes provider connections
   ansible.builtin.set_fact:
-    open_webui_openai_api_base_urls_hermes: "{{ (open_webui_openai_api_base_urls_hermes | default([])) + [endpoint.base_url] }}"
-    open_webui_openai_api_keys_hermes: "{{ (open_webui_openai_api_keys_hermes | default([])) + [endpoint.key] }}"
-    open_webui_provider_configs_hermes: "{{ (open_webui_provider_configs_hermes | default([])) + [endpoint.config] }}"
-    open_webui_openai_api_configs: "{{ (open_webui_openai_api_configs | default({})) | combine({((idx | int) + 1) | string: endpoint.config}) }}"
+    open_webui_openai_api_base_urls_hermes: "{{ open_webui_openai_api_base_urls_hermes + [endpoint.base_url] }}"
+    open_webui_openai_api_keys_hermes: "{{ open_webui_openai_api_keys_hermes + [endpoint.key] }}"
+    open_webui_provider_configs_hermes: "{{ open_webui_provider_configs_hermes + [endpoint.config] }}"
+    open_webui_openai_api_configs: "{{ open_webui_openai_api_configs | combine({((idx | int) + 1) | string: endpoint.config}) }}"
   vars:
     endpoint:
       base_url: >-
