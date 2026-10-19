@@ -402,7 +402,13 @@ function cardMenuItems(t) {
     else if (t.status !== "running") items.push({ label: "✓ Complete", fn: () => openCompleteModal(t) });
     if (t.status !== "blocked") items.push({ label: "⛔ Block…", fn: () => promptReason("Block reason", r => act(api(`/tasks/${t.id}` + qs(), { method: "PATCH", body: { status: "blocked", block_reason: r } }).then(loadBoard), "Blocked")) });
     if (t.status !== "scheduled") items.push({ label: "⏰ Schedule…", fn: () => promptReason("Schedule note", r => act(api(`/tasks/${t.id}` + qs(), { method: "PATCH", body: { status: "scheduled", block_reason: r } }).then(loadBoard), "Scheduled")) });
-    if (t.status === "running") items.push({ label: "⏮ Reclaim (release worker)", fn: () => act(api(`/tasks/${t.id}/reclaim` + qs(), { method: "POST", body: { reason: "dashboard" } }).then(loadBoard), "Reclaimed") });
+    // PR#13 review finding 4301554389: worker-control ops (reclaim / run
+    // terminate / reclaim-first reassign) are refused server-side in
+    // server.py -- a container-side reclaim releases the claim without
+    // signalling the host worker, so the dispatcher could spawn a
+    // duplicate beside a still-running worker. The control is removed
+    // here too (defense-in-depth + no misleading affordance); run
+    // `hermes kanban reclaim <id>` on the Hermes host instead.
   }
   if (t.status === "triage") items.push({ label: "✒ Specify (expand w/ LLM)", fn: () => act(api(`/tasks/${t.id}/specify` + qs(), { method: "POST", body: {} }).then(loadBoard), "Specified") });
   if (t.status === "triage" || t.status === "todo") items.push({ label: "🌱 Decompose", fn: () => act(api(`/tasks/${t.id}/decompose` + qs(), { method: "POST", body: {} }).then(loadBoard), "Decomposed") });
@@ -549,15 +555,21 @@ async function openCompleteModal(t) {
 async function openReassignModal(t) {
   await loadAssignees();
   const sel = selControl(assigneeOptions(), t.assignee || "");
-  const reclaim = h("input", { type: "checkbox", ...(t.status === "running" ? { checked: "" } : {}) });
+  // PR#13 review finding 4301554389: reclaim-first reassign calls
+  // reclaim_task() server-side, which would release the claim WITHOUT
+  // signalling the host worker (the container is not the worker's host).
+  // The server rejects reclaim_first=true with 403; the checkbox stays
+  // visible but DISABLED so the affordance is explained, not hidden, and
+  // the Apply call below hard-codes reclaim_first: false regardless.
+  const reclaim = h("input", { type: "checkbox", disabled: "", ...(t.status === "running" ? { checked: "" } : {}) });
   const m = modalShell("Reassign " + t.id, h("div", {},
     h("label", {}, "Profile"), sel,
-    h("label", { class: "fchk", style: "margin-top:10px" }, reclaim, "Reclaim first (release running worker)"),
+    h("label", { class: "fchk", style: "margin-top:10px", title: "Worker control (reclaim) is only available on the Hermes host: hermes kanban reassign <id> <profile> --reclaim" }, reclaim, "Reclaim first (release running worker) (disabled in the WebUI)"),
   ), [
     h("button", { class: "btn btn-quiet", onclick: () => m.close() }, "Cancel"),
     h("button", { class: "btn btn-accent", onclick: async () => {
       try {
-        await api(`/tasks/${t.id}/reassign` + qs(), { method: "POST", body: { profile: sel.value || null, reclaim_first: reclaim.checked, reason: "dashboard reassign" } });
+        await api(`/tasks/${t.id}/reassign` + qs(), { method: "POST", body: { profile: sel.value || null, reclaim_first: false, reason: "dashboard reassign" } });
         m.close(); toast("Reassigned", "ok"); await loadBoard(true);
         if (S.drawerId === t.id) openDrawer(t.id);
       } catch (e) { toast(e.message, "err"); }
@@ -758,10 +770,12 @@ function openWorkers() {
           h("span", { class: "chip time", title: "heartbeat" }, "♥ " + ago(w.last_heartbeat_at, now)),
           h("span", { class: "chip time" }, ago(w.started_at, now)),
           h("button", { class: "btn btn-sm btn-quiet", onclick: () => inspectRun(w.run_id) }, "inspect"),
-          h("button", { class: "btn btn-sm btn-quiet danger", onclick: () => confirmModal(`Terminate worker for ${w.task_id}? The run closes as reclaimed/failed.`, async () => {
-            await act(api(`/runs/${w.run_id}/terminate`, { method: "POST", body: { reason: "terminated from dashboard" } }), "Terminated");
-            refresh(); loadBoard(true);
-          }) }, "✕")),
+          // PR#13 review finding 4301554389: run termination routes
+          // through reclaim_task(), which inside this container releases
+          // the claim without signalling the host worker (duplicate-
+          // dispatch hazard). Server rejects it with 403; the button is
+          // disabled so the UI does not advertise a dead control.
+          h("button", { class: "btn btn-sm btn-quiet danger", disabled: "", title: "Worker control is only available on the Hermes host: hermes kanban reclaim " + w.task_id }, "✕")),
         );
       }
     } catch (e) { box.replaceChildren(h("div", { class: "col-empty" }, e.message)); }
@@ -872,7 +886,12 @@ async function renderDrawer(d) {
 
   // fields grid
   const assignSel = selControl(assigneeOptions(), t.assignee || "");
-  assignSel.addEventListener("change", () => act(api(`/tasks/${t.id}/reassign` + qs(), { method: "POST", body: { profile: assignSel.value || null, reclaim_first: t.status === "running", reason: "dashboard" } }).then(() => { loadBoard(true); refreshDrawer(); }), "Assignee updated"));
+  // PR#13 review finding 4301554389: never send reclaim_first from the
+  // WebUI (server-side reject; see openReassignModal). For a RUNNING
+  // task the plain reassign now surfaces upstream's 409 "still running"
+  // refusal as a toast instead of silently releasing the claim beside a
+  // live host worker.
+  assignSel.addEventListener("change", () => act(api(`/tasks/${t.id}/reassign` + qs(), { method: "POST", body: { profile: assignSel.value || null, reclaim_first: false, reason: "dashboard" } }).then(() => { loadBoard(true); refreshDrawer(); }), "Assignee updated"));
   const prioInput = h("input", { type: "number", value: String(t.priority ?? 0) });
   prioInput.addEventListener("change", () => act(api(`/tasks/${t.id}` + qs(), { method: "PATCH", body: { priority: parseInt(prioInput.value || "0", 10) } }).then(loadBoard), "Priority updated"));
   const modelSel = await modelSelect(t.model_override);

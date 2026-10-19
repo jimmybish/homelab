@@ -45,6 +45,10 @@
 #   8b. the WS upgrade with the valid session cookie but a FORGED Origin
 #       is refused (PR review comment 4244239544 sibling-subdomain gate)
 #   9. container logs since this container start are free of token material
+#  10. worker-control ops (reclaim / run terminate / reclaim-first reassign)
+#      reject a FULL session with the documented 403 body, while the plain
+#      reassign reaches its handler and the anon reclaim 401s at the
+#      session gate (PR#13 review finding 4301554389)
 set -u
 
 : "${KANBAN_UI_VERIFY_URL:?}"
@@ -247,6 +251,47 @@ chmod 600 "$WORK/ws-origin.conf"
 C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 --http1.1 \
   --config "$WORK/ws-origin.conf")
 [ "$C" != "101" ] || fail "WS upgrade accepted with a forged Origin and a replayed session cookie"
+
+# 10. PR#13 review finding 4301554389: worker-control operations (task
+# reclaim, run terminate, reclaim-first reassign) must be refused
+# server-side with the documented 403 body even for a fully
+# authenticated session (cookie + marker header), because a
+# container-side reclaim releases the claim without signalling the host
+# worker (duplicate-dispatch hazard). Unaffected ops must still pass the
+# gate: the plain reassign on the same unknown id must NOT carry the
+# guard body (over-rejection check), and the anon reclaim still 401s at
+# the session gate (auth middleware stays outermost).
+wop() {
+  local name="$1" path="$2" data="$3"
+  {
+    printf 'header = "Cookie: kanban_ui_session=%s"\n' "$SESS"
+    printf 'url = "%s%s?board=%s"\n' "$BASE" "$path" "$KANBAN_UI_VERIFY_BOARD"
+  } > "$WORK/wo_$name.conf"
+  chmod 600 "$WORK/wo_$name.conf"
+  C=$(curl -s -o "$WORK/wo_$name.body" -w '%{http_code}' --max-time 15 -X POST \
+    --config "$WORK/wo_$name.conf" -H 'X-Kanban-UI: 1' \
+    -H 'Content-Type: application/json' --data "$data")
+  [ "$C" = "403" ] || fail "worker-control $name expected 403, got $C"
+  grep -q 'worker control operations are disabled' "$WORK/wo_$name.body" \
+    || fail "worker-control $name 403 body is not the documented reject"
+}
+wop reclaim "/api/kanban/tasks/kanban-ui-probe/reclaim" '{"reason":"probe"}'
+wop terminate "/api/kanban/runs/999999/terminate" '{"reason":"probe"}'
+wop reassign-reclaim "/api/kanban/tasks/kanban-ui-probe/reassign" '{"profile":"probe","reclaim_first":true}'
+# Contrast 1: plain reassign (no reclaim_first) must reach the upstream
+# handler, not the guard (unknown id => upstream 409/404; the guard body
+# here would mean the deny-list over-rejects the sanctioned op).
+C=$(curl -s -o "$WORK/wo_plain.body" -w '%{http_code}' --max-time 15 -X POST \
+  --config "$WORK/wo_reassign-reclaim.conf" -H 'X-Kanban-UI: 1' \
+  -H 'Content-Type: application/json' --data '{"profile":"probe"}')
+grep -q 'worker control operations are disabled' "$WORK/wo_plain.body" \
+  && fail "plain reassign over-rejected by the worker-control guard"
+[ "$C" != "401" ] || fail "plain reassign blocked by session gate: $C"
+# Contrast 2: anonymous reclaim hits the OUTER session gate first (401),
+# never the deny-list -- middleware order is auth-outermost.
+C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST \
+  "$BASE/api/kanban/tasks/kanban-ui-probe/reclaim")
+[ "$C" = "401" ] || fail "anon reclaim expected 401 (session gate outermost), got $C"
 
 # 9. container logs since this container start are free of token material.
 # The old bearer-token image printed the token at startup; its retained

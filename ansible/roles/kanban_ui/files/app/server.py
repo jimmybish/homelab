@@ -46,6 +46,7 @@ Bind: loopback unless --lan (or $KANBAN_UI_LAN=1). Public bind is safe to
 expose to the LAN: everything privileged is cookie-gated.
 """
 import argparse
+import asyncio
 import importlib.util
 import os
 import re
@@ -92,6 +93,50 @@ SESSION_TTL_SECONDS = 12 * 3600
 MAX_SESSIONS = 512
 LOGIN_FAIL_LIMIT = 20
 LOGIN_FAIL_WINDOW = 60
+
+# PR#13 review finding (comment 4301554389): worker-control deny-list.
+# This container is not the worker's host, so its reclaim path clears the
+# claim WITHOUT ever signalling the real process (the pinned Hermes
+# _terminate_reclaimed_worker only signals when the claim lock carries
+# the LOCAL host prefix -- inside the container it never does). A UI-side
+# reclaim would leave the host worker running while the dispatcher is
+# free to spawn a duplicate. Pure predicates (stdlib-only, unit-tested in
+# tests/test_worker_control_guard.py); build_app wires them into a
+# middleware + a route dependency and is the only place fastapi is needed.
+_WORKER_CONTROL_DENIED: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("POST", re.compile(r"^/api/kanban/tasks/[^/]+/reclaim$")),
+    ("POST", re.compile(r"^/api/kanban/runs/[^/]+/terminate$")),
+)
+WORKER_CONTROL_REJECT_BODY = {
+    "detail": "worker control operations are disabled in the Kanban WebUI: "
+    "a container-side reclaim releases the claim without signalling the "
+    "host worker, which can lead to a duplicate dispatch. Run "
+    "`hermes kanban reclaim <task_id>` (or `reassign --reclaim`) on the "
+    "Hermes host instead."
+}
+
+
+def worker_control_denied(method: str, path: str) -> bool:
+    """True when (method, path) is a worker-control op this container must
+    never execute: task reclaim or run terminate. Reclaim-first reassign
+    is body-driven and checked by worker_control_reassign_denied."""
+    m = (method or "").strip().upper()
+    p = path or ""
+    return any(m == dm and pattern.match(p) for dm, pattern in _WORKER_CONTROL_DENIED)
+
+
+def worker_control_reassign_denied(body: object) -> bool:
+    """True when a (validated or raw) reassign payload requests
+    reclaim_first -- the reclaim half of the reassign op. Accepts the
+    endpoint's Pydantic model or a plain dict so it is testable without
+    fastapi; anything unrecognised FAILS CLOSED (denied)."""
+    if isinstance(body, dict):
+        value = body.get("reclaim_first", False)
+    elif body is not None and hasattr(body, "reclaim_first"):
+        value = body.reclaim_first
+    else:
+        return True
+    return bool(value)
 
 # Access-log credential hygiene. Stale browser tabs from the old
 # bearer-token build still reconnect with ?token=<secret> in the query
@@ -417,6 +462,9 @@ def load_proxy_marker() -> str:
 def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_allowed_origin: str = ""):
     from fastapi import FastAPI, Request
     from fastapi.responses import FileResponse, JSONResponse, Response
+    # fastapi 0.133.1 (pinned) exports only APIRouter at top level; the
+    # route CLASS lives in fastapi.routing (verified against the image).
+    from fastapi.routing import APIRoute
 
     spec = importlib.util.spec_from_file_location("kanban_plugin_api", PLUGIN / "plugin_api.py")
     plugin = importlib.util.module_from_spec(spec)
@@ -456,6 +504,20 @@ def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_a
         return len(login_failures) >= LOGIN_FAIL_LIMIT
 
     @app.middleware("http")
+    async def worker_control_mw(request: Request, call_next):
+        # PR#13 review finding 4301554389 (path-deny half; the body-driven
+        # reassign guard is wired after include_router below). Stateless
+        # reclaim/run-terminate paths are refused here BEFORE routing
+        # begins -- no body parse, no DB access. Registered BEFORE
+        # auth_mw: Starlette makes the LAST-registered middleware the
+        # OUTERMOST, so the session gate runs first and an anonymous
+        # probe still gets 401 -- the reject body (which names operator
+        # workflows) is only ever visible to a session-holder.
+        if worker_control_denied(request.method, request.url.path):
+            return JSONResponse(WORKER_CONTROL_REJECT_BODY, status_code=403)
+        return await call_next(request)
+
+    @app.middleware("http")
     async def auth_mw(request: Request, call_next):
         if request.url.path.startswith("/api/"):
             cookie = request.cookies.get(SESSION_COOKIE, "")
@@ -471,6 +533,86 @@ def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_a
         return await call_next(request)
 
     app.include_router(plugin.router, prefix="/api/kanban")
+
+    # ---- worker-control deny-list (PR#13 review finding 4301554389) ------
+    # This container is NOT the worker's host. The pinned Hermes reclaim
+    # path clears the claim and returns the task to ready unconditionally
+    # (hermes_cli/kanban_db.py reclaim_task), but the SIGTERM/SIGKILL half
+    # (_terminate_reclaimed_worker in kanban_db_dispatch.py) bails out
+    # with host_local=False whenever the claim lock does not start with
+    # the local host prefix. The dispatcher claims on the HERMES host, so
+    # a reclaim issued from inside this container releases the claim
+    # without ever signalling the real worker: the host worker keeps
+    # running while the dispatcher is free to spawn a duplicate beside
+    # it. Until there is a host-side worker-control channel, these three
+    # operations are refused here BEFORE any DB access, and the UI
+    # controls that would call them are disabled (static/app.js). Plain
+    # reassign (reclaim_first=false) is unaffected: it never touches
+    # reclaim_task. Operators on the Hermes host remain the sanctioned
+    # path (`hermes kanban reclaim <id>` / `hermes kanban reassign ...
+    # --reclaim`; the dashboard's own terminate/reclaim buttons are the
+    # host dashboard, not this container).
+    #
+    # The path-deny half (reclaim, run terminate) lives in
+    # worker_control_mw above. The reassign refusal depends on the PARSED
+    # body (reclaim_first), so it runs as a wrapper around the endpoint's
+    # own call -- swapped into route.dependant.call, which is exactly
+    # what FastAPI invokes per request AFTER it has parsed and validated
+    # the body with the upstream ReassignBody model. Upstream validation
+    # semantics (422 shapes, defaults) are therefore untouched, and the
+    # guard refuses before the handler calls reassign_task/reclaim_task.
+    _reassign_path = "/api/kanban/tasks/{task_id}/reassign"
+    _reassign_routes = [
+        r for r in app.routes
+        if isinstance(r, APIRoute) and r.path == _reassign_path
+        and "POST" in (r.methods or set())
+    ]
+    # Fail closed: this wrapper is the only thing stopping a body-driven
+    # reclaim through reassign. If the upstream endpoint is ever renamed,
+    # removed, or duplicated so the hook cannot attach (or attach twice),
+    # refuse to boot rather than serve the op unguarded -- same
+    # philosophy as the proxy-marker gate.
+    if len(_reassign_routes) != 1 or getattr(_reassign_routes[0], "dependant", None) is None \
+            or not callable(_reassign_routes[0].dependant.call):
+        raise SystemExit(
+            f"worker-control guard could not attach to {_reassign_path}; "
+            "refusing to start with the reclaim-first reassign path unguarded "
+            "(mounted plugin router drifted from the pinned Hermes checkout)."
+        )
+    _reassign_route = _reassign_routes[0]
+    _reassign_upstream_call = _reassign_route.dependant.call
+    # FastAPI captured is_coroutine_callable at route construction and
+    # dispatches dependant.call accordingly (sync => threadpool). The
+    # wrapper must keep that SAME dispatch shape; a mismatch would hand
+    # run_in_threadpool a coroutine function. The pinned upstream is a
+    # sync def; both shapes are supported so a future upstream flip to
+    # async stays correct, anything else is drift and fails closed.
+    _upstream_is_async = bool(
+        getattr(_reassign_route.dependant, "is_coroutine_callable", False)
+    )
+    if not _upstream_is_async and asyncio.iscoroutinefunction(_reassign_upstream_call):
+        raise SystemExit(
+            f"worker-control guard: {_reassign_path} dispatch shape drifted "
+            "(dependant.is_coroutine_callable disagrees with the callable); "
+            "refusing to start unguarded."
+        )
+
+    if _upstream_is_async:
+        async def _reassign_guarded_call(**values):
+            if worker_control_reassign_denied(values.get("payload", values.get("body"))):
+                return JSONResponse(WORKER_CONTROL_REJECT_BODY, status_code=403)
+            return await _reassign_upstream_call(**values)
+    else:
+        def _reassign_guarded_call(**values):  # sync: FastAPI threadpools it
+            if worker_control_reassign_denied(values.get("payload", values.get("body"))):
+                return JSONResponse(WORKER_CONTROL_REJECT_BODY, status_code=403)
+            return _reassign_upstream_call(**values)
+
+    _reassign_guarded_call.__name__ = getattr(_reassign_upstream_call, "__name__", "reassign")
+    _reassign_guarded_call.__qualname__ = "reassign_task_endpoint[worker-control-guarded]"
+    _reassign_guarded_call._worker_control_guarded = True
+    _reassign_guarded_call._worker_control_upstream = _reassign_upstream_call
+    _reassign_route.dependant.call = _reassign_guarded_call
 
     # Override the plugin's WS upgrade authorization. The upstream default
     # delegates to web_server._ws_auth_ok, which only understands ?token=
