@@ -439,6 +439,49 @@ hermes_api_server_key: !vault |
           33393133663366636136
           38623836643663636537
 
+
+# Per-profile Hermes API server key (Open WebUI /p/<profile> connection, t_70b642c9)
+hermes_virtuajimmy_api_server_key: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          6437646561346434386239626530343238656538666164343037383765646563
+          6466333063373135373835643232323537356662316261313263633339653137
+          0a66363538383437336233623765316437386235626661363630376232643935
+          3536643936633936306466393964663064613664303034333138373636363330
+          660a396466333330373938373061633062303934626633663134663262303763
+          3934336631383465326663353565383534663765626236626165303965666465
+          3165626261636666363339623536356166373837656137366363626137373732
+          6531323565356266346663633939326665333662323936323935356435633037
+          3432376632333032343965353337346161303037313334643933386535386466
+          6637
+
+# Per-profile Hermes API server key (Open WebUI /p/<profile> connection, t_70b642c9)
+hermes_copilot_api_server_key: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          3431353036633439613133373631626436376263626631353634346239303763
+          3638336562643537313166656562633838333836303636386362663039393135
+          0a65323164333739646364656631383161623766333961353261633131373465
+          6265623034613739393330373830396236313039393766613433343433613639
+          340a623831666638313232393835633439336636656166393633313363623434
+          3933396662373533376462313536626163396332316632616439303831323337
+          3962363733653638393865346163396439356165306663616131366462396239
+          3232313637663439313462366432643735373866643862653036313537303263
+          3931633634333938396562323633623230663461383939366562356532666661
+          3231
+
+# Per-profile Hermes API server key (Open WebUI /p/<profile> connection, t_70b642c9)
+hermes_plexibot_api_server_key: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          6565393836313862646663346161666666653033313639393132653830323738
+          6435393939313538626334326261343831313236356538303439386631643937
+          0a61613764343235393031386531323065643164353936633835613532616361
+          3564353061333161326230663632613432653837326563343561633732376237
+          610a616336643933643239376261613466376237303463306436353230656330
+          6265356532386634623433353939653037383633653430303365663836326139
+          3932303033633130343831633234656534653634653636316634306630336462
+          3664303139626635383538646338616463336366623632343165633439326631
+          3361346431643664303439623364633362323566643138396163623762353362
+          6336
+
 # Sonarr API key
 sonarr_api_key: !vault |
           $ANSIBLE_VAULT;1.1;AES256
@@ -718,6 +761,36 @@ n8n_plex_webhook_path: "plex-library-new"
 hermes_api_server_port: 8642
 
 hermes_virtuajimmy_webhook_port: 8644
+
+# Hermes profiles exposed to Open WebUI as OpenAI-compatible connections.
+# The multiplexed API server (gateway.multiplex_profiles: true) routes
+# /p/<profile>/v1 on hermes_api_server_port; the 'default' profile keeps the
+# unprefixed endpoint and the legacy 'hermes' prefix. Profiles without a
+# Profiles without a usable per-profile API_SERVER_KEY in
+# ~/.hermes/profiles/<name>/.env must be listed in
+# open_webui_hermes_disabled_profiles until provisioned, so Open
+# WebUI shows the connection disabled instead of failing with 401s.
+open_webui_hermes_profiles:
+  - default
+  - virtuajimmy
+  - copilot
+  - plexibot
+  - hass
+
+# All profiles provisioned with per-profile API_SERVER_KEY values
+# (t_70b642c9); gateway bounced 2026-10-19 15:07 to load them.
+open_webui_hermes_disabled_profiles: []
+
+# Optional per-profile prefix overrides (defaults to the profile name).
+open_webui_hermes_profile_prefixes:
+  default: hermes
+
+# Optional per-profile API key overrides (defaults to hermes_api_server_key,
+# which is correct for profiles whose .env key is identical to default's).
+open_webui_hermes_profile_keys:
+  virtuajimmy: "{{ hermes_virtuajimmy_api_server_key }}"
+  copilot: "{{ hermes_copilot_api_server_key }}"
+  plexibot: "{{ hermes_plexibot_api_server_key }}"
 
 # File Shares
 fs_backups: "/Backups"
