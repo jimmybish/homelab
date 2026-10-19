@@ -238,6 +238,30 @@ def login_transport_allowed(forwarded_proto: str, allow_insecure_dev: bool) -> b
     return first == "https"
 
 
+def login_token_matches(presented: object, secret: str) -> bool:
+    """Pure predicate: does the presented bootstrap token match the secret?
+
+    PR#13 review finding (comment 4301554425): the raw
+    ``secrets.compare_digest(presented, secret)`` gate only accepts ASCII
+    strings, so a non-ASCII JSON token such as "é" raised TypeError --
+    Starlette answered 500 and, worse, the exception skipped the
+    ``login_failures`` append on the invalid-credentials branch, leaving
+    the brute-force throttle disengaged for exactly the inputs an attacker
+    would throw at it. Comparing UTF-8 BYTES keeps the constant-time
+    comparison for any Unicode presentation, and a presentation that
+    cannot even be UTF-8 encoded (a lone surrogate admitted by
+    ``json.loads`` on a ``\\udXXX`` escape) is treated as invalid
+    credentials rather than a server error, so every failed attempt flows
+    through the 401 + counter path.
+    """
+    if not isinstance(presented, str) or presented == "":
+        return False
+    try:
+        return secrets.compare_digest(presented.encode("utf-8"), secret.encode("utf-8"))
+    except (UnicodeEncodeError, TypeError):
+        return False
+
+
 # PR-review finding (comment 4244239544): SameSite=strict is SITE-scoped,
 # not origin-scoped -- JS on a compromised sibling subdomain of the
 # internal domain gets the session cookie on ITS WebSocket upgrade and
@@ -691,7 +715,7 @@ def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_a
         except Exception:
             body = None
         presented = body.get("token") if isinstance(body, dict) else None
-        ok = isinstance(presented, str) and presented != "" and secrets.compare_digest(presented, secret)
+        ok = login_token_matches(presented, secret)
         if not ok:
             login_failures.append(time.time())
             return JSONResponse({"detail": "invalid credentials"}, status_code=401)

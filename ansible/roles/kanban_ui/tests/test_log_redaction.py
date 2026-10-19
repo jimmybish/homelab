@@ -566,7 +566,7 @@ class TestLoginTransportGate(unittest.TestCase):
         self.assertIn("status_code=403", route[marker_gate : marker_gate + 600])
         self.assertIn("status_code=403", route[gate : gate + 600])
         for cred_touch in ("_login_throttled()", "await req.json()",
-                           "compare_digest(presented, secret)"):
+                           "login_token_matches(presented, secret)"):
             self.assertLess(marker_gate, route.index(cred_touch))
             self.assertLess(gate, route.index(cred_touch))
 
@@ -725,7 +725,7 @@ class TestLoginTransportGate(unittest.TestCase):
         route = src[start:end]
         peer_gate = route.index("login_peer_allowed(")
         for cred_touch in ("_login_throttled()", "await req.json()",
-                           "compare_digest(presented, secret)"):
+                           "login_token_matches(presented, secret)"):
             self.assertLess(peer_gate, route.index(cred_touch))
         self.assertIn("req.client.host", route[peer_gate : peer_gate + 400])
         self.assertIn("status_code=403", route[peer_gate : peer_gate + 500])
