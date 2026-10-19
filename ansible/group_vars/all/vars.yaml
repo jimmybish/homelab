@@ -777,12 +777,9 @@ open_webui_hermes_profiles:
   - plexibot
   - hass
 
-# Kept disabled until the gateway is bounced to load the new per-profile keys
-# (t_70b642c9); flipped to [] after the bounce window.
-open_webui_hermes_disabled_profiles:
-  - virtuajimmy
-  - copilot
-  - plexibot
+# All profiles provisioned with per-profile API_SERVER_KEY values
+# (t_70b642c9); gateway bounced 2026-10-19 15:07 to load them.
+open_webui_hermes_disabled_profiles: []
 
 # Optional per-profile prefix overrides (defaults to the profile name).
 open_webui_hermes_profile_prefixes:
