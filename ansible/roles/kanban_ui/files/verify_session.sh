@@ -24,14 +24,19 @@
 #     (printf, [[, redirection, read) do not fork, so /proc never sees
 #     the secret.
 #   - The verification base MUST be the HTTPS SWAG URL. This script
-#     refuses to run against http://, mirroring the deployed Secure
-#     session cookie; there is no plaintext credential/session fallback.
+#     ABORTS (exit 1, not fail-and-continue) against a non-https base,
+#     BEFORE mktemp, before the watcher starts, and before a single
+#     request is constructed - mirroring the deployed Secure session
+#     cookie; there is no plaintext credential/session fallback.
+#     (Round-2 review finding 4301554415: the old fail()-and-continue
+#     ordering still reached the step-5 login POST in plaintext.)
 #   - All artifacts live in a private mktemp -d directory (mode 700,
 #     removed by an EXIT trap). The play runs with become: true, so no
 #     predictable /tmp paths may be written.
 #
 # Verifies (live):
-#   0. the verification base is HTTPS
+#   0. the verification base is HTTPS (hard abort before ANY request or
+#      token read, never fail-and-continue - finding 4301554415)
 #   1. anonymous /api/health is 401 (session gate enforcing)
 #   2. anonymous index is 200 and carries NO token material
 #   3. static assets (app.js/app.css/md.js) serve 200 and app.js is
@@ -55,14 +60,39 @@ set -u
 : "${KANBAN_UI_VERIFY_TOKEN_FILE:?}"
 : "${KANBAN_UI_VERIFY_BOARD:?}"
 BASE="${KANBAN_UI_VERIFY_URL%/}"
+
+FAIL=0
+fail() { echo "FAIL: $1"; FAIL=1; }
+# ROUND-2 REVIEW FINDING 4301554415: fail() only sets FAIL=1; execution
+# continues to the next line, and the next line may be ANOTHER REQUEST.
+# Credential-transport gates therefore use abort(): report, stop the
+# already-started argv watcher, and exit nonzero HERE so no subsequent
+# request (least of all the real-token login POST) is ever constructed.
+abort() {
+  echo "ABORT: $1"
+  if [ -n "${WATCHER_PID:-}" ]; then
+    kill "$WATCHER_PID" 2>/dev/null || true
+    wait "$WATCHER_PID" 2>/dev/null || true
+  fi
+  exit 1
+}
+
+# 0. credentials never transit plaintext. This gate runs BEFORE the
+# token file is read, before mktemp, before the watcher starts, and
+# before a single request is constructed (finding 4301554415: the old
+# ordering started the watcher first and merely failed, so a mis-set
+# http:// base still reached the step-5 real-token login POST).
+case "$BASE" in
+  https://*) : ;;
+  *) abort "verification base is not https; login must never traverse plaintext";;
+esac
+
 # ROUND-7 finding 3: the token arrives as a PATH only (see transport
 # rule above). `read` is a builtin: no fork, nothing token-shaped can
 # reach any /proc/<pid>/cmdline.
 TOK=""
 IFS= read -r TOK < "$KANBAN_UI_VERIFY_TOKEN_FILE"
 [[ -n "$TOK" ]] || exit 1
-FAIL=0
-fail() { echo "FAIL: $1"; FAIL=1; }
 
 WORK=$(mktemp -d) || exit 1
 chmod 700 "$WORK"
@@ -92,11 +122,8 @@ trap 'rm -rf "$WORK"' EXIT
 ) &
 WATCHER_PID=$!
 
-# 0. credentials never transit plaintext
-case "$BASE" in
-  https://*) : ;;
-  *) fail "verification base is not https; login must never traverse plaintext";;
-esac
+# (step 0, the https gate, already ran above before the token was even
+# read - finding 4301554415; a non-https base can no longer reach here)
 
 # 1. anonymous API gate
 C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/api/health")
@@ -145,7 +172,10 @@ C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST "$BASE/login" \
 : "${KANBAN_UI_DIRECT_URL:?}"
 case "$KANBAN_UI_DIRECT_URL" in
   http://*) : ;;
-  *) fail "KANBAN_UI_DIRECT_URL must be the plaintext direct base (sanity of this probe)";;
+  # Same continue-after-fail hazard as finding 4301554415: this is the
+  # gate in front of three direct POSTs. A malformed base must stop the
+  # script, not fall through and fire the probes at an unknown target.
+  *) abort "KANBAN_UI_DIRECT_URL must be the plaintext direct base (sanity of this probe)";;
 esac
 for probe_name in plain spoofed-proto spoofed-proto-and-bogus-marker; do
   hdr_args=()
@@ -178,12 +208,16 @@ esc=${esc//\"/\\\"}
 HDRS=$(curl -s -D - -o /dev/null --max-time 15 -X POST "$BASE/login" \
   -H 'Content-Type: application/json' --data-binary "@$WORK/login.json")
 STATUS=$(grep -oE 'HTTP/[0-9.]+ [0-9]+' <<<"$HDRS" | tail -1 | grep -oE '[0-9]+$')
-[ "$STATUS" = "200" ] || fail "login expected 200, got $STATUS"
-grep -qi 'set-cookie: kanban_ui_session=[^;]*;.*httponly' <<<"$HDRS" || fail "session cookie is not HttpOnly"
-grep -qi 'set-cookie: kanban_ui_session=.*samesite=strict' <<<"$HDRS" || fail "session cookie is not SameSite=strict"
-grep -qi 'set-cookie: kanban_ui_session=[^;]*;.*secure' <<<"$HDRS" || fail "session cookie is not Secure"
+# Finding 4301554415 audit: the login itself failed or minted suspect
+# session material. fail() here would keep executing and fire every
+# remaining cookie-bearing request (steps 6-10) against the live app;
+# these gates abort instead.
+[ "$STATUS" = "200" ] || abort "login expected 200, got $STATUS"
+grep -qi 'set-cookie: kanban_ui_session=[^;]*;.*httponly' <<<"$HDRS" || abort "session cookie is not HttpOnly"
+grep -qi 'set-cookie: kanban_ui_session=.*samesite=strict' <<<"$HDRS" || abort "session cookie is not SameSite=strict"
+grep -qi 'set-cookie: kanban_ui_session=[^;]*;.*secure' <<<"$HDRS" || abort "session cookie is not Secure"
 SESS=$(grep -io 'set-cookie: kanban_ui_session=[^;]*' <<<"$HDRS" | head -1 | cut -d= -f2)
-[ -n "$SESS" ] || fail "no session cookie issued"
+[ -n "$SESS" ] || abort "no session cookie issued"
 
 # Cookie-bearing requests: the session value goes into a 0600 curl
 # --config file via printf (builtin); only the file path is argv.

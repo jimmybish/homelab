@@ -396,6 +396,39 @@ class TestVerifierArgvHygiene(unittest.TestCase):
         self.assertIn('https://*)', src)  # refuses any non-https base
         self.assertIn('argv_leak', src)   # the watcher gates the exit code
 
+    def test_http_base_aborts_before_any_request_or_token_read(self):
+        # ROUND-2 REVIEW FINDING 4301554415: fail() only sets FAIL=1 and
+        # execution continued, so a mis-set http:// base still reached
+        # the step-5 real-token login POST. Lock the ordering statically:
+        #   (a) an abort() primitive exists that kills the watcher and
+        #       exits nonzero,
+        #   (b) the https gate uses abort (not fail) and sits BEFORE the
+        #       watcher launch, the token read, and every POST/curl,
+        #   (c) the login/cookie integrity gates (steps 5) also abort --
+        #       they protect session material and gate steps 6-10.
+        src = self.VERIFIER.read_text()
+        self.assertRegex(src, r"abort\(\) \{[\s\S]*?kill \"\$WATCHER_PID\"[\s\S]*?exit 1")
+        gate = src.index("https://*)")
+        watcher = src.index("WATCHER_PID=$!")
+        token_read = src.index('IFS= read -r TOK <')
+        login_post = src.index('"$BASE/login"')
+        self.assertLess(gate, watcher)
+        self.assertLess(gate, token_read)
+        self.assertLess(gate, login_post)
+        # the case-arm that rejects a non-https base must abort, not fail
+        self.assertRegex(src, r"\*\) abort \"verification base is not https")
+        # direct-probe sanity gate in front of the three plaintext POSTs
+        self.assertRegex(src, r"\*\) abort \"KANBAN_UI_DIRECT_URL must be")
+        # step-5 integrity gates abort so no cookie-bearing request fires
+        # after a failed/suspect login
+        for msg in ("login expected 200", "session cookie is not HttpOnly",
+                    "session cookie is not SameSite=strict",
+                    "session cookie is not Secure", "no session cookie issued"):
+            self.assertRegex(src, r"\|\| abort \"" + msg)
+        # the old fail-and-continue form must be gone
+        self.assertNotIn('fail "verification base is not https', src)
+        self.assertNotIn('fail "login expected 200', src)
+
     def test_token_reaches_script_as_path_not_env_value(self):
         # ROUND-7 finding 3: Ansible renders task `environment:` into
         # `/bin/sh -c KEY=value ...` argv on the target, so the token
