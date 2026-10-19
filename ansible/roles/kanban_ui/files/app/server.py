@@ -138,6 +138,35 @@ def worker_control_reassign_denied(body: object) -> bool:
         return True
     return bool(value)
 
+
+# PR#13 review finding (comment 4319617397): status-driven reclaim.
+# The deny-list above only refuses the EXPLICIT reclaim endpoints, but the
+# pinned plugin's PATCH /tasks/{id} and POST /tasks/bulk both dispatch
+# status="ready" through _drag_to -> _set_status_direct, which for a
+# RUNNING task NULLs claim_lock/claim_expires/worker_pid, ends the run as
+# 'reclaimed', and calls _terminate_reclaimed_worker -- which no-ops unless
+# the claim lock carries the LOCAL host prefix (never true in this
+# container; the dispatcher claims on the Hermes host). Dragging a running
+# card to Ready therefore released the claim without ever signalling the
+# real worker, and recompute_ready let the dispatcher spawn a duplicate
+# beside it. build_app() wraps plugin._set_status_direct with a guard built
+# from this predicate; both update paths share that single chokepoint.
+def worker_requeue_denied(current_status: object, requested_status: object) -> bool:
+    """True when moving a task to ``requested_status`` would release a live
+    worker claim through the direct status write: a running task requeued
+    to 'ready'. Anything else (non-string inputs, absent tasks via None,
+    other transitions) is not this op. Deliberately narrow: only the exact
+    running->ready pair is refused, matching the finding's scope."""
+    return current_status == "running" and requested_status == "ready"
+
+
+WORKER_REQUEUE_REJECT_MSG = (
+    "cannot requeue a running task to 'ready' from the Kanban WebUI: the "
+    "direct status write releases the worker claim without signalling the "
+    "host worker, which can lead to a duplicate dispatch. Run "
+    "`hermes kanban reclaim <task_id>` on the Hermes host instead."
+)
+
 # Access-log credential hygiene. Stale browser tabs from the old
 # bearer-token build still reconnect with ?token=<secret> in the query
 # string; uvicorn's access logger echoes the full request line, so the
@@ -637,6 +666,57 @@ def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_a
     _reassign_guarded_call._worker_control_guarded = True
     _reassign_guarded_call._worker_control_upstream = _reassign_upstream_call
     _reassign_route.dependant.call = _reassign_guarded_call
+
+    # ---- status-driven reclaim guard (PR#13 review finding 4319617397) ----
+    # The deny-list middleware above refuses the EXPLICIT reclaim endpoints,
+    # but a running-card -> ready drag reaches the same claim release
+    # through plugin._set_status_direct: that helper NULLs the claim
+    # columns, ends the run as 'reclaimed', and its post-commit
+    # _terminate_reclaimed_worker no-ops for any claim lock that does not
+    # carry the LOCAL host prefix (inside this container: never), so the
+    # host worker keeps running while recompute_ready invites a duplicate
+    # dispatch. Both update paths -- PATCH /tasks/{id} (_patch_status) and
+    # POST /tasks/bulk (_bulk_apply_one) -- funnel through _drag_to ->
+    # _set_status_direct for the raw ready write, so wrapping that ONE
+    # module-level function guards BOTH paths at the single chokepoint.
+    # _drag_to and _STATUS_HANDLERS resolve _set_status_direct as a module
+    # global at call time (same mechanism as the WS-gate override below),
+    # so the swap is authoritative without touching the pinned checkout.
+    # The refuse channel is upstream's own _StatusRejected: _patch_status
+    # maps it via _map_errors(400, _StatusRejected, ValueError) -> 400 +
+    # actionable detail, and bulk_update's per-id handler records it as
+    # {ok: false, error: <message>} without aborting siblings. The check
+    # runs BEFORE the write_txn opens -- a refused transition never touches
+    # the DB. Fail closed on router drift: if upstream renames the helper
+    # or the error class, refuse to boot rather than serve ready-requeue
+    # unguarded (same philosophy as the reassign guard and proxy marker).
+    _upstream_set_status = getattr(plugin, "_set_status_direct", None)
+    _status_rejected_cls = getattr(plugin, "_StatusRejected", None)
+    if not callable(_upstream_set_status) or not (
+        isinstance(_status_rejected_cls, type) and issubclass(_status_rejected_cls, Exception)
+    ):
+        raise SystemExit(
+            "worker-control guard could not attach to plugin._set_status_direct; "
+            "refusing to start with the running->ready status requeue unguarded "
+            "(mounted plugin router drifted from the pinned Hermes checkout)."
+        )
+
+    def _set_status_direct_guarded(conn, task_id, new_status):
+        # Read the CURRENT status through upstream's own accessor; an
+        # absent task (None) is not a running claim and passes through to
+        # upstream's own not-found handling. Only the exact running->ready
+        # pair is refused; every other transition (todo<->ready for idle
+        # cards, running->blocked/scheduled/done/review, ...) is untouched.
+        current = plugin.kanban_db.get_task(conn, task_id)
+        if worker_requeue_denied(getattr(current, "status", None), new_status):
+            raise _status_rejected_cls(WORKER_REQUEUE_REJECT_MSG)
+        return _upstream_set_status(conn, task_id, new_status)
+
+    _set_status_direct_guarded.__name__ = "_set_status_direct"
+    _set_status_direct_guarded.__qualname__ = "_set_status_direct[worker-control-guarded]"
+    _set_status_direct_guarded._worker_control_guarded = True
+    _set_status_direct_guarded._worker_control_upstream = _upstream_set_status
+    plugin._set_status_direct = _set_status_direct_guarded
 
     # Override the plugin's WS upgrade authorization. The upstream default
     # delegates to web_server._ws_auth_ok, which only understands ?token=

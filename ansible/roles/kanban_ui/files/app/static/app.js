@@ -393,6 +393,20 @@ function syncFilterOptions() {
 
 /* ---------------- actions ---------------- */
 async function moveTasks(ids, target) {
+  // PR#13 review finding 4319617397: dragging a RUNNING card to Ready
+  // reaches _set_status_direct, which releases the worker claim without
+  // signalling the host worker (duplicate-dispatch hazard). server.py
+  // refuses the transition at the shared chokepoint (PATCH 400 / bulk
+  // per-id refusal); the UI refuses it too so there is no misleading
+  // half-success toast. Reclaim belongs on the Hermes host.
+  if (target === "ready") {
+    const running = ids.filter(id => { const t = findTask(id); return t && t.status === "running"; });
+    if (running.length) {
+      toast("running card(s) cannot move to Ready from the WebUI: the claim release would not signal the host worker; run `hermes kanban reclaim <id>` on the Hermes host (" + running.join(", ") + ")", "err");
+      if (running.length === ids.length) return;
+      ids = ids.filter(id => !running.includes(id));
+    }
+  }
   // single PATCH per task via bulk endpoint for status
   const body = { ids, status: target === "archived" ? undefined : target, archive: target === "archived" };
   try {
@@ -405,7 +419,7 @@ async function moveTasks(ids, target) {
 
 function cardMenuItems(t) {
   const items = [];
-  const move = (status, label) => items.push({ label, fn: () => moveTasks(S.sel.has(t.id) ? [...S.sel] : [t.id], status) });
+  const move = (status, label, extra = {}) => items.push({ label, fn: () => moveTasks(S.sel.has(t.id) ? [...S.sel] : [t.id], status), ...extra });
   if (t.status !== "done") {
     if (t.status === "blocked" || t.status === "scheduled") items.push({ label: "Unblock → Ready", fn: () => act(api(`/tasks/${t.id}` + qs(), { method: "PATCH", body: { status: "ready" } }).then(loadBoard), "Unblocked") });
     else if (t.status !== "running") items.push({ label: "✓ Complete", fn: () => openCompleteModal(t) });
@@ -423,7 +437,14 @@ function cardMenuItems(t) {
   if (t.status === "triage" || t.status === "todo") items.push({ label: "🌱 Decompose", fn: () => act(api(`/tasks/${t.id}/decompose` + qs(), { method: "POST", body: {} }).then(loadBoard), "Decomposed") });
   move("triage", "→ Triage");
   move("todo", "→ Todo");
-  move("ready", "→ Ready");
+  // PR#13 review finding 4319617397: running cards cannot be requeued to
+  // Ready here (server-side chokepoint guard in server.py refuses; the
+  // item stays visible-but-disabled until host-side worker control lands).
+  if (t.status === "running") {
+    items.push({ label: "→ Ready (disabled in the WebUI)", disabled: "", title: "Requeuing a running task would release the worker claim without signalling the host worker; run `hermes kanban reclaim <id>` on the Hermes host instead" });
+  } else {
+    move("ready", "→ Ready");
+  }
   items.push({ label: "Reassign…", fn: () => openReassignModal(t) });
   items.push({ label: "🔮 Estimate", fn: async () => { try { const r = await api(`/tasks/${t.id}/estimate` + qs(), { method: "POST" }); toast(r.ok ? `est ~${r.est_tokens} tokens · ${r.complexity} (${r.model})` : ("estimate: " + (r.reason || "n/a")), r.ok ? "ok" : "err"); } catch (e) { toast(e.message, "err"); } } });
   items.push({ label: "⤴ Add dependency…", fn: () => openDepModal(t) });
@@ -440,6 +461,7 @@ function openCardMenu(t, x, y) {
     if (it.sep) { menu.append(h("hr", { style: "border:none;border-top:1px solid var(--line);margin:4px 0" })); continue; }
     menu.append(h("button", {
       class: "btn btn-quiet" + (it.danger ? " danger" : ""), style: "width:100%;justify-content:flex-start;border-radius:8px",
+      ...(it.disabled ? { disabled: "" } : {}), ...(it.title ? { title: it.title } : {}),
       onclick: () => { closeMenus(); it.fn(); }
     }, it.label));
   }
@@ -1088,8 +1110,18 @@ function kvBox(k, vNode) { return h("div", { class: "kv" }, h("div", { class: "k
 function statusBadge(s) { return ["done"].includes(s) ? "ok" : ["blocked", "archived"].includes(s) ? "bad" : ["running", "scheduled", "review"].includes(s) ? "warn" : "neutral"; }
 function runBadge(r) { const o = (r.outcome || "").toLowerCase(); if (["completed", "done", "success"].includes(o)) return "ok"; if (["failed", "crashed", "gave_up", "error", "timeout"].includes(o)) return "bad"; if (r.ended_at === null) return "warn"; return "neutral"; }
 function statusControl(t) {
-  const opts = [["", t.status], ...["triage", "todo", "scheduled", "ready", "blocked", "review", "done"].filter(s => s !== t.status).map(s => [s, "→ " + s])];
+  // PR#13 review finding 4319617397: for a RUNNING card the "→ ready"
+  // option is visible-but-disabled (the PATCH would be refused server-side
+  // at _set_status_direct; reclaim belongs on the Hermes host). Every
+  // other target stays available.
+  const opts = [[ "", t.status], ...["triage", "todo", "scheduled", "ready", "blocked", "review", "done"]
+    .filter(s => s !== t.status)
+    .map(s => [s, "→ " + s + (t.status === "running" && s === "ready" ? " (disabled in the WebUI)" : "")])];
   const sel = selControl(opts, "");
+  if (t.status === "running") {
+    const readyOpt = [...sel.options].find(o => o.value === "ready");
+    if (readyOpt) { readyOpt.disabled = true; readyOpt.title = "Requeuing a running task would release the worker claim without signalling the host worker; run `hermes kanban reclaim <id>` on the Hermes host instead"; }
+  }
   sel.addEventListener("change", async () => {
     if (!sel.value) return;
     if (sel.value === "done") { openCompleteModal(t); sel.value = ""; return; }
