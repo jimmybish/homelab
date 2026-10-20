@@ -201,6 +201,45 @@ WORKER_REQUEUE_REJECT_MSG = (
     "`hermes kanban reclaim <task_id>` on the Hermes host instead."
 )
 
+# PR#13 review finding (comment 4323915007): container-local dispatcher
+# pass. The mounted plugin exposes POST /dispatch straight onto
+# kanban_db.dispatch_once(). At the pinned Hermes revision (b3aa561f,
+# hermes_cli/kanban_db.py:8419 -> release_stale_claims at 4454) a tick
+# from THIS container is actively dangerous: release_stale_claims treats
+# a claim whose lock does not carry the local (_claimer_id()) host prefix
+# as foreign, so the live-PID extension is skipped AND
+# _terminate_reclaimed_worker returns host_local=False without ever
+# signalling; _worker_survived_termination therefore does not defer and
+# the expired host claim is still cleared (status back to ready, run
+# ended 'reclaimed'). The host worker keeps running while the same tick's
+# spawn pass (recompute_ready) can dispatch a duplicate beside it. There
+# is no safe container-side nudge: dispatch belongs on the Hermes host
+# (CLI `hermes kanban dispatch`, or the gateway's embedded 60s tick), so
+# the endpoint is refused fail-closed in the same middleware as the
+# worker-control deny-list until dispatch can delegate to the host.
+_DISPATCHER_PASS_PATH = re.compile(r"^/api/kanban/dispatch/?$")
+
+
+def dispatcher_pass_denied(method: str, path: str) -> bool:
+    """True when (method, path) is the container-local dispatcher pass
+    this build must never execute: POST /api/kanban/dispatch (trailing
+    slash included -- Starlette would 307 it back onto the same route).
+    Exact-match like _WORKER_CONTROL_DENIED: no prefix games, lookalike
+    paths (/api/kanban/dispatch/extra, /api/kanban/tasks/dispatch) and
+    every other method (GET) pass through untouched."""
+    m = (method or "").strip().upper()
+    return m == "POST" and bool(_DISPATCHER_PASS_PATH.match(path or ""))
+
+
+DISPATCH_PASS_REJECT_BODY = {
+    "detail": "dispatcher passes are disabled in the Kanban WebUI: a "
+    "container-side dispatch_once() tick clears expired HOST worker "
+    "claims without signalling the host worker (the claim lock is foreign "
+    "in this container), which can leave a live worker running while a "
+    "duplicate is dispatched. Run `hermes kanban dispatch` on the Hermes "
+    "host, or let the gateway's embedded dispatcher tick."
+}
+
 # Access-log credential hygiene. Stale browser tabs from the old
 # bearer-token build still reconnect with ?token=<secret> in the query
 # string; uvicorn's access logger echoes the full request line, so the
@@ -602,6 +641,13 @@ def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_a
         # workflows) is only ever visible to a session-holder.
         if worker_control_denied(request.method, request.url.path):
             return JSONResponse(WORKER_CONTROL_REJECT_BODY, status_code=403)
+        # PR#13 review finding 4323915007: the container-local dispatcher
+        # pass is refused at the same point -- before routing, before any
+        # DB access, so the mounted dispatch() -> dispatch_once() is never
+        # entered. Same ordering rationale: inside auth_mw, so an
+        # anonymous probe still gets 401 at the session gate.
+        if dispatcher_pass_denied(request.method, request.url.path):
+            return JSONResponse(DISPATCH_PASS_REJECT_BODY, status_code=403)
         return await call_next(request)
 
     @app.middleware("http")

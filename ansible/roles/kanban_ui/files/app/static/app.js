@@ -1271,7 +1271,14 @@ function renderBulkBar() {
     h("button", { class: "btn btn-sm btn-quiet", onclick: () => { const ids = [...S.sel]; S.sel.clear(); moveTasks(ids, "blocked").then(render); } }, "→ Blocked"),
     h("button", { class: "btn btn-sm btn-quiet", onclick: () => { const ids = [...S.sel]; S.sel.clear(); moveTasks(ids, "done").then(render); } }, "→ Done"),
     h("button", { class: "btn btn-sm btn-quiet danger", onclick: () => { const ids = [...S.sel]; S.sel.clear(); moveTasks(ids, "archived").then(render); } }, "Archive"),
-    h("button", { class: "btn btn-sm btn-quiet", onclick: async () => { const ids = [...S.sel]; S.sel.clear(); render(); await act(api("/dispatch" + qs(), { method: "POST" }), "Dispatcher pass done"); loadBoard(true); } }, "⇢ dispatch"),
+    // PR#13 review finding 4323915007: the container-local dispatcher
+    // pass is refused server-side (POST /api/kanban/dispatch -> 403):
+    // dispatch_once() from this container clears expired HOST worker
+    // claims without signalling the host worker, inviting a duplicate
+    // dispatch. The button stays visible but disabled (same contract as
+    // the worker-terminate ✕) and constructs NO /dispatch fetch; run
+    // `hermes kanban dispatch` on the Hermes host instead.
+    h("button", { class: "btn btn-sm btn-quiet", disabled: "", title: "Dispatcher passes are only available on the Hermes host: hermes kanban dispatch (disabled in the WebUI)" }, "⇢ dispatch"),
     h("button", { class: "btn btn-sm btn-quiet", onclick: () => { S.sel.clear(); render(); } }, "Clear"));
   document.body.append(bar);
 }
@@ -1372,10 +1379,18 @@ function wire() {
   $("#settingsBtn").addEventListener("click", openSettings);
   $("#workersBtn").addEventListener("click", openWorkers);
   $("#boardBtn").addEventListener("click", openBoardSwitcher);
-  $("#nudgeBtn").addEventListener("click", async () => {
-    try { const r = await api("/dispatch" + qs(), { method: "POST" }); toast("Dispatch: " + JSON.stringify(r).slice(0, 120), "ok"); await loadBoard(true); }
-    catch (e) { toast(e.message, "err"); }
-  });
+  // PR#13 review finding 4323915007: the topbar "Nudge dispatcher"
+  // control triggered the container-local pass (POST /api/kanban/dispatch
+  // -> dispatch_once), which from this container clears expired HOST
+  // worker claims without signalling the host worker (duplicate-dispatch
+  // hazard). Server refuses it with 403; the control is disabled here and
+  // NO click handler is registered at all, so no /dispatch fetch can ever
+  // be constructed. Dispatch belongs on the Hermes host: run
+  // `hermes kanban dispatch` there, or let the gateway's embedded
+  // dispatcher tick.
+  const nudgeBtn = $("#nudgeBtn");
+  nudgeBtn.disabled = true;
+  nudgeBtn.title = "Dispatcher passes are only available on the Hermes host: hermes kanban dispatch (disabled in the WebUI)";
   const theme = localStorage.getItem("ktheme") || "dark";
   document.documentElement.dataset.theme = theme;
   $("#themeBtn").addEventListener("click", () => {

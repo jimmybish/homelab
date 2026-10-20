@@ -54,6 +54,10 @@
 #      reject a FULL session with the documented 403 body, while the plain
 #      reassign reaches its handler and the anon reclaim 401s at the
 #      session gate (PR#13 review finding 4301554389)
+#  10b. the container-local dispatcher pass (POST /api/kanban/dispatch)
+#      rejects a FULL session with the documented 403 body and leaves the
+#      board byte-identical; the anon tick 401s at the session gate
+#      (PR#13 review finding 4323915007)
 set -u
 
 : "${KANBAN_UI_VERIFY_URL:?}"
@@ -312,6 +316,39 @@ wop() {
 wop reclaim "/api/kanban/tasks/kanban-ui-probe/reclaim" '{"reason":"probe"}'
 wop terminate "/api/kanban/runs/999999/terminate" '{"reason":"probe"}'
 wop reassign-reclaim "/api/kanban/tasks/kanban-ui-probe/reassign" '{"profile":"probe","reclaim_first":true}'
+# 10b. PR#13 review finding 4323915007: the container-local dispatcher
+# pass (POST /api/kanban/dispatch -> dispatch_once -> release_stale_claims
+# clearing foreign host claims without signalling) must be refused with
+# the documented 403 body for a full session, must 401 anonymously at the
+# session gate, and the refused tick must leave the board byte-identical
+# (the request never reaches dispatch_once).
+{
+  printf 'header = "Cookie: kanban_ui_session=%s"\n' "$SESS"
+  printf 'url = "%s/api/kanban/board?board=%s"\n' "$BASE" "$KANBAN_UI_VERIFY_BOARD"
+} > "$WORK/board_sha.conf"
+chmod 600 "$WORK/board_sha.conf"
+board_sha() {
+  curl -s --max-time 60 --config "$WORK/board_sha.conf" -H 'X-Kanban-UI: 1' | sha256sum | cut -d' ' -f1
+}
+SHA_BEFORE=$(board_sha)
+{
+  printf 'header = "Cookie: kanban_ui_session=%s"\n' "$SESS"
+  printf 'url = "%s/api/kanban/dispatch?board=%s"\n' "$BASE" "$KANBAN_UI_VERIFY_BOARD"
+} > "$WORK/wo_dispatch.conf"
+chmod 600 "$WORK/wo_dispatch.conf"
+C=$(curl -s -o "$WORK/wo_dispatch.body" -w '%{http_code}' --max-time 15 -X POST \
+  --config "$WORK/wo_dispatch.conf" -H 'X-Kanban-UI: 1' \
+  -H 'Content-Type: application/json')
+[ "$C" = "403" ] || fail "dispatcher-pass dispatch expected 403, got $C"
+grep -q 'dispatcher passes are disabled' "$WORK/wo_dispatch.body" \
+  || fail "dispatcher-pass dispatch 403 body is not the documented reject"
+SHA_AFTER=$(board_sha)
+[ "$SHA_BEFORE" = "$SHA_AFTER" ] || fail "refused dispatch pass mutated board state"
+# Same middleware-ordering contrast as reclaim: anonymous dispatch tick
+# hits the OUTER session gate first (401), never the deny-list.
+C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST \
+  "$BASE/api/kanban/dispatch")
+[ "$C" = "401" ] || fail "anon dispatch expected 401 (session gate outermost), got $C"
 # Contrast 1: plain reassign (no reclaim_first) must reach the upstream
 # handler, not the guard (unknown id => upstream 409/404; the guard body
 # here would mean the deny-list over-rejects the sanctioned op).

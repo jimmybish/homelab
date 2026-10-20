@@ -83,6 +83,9 @@ class TestPathPredicate(unittest.TestCase):
         self.assertFalse(server.worker_control_denied("POST", f"/api/kanban/tasks/{TASK_ID}"))
         self.assertFalse(server.worker_control_denied("POST", f"/api/kanban/tasks/{TASK_ID}/reassign"))
         self.assertFalse(server.worker_control_denied("POST", "/api/kanban/runs/41/inspect"))
+        # POST /api/kanban/dispatch is NOT part of this deny-list -- it
+        # is refused by its own predicate, dispatcher_pass_denied below
+        # (PR#13 review finding 4323915007), with its own reject body.
         self.assertFalse(server.worker_control_denied("POST", "/api/kanban/dispatch"))
         self.assertFalse(server.worker_control_denied("POST", "/login"))
         # Empty/garbage input must refuse cleanly, never raise.
@@ -131,6 +134,101 @@ class TestRejectBody(unittest.TestCase):
         self.assertIn("hermes kanban reclaim", detail)
         # No credential material may ever leak into a reject body.
         self.assertNotIn("token", detail.lower())
+
+
+class TestDispatcherPassPredicate(unittest.TestCase):
+    """PR#13 review finding (comment 4323915007): POST /api/kanban/dispatch
+    runs dispatch_once() inside this container; release_stale_claims then
+    clears expired HOST claims without signalling (the claim lock is
+    foreign here), so a live host worker can remain beside a duplicate
+    dispatch. Refused by its own exact-match predicate + reject body."""
+
+    def test_dispatch_post_denied(self):
+        self.assertTrue(server.dispatcher_pass_denied("POST", "/api/kanban/dispatch"))
+
+    def test_trailing_slash_denied(self):
+        # Starlette redirect_slashes would 307 /dispatch/ back onto the
+        # same handler; both spellings must be refused.
+        self.assertTrue(server.dispatcher_pass_denied("POST", "/api/kanban/dispatch/"))
+
+    def test_method_case_and_padding_tolerated(self):
+        self.assertTrue(server.dispatcher_pass_denied(" post ", "/api/kanban/dispatch"))
+
+    def test_wrong_method_not_denied(self):
+        self.assertFalse(server.dispatcher_pass_denied("GET", "/api/kanban/dispatch"))
+        self.assertFalse(server.dispatcher_pass_denied("DELETE", "/api/kanban/dispatch"))
+
+    def test_lookalike_paths_not_denied(self):
+        # Over-match guards: only the exact dispatcher-pass route is
+        # refused; sibling board reads and task paths are untouched.
+        self.assertFalse(server.dispatcher_pass_denied("POST", "/api/kanban/dispatch/extra"))
+        self.assertFalse(server.dispatcher_pass_denied("POST", "/api/kanban/tasks/dispatch"))
+        self.assertFalse(server.dispatcher_pass_denied("POST", "/api/kanban/dispatchx"))
+        self.assertFalse(server.dispatcher_pass_denied("POST", "/api/kanban/board"))
+        self.assertFalse(server.dispatcher_pass_denied("POST", "/api/kanban/dispatch/../board"))
+        self.assertFalse(server.dispatcher_pass_denied("", ""))
+        self.assertFalse(server.dispatcher_pass_denied(None, None))
+
+    def test_reject_body_explains_and_points_to_host_cli(self):
+        detail = server.DISPATCH_PASS_REJECT_BODY["detail"]
+        self.assertIn("disabled", detail)
+        self.assertIn("hermes kanban dispatch", detail)
+        self.assertIn("duplicate", detail)
+        # No credential material may ever leak into a reject body.
+        self.assertNotIn("token", detail.lower())
+
+
+class TestDispatcherPassWiring(unittest.TestCase):
+    """Static locks: the middleware consults the dispatcher predicate with
+    its OWN reject body (not the worker-control one), still inside
+    auth_mw, and app.js no longer builds any /dispatch fetch."""
+
+    def test_middleware_rejects_dispatch_403_with_own_body(self):
+        src = SERVER.read_text()
+        mw = src[src.index("async def worker_control_mw"):]
+        mw = mw[: mw.index("@app.middleware")]
+        self.assertIn("dispatcher_pass_denied(request.method, request.url.path)", mw)
+        self.assertIn("DISPATCH_PASS_REJECT_BODY", mw)
+        self.assertIn("status_code=403", mw)
+
+    def test_dispatch_check_is_inside_auth_gate(self):
+        # The dispatcher check must live inside worker_control_mw, which
+        # is registered BEFORE auth_mw (auth ends up outermost), so an
+        # anonymous /dispatch probe still 401s at the session gate.
+        src = SERVER.read_text()
+        self.assertLess(
+            src.index("dispatcher_pass_denied(request.method"),
+            src.index("async def auth_mw"),
+        )
+
+    def test_appjs_never_calls_dispatch(self):
+        src = APPJS.read_text()
+        # No executable line may build a /dispatch request any more;
+        # comments naming the endpoint are fine.
+        exec_lines = [ln for ln in src.splitlines() if not ln.strip().startswith("//")]
+        self.assertEqual(
+            sum(ln.count('"/dispatch"') for ln in exec_lines), 0,
+            "app.js must not construct any /dispatch fetch",
+        )
+        self.assertEqual(
+            sum(ln.count('"/dispatch') for ln in exec_lines), 0,
+        )
+
+    def test_both_dispatch_controls_disabled_with_explanation(self):
+        src = APPJS.read_text()
+        # Bulkbar button: rendered disabled + host-CLI pointer, same
+        # affordance-visible contract as the worker-terminate ✕.
+        self.assertIn('disabled: "", title: "Dispatcher passes are only available on the Hermes host: hermes kanban dispatch (disabled in the WebUI)" }, "\u21e2 dispatch")', src)
+        # Topbar nudge button: disabled at runtime with the same title.
+        self.assertIn('nudgeBtn.disabled = true;', src)
+        self.assertIn('nudgeBtn.title = "Dispatcher passes are only available on the Hermes host: hermes kanban dispatch (disabled in the WebUI)";', src)
+        # The static shell ships it disabled too, so there is no enabled
+        # flash-of-control before wire() runs.
+        html = (SERVER.parent / "static" / "index.html").read_text()
+        nudge = [ln for ln in html.splitlines() if 'id="nudgeBtn"' in ln]
+        self.assertEqual(len(nudge), 1)
+        self.assertIn("disabled", nudge[0])
+        self.assertIn("hermes kanban dispatch", nudge[0])
 
 
 class TestServerWiringContract(unittest.TestCase):
@@ -331,6 +429,36 @@ class TestLiveWiring(unittest.TestCase):
         )
         self.assertEqual(status, 403)
         self.assertIn(b"worker control operations are disabled", body)
+
+    def test_anonymous_dispatch_still_gets_session_401_first(self):
+        # PR#13 finding 4323915007: middleware ordering lock for the
+        # dispatcher-pass refusal -- auth is outermost; the deny-list
+        # never answers strangers.
+        status, _ = self._request("POST", "/api/kanban/dispatch", cookie="", header=True)
+        self.assertEqual(status, 401)
+
+    def test_dispatch_pass_rejected_403(self):
+        # Full session must get the documented dispatcher-pass reject,
+        # NOT the worker-control body (distinct bodies prove WHICH guard
+        # answered) and never reach dispatch_once.
+        status, body = self._request("POST", "/api/kanban/dispatch", cookie=self._cookie)
+        self.assertEqual(status, 403)
+        self.assertIn(b"dispatcher passes are disabled", body)
+        self.assertIn(b"hermes kanban dispatch", body)
+        self.assertNotIn(b"worker control operations", body)
+
+    def test_dispatch_pass_trailing_slash_rejected_403(self):
+        status, body = self._request("POST", "/api/kanban/dispatch/", cookie=self._cookie)
+        self.assertEqual(status, 403)
+        self.assertIn(b"dispatcher passes are disabled", body)
+
+    def test_dispatch_get_not_swallowed(self):
+        # The refusal is method-exact: a GET on the same path is not the
+        # dispatcher pass and must hit the ROUTER (405/404), never the
+        # deny-list 403 body.
+        status, body = self._request("GET", "/api/kanban/dispatch", cookie=self._cookie, header=False)
+        self.assertNotEqual(status, 403)
+        self.assertNotIn(b"dispatcher passes are disabled", body)
 
     def test_plain_reassign_and_reads_still_work(self):
         # Unaffected ops must reach their HANDLERS (not the guard): an
