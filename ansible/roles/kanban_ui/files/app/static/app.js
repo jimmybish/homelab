@@ -897,6 +897,30 @@ function drawerIsStale(myId, mySeq) {
   // drawer would be left stuck on "Loading…".
   return _drawerRenderId === myId && mySeq !== _drawerRenderSeq;
 }
+/* PR#13 review finding 4321368000: the typing guard in refreshDrawer() only
+ * ran *before* its task-detail request, and renderDrawer() suspends again on
+ * the uncached /model-options fetch, so text typed into the description or
+ * comment box while either request was in flight was destroyed by the
+ * drawer.replaceChildren() swap. Every code path that is about to replace
+ * the drawer must recheck editing state *after* its final await and defer
+ * via S.drawerPending instead of clobbering unsaved text. A short retry
+ * timer re-runs the refresh even if no focusout ever fires (tab parked in
+ * the editor), so a deferred update cannot be lost. */
+function drawerEditorActive() {
+  const a = document.activeElement;
+  return !!(a && $("#drawer").contains(a) &&
+    (/input|textarea/i.test(a.tagName) || a.isContentEditable));
+}
+let _drawerApplyTimer = null;
+function deferDrawerApply(id) {
+  if (S.drawerId !== id) return;   // user moved on; the new card owns the drawer
+  S.drawerPending = true;
+  clearTimeout(_drawerApplyTimer);
+  _drawerApplyTimer = setTimeout(() => {
+    _drawerApplyTimer = null;
+    if (S.drawerPending && S.drawerId === id) refreshDrawer();
+  }, 2000);
+}
 async function openDrawer(id) {
   S.drawerId = id;
   drawerSig = "";
@@ -907,9 +931,17 @@ async function openDrawer(id) {
   try {
     const d = await api(`/tasks/${id}` + qs());
     if (S.drawerId !== id) return;              // user switched cards mid-fetch
-    S.drawerData = d;
-    drawerSig = drawerSigOf(d);
-    renderDrawer(d);
+    // PR#13 review finding 4321368000: the user may have started editing a
+    // freshly-rendered field while THIS request was in flight. Defer; never
+    // replace the drawer under an active editor.
+    if (drawerEditorActive()) { deferDrawerApply(id); return; }  // typing began mid-fetch
+    // Commit the signature/data only once the render actually landed (see
+    // renderDrawer's return). A render dropped by drawerIsStale() or deferred
+    // by the editor check must leave drawerSig behind, so a later refresh
+    // still sees the payload as changed and retries.
+    const applied = await renderDrawer(d).catch(() => false);
+    if (applied) { S.drawerData = d; drawerSig = drawerSigOf(d); }
+    else deferDrawerApply(id);
   } catch (e) {
     // PR#13 review finding 4321367982: same selected-task check as the
     // success path above. If this request was abandoned (user opened task
@@ -937,22 +969,27 @@ async function refreshDrawer() {
   if (document.hidden) return;   // visibility handler catches up on return
   const id = S.drawerId;
   const drawer = $("#drawer");
-  const active = document.activeElement;
-  const typing = active && drawer.contains(active) &&
-    (/input|textarea/i.test(active.tagName) || active.isContentEditable);
-  if (typing) { S.drawerPending = true; return; }
+  if (drawerEditorActive()) { S.drawerPending = true; return; }
   try {
     const d = await api(`/tasks/${id}` + qs());
     if (S.drawerId !== id) return;
+    // PR#13 review finding 4321368000: recheck after the detail request —
+    // the user may have started editing a description or comment while it
+    // was in flight. renderDrawer() rechecks again after its own final
+    // await (model options) and returns false when it drops the swap.
+    if (drawerEditorActive()) { deferDrawerApply(id); return; }
     const sig = drawerSigOf(d);
     if (sig === drawerSig) { S.drawerData = d; return; }
-    S.drawerData = d; drawerSig = sig;
     const body = drawer.querySelector(".drawer-body");
     const keep = { scrollTop: body ? body.scrollTop : 0, left: body ? body.scrollLeft : 0 };
     const af = document.activeElement;
     const all = [...drawer.querySelectorAll("*")];
     const focusIdx = af && af !== document.body && drawer.contains(af) ? all.indexOf(af) : -1;
-    await renderDrawer(d);
+    const applied = await renderDrawer(d).catch(() => false);
+    if (!applied) { deferDrawerApply(id); return; }
+    // Commit only once the render actually landed, so a dropped or deferred
+    // render leaves drawerSig behind and a later refresh retries the change.
+    S.drawerData = d; drawerSig = sig;
     const nb = drawer.querySelector(".drawer-body");
     if (nb) { nb.scrollTop = keep.scrollTop; nb.scrollLeft = keep.left; }
     if (focusIdx >= 0) {
@@ -969,12 +1006,16 @@ document.addEventListener("focusout", e => {
       const a = document.activeElement;
       if (a && $("#drawer").contains(a) && (/input|textarea/i.test(a.tagName) || a.isContentEditable)) return;
       S.drawerPending = false;
+      clearTimeout(_drawerApplyTimer); _drawerApplyTimer = null;
       refreshDrawer();
     }, 0);
   }
 }, true);
 
 async function renderDrawer(d) {
+  // Returns true only when the drawer DOM was actually replaced. Callers
+  // commit drawerSig/S.drawerData on true and defer on false (PR#13 review
+  // finding 4321368000) so a dropped swap stays retryable.
   const t = d.task;
   const myId = t.id;
   const mySeq = ++_drawerRenderSeq;   // PR#13 finding 4319617532, see drawerIsStale
@@ -1011,7 +1052,12 @@ async function renderDrawer(d) {
   // the user switched cards (or a newer render of this card started) while
   // the fetch was in flight, drop this render entirely — the newer one
   // owns the drawer.
-  if (drawerIsStale(myId, mySeq)) return;
+  if (drawerIsStale(myId, mySeq)) return false;
+  // PR#13 review finding 4321368000: final recheck after the last await —
+  // the user may have focused the description or comment box (or the
+  // title) while the model-options fetch was in flight. Report the swap as
+  // not applied so the caller defers instead of discarding unsaved text.
+  if (drawerEditorActive()) return false;
   modelSel.addEventListener("change", async () => {
     if (!modelSel.value) { await act(api(`/tasks/${t.id}` + qs(), { method: "PATCH", body: { clear_model_override: true } }).then(loadBoard), "Model override cleared"); }
     else { const [prov, name] = modelSel.value.split("::"); await act(api(`/tasks/${t.id}` + qs(), { method: "PATCH", body: { model_override: name, provider_override: prov } }).then(loadBoard), "Model override set"); }
@@ -1185,6 +1231,7 @@ async function renderDrawer(d) {
     actions);
 
   loadLog();
+  return true;   // swap applied (see return-contract note at the function top)
 }
 function kvBox(k, vNode) { return h("div", { class: "kv" }, h("div", { class: "k" }, k), h("div", { class: "v" }, vNode)); }
 function statusBadge(s) { return ["done"].includes(s) ? "ok" : ["blocked", "archived"].includes(s) ? "bad" : ["running", "scheduled", "review"].includes(s) ? "warn" : "neutral"; }

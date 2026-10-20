@@ -48,7 +48,7 @@ const vm = require('vm');
 
 const APP_JS = path.join(__dirname, '..', 'files', 'app', 'static', 'app.js');
 const MD_JS = path.join(__dirname, '..', 'files', 'app', 'static', 'md.js');
-const GUARD = 'if (drawerIsStale(myId, mySeq)) return;';
+const GUARD = 'if (drawerIsStale(myId, mySeq)) return false;';
 
 let failures = 0;
 function check(name, cond, detail) {
