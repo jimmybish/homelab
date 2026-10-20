@@ -47,11 +47,13 @@ expose to the LAN: everything privileged is cookie-gated.
 """
 import argparse
 import asyncio
+import contextlib
 import importlib.util
 import os
 import re
 import secrets
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -585,6 +587,49 @@ def load_proxy_marker() -> str:
     return MARKER_FILE.read_text().strip()
 
 
+class _ReentrantGuardWriteTxn:
+    """Reentrancy-aware shim over kanban_db.write_txn (PR#13 round-5
+    finding 4323915048, installed by build_app's worker-control guard).
+
+    __call__ outside the guard returns upstream's own context manager
+    object -- byte-identical behaviour including BEGIN IMMEDIATE
+    busy-retry, rollback-on-exception, and the post-commit file-length
+    check. hold() is the guard-side entry: same upstream semantics plus
+    a thread-local 'held' marker so the pinned helper's internal
+    `with kanban_db.write_txn(conn)` (and the trailing recompute_ready)
+    join the open transaction instead of hitting SQLite's forbidden
+    nested BEGIN. The marker is per-thread and per-connection identity:
+    concurrent FastAPI threadpool writers never see each other's hold.
+    """
+
+    _kanban_ui_reentrant_shim = True
+    _UNHELD = object()
+
+    def __init__(self, upstream):
+        self._upstream = upstream
+        self._local = threading.local()
+
+    @contextlib.contextmanager
+    def hold(self, conn, *args, **kwargs):
+        with self._upstream(conn, *args, **kwargs) as tx:
+            self._local.held = conn
+            try:
+                yield tx
+            finally:
+                self._local.held = self._UNHELD
+
+    def __call__(self, conn, *args, **kwargs):
+        # Signature-transparent: newer mounted checkouts call
+        # write_txn(conn, allow_nested=True); those kwargs belong to
+        # upstream and are forwarded verbatim. A JOIN under our own hold
+        # ignores them (there is nothing to begin; the txn is already
+        # ours), which is strictly safer than whatever nesting the
+        # mounted revision implements.
+        if getattr(self._local, "held", self._UNHELD) is conn:
+            return contextlib.nullcontext(conn)
+        return self._upstream(conn, *args, **kwargs)
+
+
 def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_allowed_origin: str = ""):
     from fastapi import FastAPI, Request
     from fastapi.responses import FileResponse, JSONResponse, Response
@@ -848,6 +893,42 @@ def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_a
             "refusing to start with the running->ready status requeue unguarded "
             "(mounted plugin router drifted from the pinned Hermes checkout)."
         )
+    # PR#13 round-5 finding (comment 4323915048): check-to-use atomicity.
+    # The guard's status read must sit INSIDE the same write transaction
+    # as the mutation, or the host dispatcher can commit claim_task()
+    # (kanban_db.py:4226 -- its own BEGIN IMMEDIATE CAS ready->running
+    # setting claim_lock/worker_pid) between the guard's read and the
+    # helper opening its transaction: the guard saw 'ready', the helper
+    # then re-reads the freshly-committed claim and its unconditional
+    # UPDATE NULLs claim_lock/claim_expires/worker_pid + ends the run
+    # 'reclaimed' + recompute_ready -> duplicate dispatch beside the
+    # live host worker. Fix: acquire BEGIN IMMEDIATE through upstream's
+    # OWN write_txn semantics BEFORE the read, and hold it across the
+    # helper call. SQLite forbids a nested BEGIN on a connection already
+    # writing, so kanban_db.write_txn is swapped for a reentrancy-aware
+    # shim whose only non-transparent behaviour is: while this thread
+    # holds the guard's txn on this exact connection, a nested
+    # write_txn() joins it instead of re-issuing BEGIN. Every other
+    # writer in this process (comments, links, priority, bulk siblings,
+    # recompute_ready, and the host-side claim path -- different process,
+    # never here) gets upstream's own context manager back unchanged.
+    # Fail-closed anchor: a mounted checkout without a callable
+    # kanban_db.write_txn cannot give the guard an early write lock, so
+    # boot is refused rather than running the racy read-then-write.
+    _upstream_write_txn = getattr(plugin.kanban_db, "write_txn", None)
+    while getattr(_upstream_write_txn, "_kanban_ui_reentrant_shim", False):
+        # A second build_app in the same process (test harnesses) would
+        # otherwise wrap last run's shim again; unwrap to the real one.
+        _upstream_write_txn = _upstream_write_txn._upstream
+    if not callable(_upstream_write_txn):
+        raise SystemExit(
+            "worker-control guard could not attach to kanban_db.write_txn; "
+            "refusing to start with the running->ready status requeue "
+            "unguarded (mounted kanban_db drifted from the pinned Hermes "
+            "checkout -- the guard cannot take the write lock early)."
+        )
+    _guard_write_txn = _ReentrantGuardWriteTxn(_upstream_write_txn)
+    plugin.kanban_db.write_txn = _guard_write_txn
     _status_rejected_cls = getattr(plugin, "_StatusRejected", None)
     if isinstance(_status_rejected_cls, type) and issubclass(_status_rejected_cls, Exception):
         _requeue_refuse_channel = "plugin._StatusRejected"
@@ -876,20 +957,34 @@ def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_a
     )
 
     def _set_status_direct_guarded(conn, task_id, new_status):
+        # PR#13 round-5 finding 4323915048: the status read and the
+        # mutation are atomic with respect to the host dispatcher's
+        # claim commit. _guard_write_txn.hold() opens upstream's own
+        # BEGIN IMMEDIATE write transaction BEFORE the read, so a
+        # concurrent claim_task() (which needs that same write lock) can
+        # only commit either entirely before our read -- then we see
+        # 'running' and refuse -- or entirely after our mutation commits
+        # -- then its CAS sees the post-mutation row. The helper's own
+        # `with write_txn(conn)` joins this transaction through the shim
+        # (no forbidden nested BEGIN), so refusal rolls back with no
+        # partial write and success commits as one unit.
+        #
         # Read the CURRENT status through upstream's own accessor; an
         # absent task (None) is not a running claim and passes through to
         # upstream's own not-found handling. Only the exact running->ready
         # pair is refused; every other transition (todo<->ready for idle
         # cards, running->blocked/scheduled/done/review, ...) is untouched.
-        current = plugin.kanban_db.get_task(conn, task_id)
-        if worker_requeue_denied(getattr(current, "status", None), new_status):
-            raise _requeue_refusal()
-        return _upstream_set_status(conn, task_id, new_status)
+        with _guard_write_txn.hold(conn):
+            current = plugin.kanban_db.get_task(conn, task_id)
+            if worker_requeue_denied(getattr(current, "status", None), new_status):
+                raise _requeue_refusal()
+            return _upstream_set_status(conn, task_id, new_status)
 
     _set_status_direct_guarded.__name__ = "_set_status_direct"
     _set_status_direct_guarded.__qualname__ = "_set_status_direct[worker-control-guarded]"
     _set_status_direct_guarded._worker_control_guarded = True
     _set_status_direct_guarded._worker_control_upstream = _upstream_set_status
+    _set_status_direct_guarded._worker_control_write_txn = _guard_write_txn
     plugin._set_status_direct = _set_status_direct_guarded
 
     # Override the plugin's WS upgrade authorization. The upstream default

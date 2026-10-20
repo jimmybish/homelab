@@ -140,6 +140,64 @@ class TestServerWiringContract(unittest.TestCase):
         # refused path never calls the upstream write.
         self.assertIn("plugin.kanban_db.get_task(conn, task_id)", wrap)
         self.assertIn("return _upstream_set_status(conn, task_id, new_status)", wrap)
+        # Round-5 finding 4323915048: the read, the predicate, and the
+        # upstream write all sit INSIDE the guard's early write
+        # transaction. Static ordering locks: hold opens before the
+        # read, and the read/refusal/upstream-call are indented under
+        # the with-block (a flat read-then-call is the racy shape).
+        self.assertIn("with _guard_write_txn.hold(conn):", wrap)
+        body = wrap[wrap.index("with _guard_write_txn.hold(conn):"):]
+        self.assertLess(
+            body.index("plugin.kanban_db.get_task(conn, task_id)"),
+            body.index("worker_requeue_denied("),
+        )
+        self.assertLess(
+            body.index("plugin.kanban_db.get_task(conn, task_id)"),
+            body.index("return _upstream_set_status(conn, task_id, new_status)"),
+        )
+        for needle in (
+            "plugin.kanban_db.get_task(conn, task_id)",
+            "worker_requeue_denied(getattr(current,",
+            "raise _requeue_refusal()",
+            "return _upstream_set_status(conn, task_id, new_status)",
+        ):
+            self.assertTrue(
+                any(line.startswith("            ") and needle in line
+                    for line in body.splitlines()),
+                f"{needle!r} not indented under the hold() block",
+            )
+
+    def test_guard_early_write_txn_shim_contract(self):
+        # Round-5 finding 4323915048 static locks: the guard takes
+        # upstream's own BEGIN IMMEDIATE before the status read via a
+        # reentrancy-aware shim over kanban_db.write_txn, the shim is
+        # installed on the mounted kanban_db, the wrapper carries the
+        # handle, re-wrapping a previous shim is unwrapped (idempotent
+        # reattach), and a missing write_txn anchor fails the boot.
+        src = SERVER.read_text()
+        self.assertIn("_upstream_write_txn = getattr(plugin.kanban_db, \"write_txn\", None)", src)
+        self.assertIn("while getattr(_upstream_write_txn, \"_kanban_ui_reentrant_shim\", False):", src)
+        self.assertIn("_upstream_write_txn = _upstream_write_txn._upstream", src)
+        self.assertIn("if not callable(_upstream_write_txn):", src)
+        shim = src[src.index("class _ReentrantGuardWriteTxn"):]
+        shim = shim[: shim.index("_guard_write_txn = _ReentrantGuardWriteTxn(")]
+        self.assertIn("_kanban_ui_reentrant_shim = True", shim)
+        self.assertIn("self._local = threading.local()", shim)
+        # Signature-transparent pass-through (newer checkouts pass
+        # allow_nested= and other kwargs that belong to upstream).
+        self.assertIn("with self._upstream(conn, *args, **kwargs) as tx:", shim)
+        self.assertIn("self._local.held = conn", shim)
+        # Join only for THIS thread holding THIS exact connection; every
+        # other caller gets upstream's own context manager back verbatim.
+        self.assertIn("return contextlib.nullcontext(conn)", shim)
+        self.assertIn("return self._upstream(conn, *args, **kwargs)", shim)
+        self.assertIn("plugin.kanban_db.write_txn = _guard_write_txn", src)
+        self.assertIn("_set_status_direct_guarded._worker_control_write_txn = _guard_write_txn", src)
+        # Both new fail-closed anchors (write_txn anchor + chokepoint)
+        # live in the same attach block.
+        block = src[src.index('_upstream_set_status = getattr'):]
+        block = block[: block.index("def _set_status_direct_guarded")]
+        self.assertGreaterEqual(block.count("raise SystemExit"), 3)
 
     def test_attach_failure_refuses_to_boot(self):
         src = SERVER.read_text()
@@ -160,6 +218,108 @@ class TestServerWiringContract(unittest.TestCase):
     def test_main_uses_build_app(self):
         src = SERVER.read_text()
         self.assertIn("app = build_app(", src[src.index("def main("):])
+
+
+# --------------------------------------------------------------------------
+# PR#13 round-5 finding 4323915048: check-to-use atomicity locks. The
+# guard's status read must be taken INSIDE the write transaction (early
+# BEGIN IMMEDIATE through upstream's own write_txn), kanban_db.write_txn
+# must carry the reentrancy shim so the pinned helper's own
+# `with write_txn(conn)` joins instead of nesting a forbidden BEGIN, and
+# a checkout without a callable write_txn must refuse to boot.
+# --------------------------------------------------------------------------
+
+class TestAtomicGuardContract(unittest.TestCase):
+    def test_read_and_mutation_inside_hold(self):
+        src = SERVER.read_text()
+        wrap = src[src.index("def _set_status_direct_guarded"):]
+        wrap = wrap[: wrap.index("_set_status_direct_guarded.__name__")]
+        self.assertIn("with _guard_write_txn.hold(conn):", wrap)
+        # Read, predicate, refusal, and the upstream write are all INSIDE
+        # the hold (indented under it), never before the lock is taken.
+        body = wrap[wrap.index("with _guard_write_txn.hold(conn):"):]
+        self.assertIn("current = plugin.kanban_db.get_task(conn, task_id)", body)
+        self.assertIn("worker_requeue_denied(", body)
+        self.assertIn("raise _requeue_refusal()", body)
+        self.assertIn("return _upstream_set_status(conn, task_id, new_status)", body)
+
+    def test_write_txn_shim_installed_and_anchored(self):
+        src = SERVER.read_text()
+        self.assertIn("plugin.kanban_db.write_txn = _guard_write_txn", src)
+        self.assertIn("_set_status_direct_guarded._worker_control_write_txn = _guard_write_txn", src)
+        block = src[src.index("_upstream_write_txn = getattr"):][: src.index("def _set_status_direct_guarded")]
+        # Fail-closed: no callable kanban_db.write_txn -> no early lock -> boot refused.
+        self.assertIn("if not callable(_upstream_write_txn):", block)
+        self.assertIn("raise SystemExit", block)
+        # Double-build safety: an existing shim is unwrapped, never re-wrapped.
+        self.assertIn('_kanban_ui_reentrant_shim', block)
+        self.assertIn("_upstream_write_txn = _upstream_write_txn._upstream", block)
+
+    def test_shim_joins_only_own_thread_and_connection(self):
+        # Hermetic shim behaviour (no fastapi needed): hold() enters the
+        # upstream CM exactly once; a nested same-thread/same-connection
+        # call JOINS (nullcontext, no second BEGIN); other threads and
+        # other connections get the upstream CM back untouched.
+        import contextlib
+        import threading as _threading
+
+        begins = []
+
+        def fake_upstream(conn):
+            @contextlib.contextmanager
+            def cm(c):
+                begins.append(c)
+                yield c
+            return cm(conn)
+
+        shim = server._ReentrantGuardWriteTxn(fake_upstream)
+        conn_a, conn_b = object(), object()
+
+        with shim.hold(conn_a):
+            self.assertIs(type(shim(conn_a)), contextlib.nullcontext)  # joins
+            self.assertIsNot(type(shim(conn_b)), contextlib.nullcontext)  # other conn
+            joined_on_b = {}
+
+            def other_thread():
+                joined_on_b["type"] = type(shim(conn_a))
+
+            t = _threading.Thread(target=other_thread)
+            t.start(); t.join()
+            self.assertIsNot(joined_on_b["type"], contextlib.nullcontext)  # other thread
+        self.assertEqual(begins, [conn_a])  # upstream entered exactly once
+        # Outside any hold the shim is fully transparent.
+        self.assertIsNot(type(shim(conn_a)), contextlib.nullcontext)
+        with shim(conn_a) as c:
+            self.assertIs(c, conn_a)
+        self.assertEqual(begins, [conn_a, conn_a])
+
+    def test_shim_rollbacks_on_hold_body_exception(self):
+        import contextlib
+
+        events = []
+
+        def fake_upstream(conn):
+            @contextlib.contextmanager
+            def cm(c):
+                try:
+                    yield c
+                except Exception:
+                    events.append("rollback")
+                    raise
+                events.append("commit")
+            return cm(conn)
+
+        shim = server._ReentrantGuardWriteTxn(fake_upstream)
+        conn = object()
+        with self.assertRaises(ValueError):
+            with shim.hold(conn):
+                raise ValueError("boom")
+        self.assertEqual(events, ["rollback"])
+        # And the hold is cleared even on the failure path.
+        self.assertIs(getattr(shim._local, "held", shim._UNHELD), shim._UNHELD)
+        with shim.hold(conn):
+            pass
+        self.assertEqual(events, ["rollback", "commit"])
 
 
 # --------------------------------------------------------------------------
@@ -184,7 +344,15 @@ from fastapi import APIRouter
 router = APIRouter()
 
 _TASK = None
-kanban_db = SimpleNamespace(get_task=lambda conn, tid: _TASK)
+def _stub_write_txn(conn):
+    # Stand-in for kanban_db.write_txn (context manager, BEGIN IMMEDIATE
+    # upstream). The r5 atomicity shim attaches over it.
+    from contextlib import contextmanager
+    @contextmanager
+    def _cm(c):
+        yield c
+    return _cm(conn)
+kanban_db = SimpleNamespace(get_task=lambda conn, tid: _TASK, write_txn=_stub_write_txn)
 
 
 @router.post("/tasks/{task_id}/reassign")
