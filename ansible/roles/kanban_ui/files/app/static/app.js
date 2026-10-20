@@ -855,6 +855,27 @@ async function inspectRun(runId) {
 
 /* ---------------- drawer ---------------- */
 let drawerSig = "";
+/* PR#13 review finding 4319617532: renderDrawer() awaits /model-options
+ * (uncached path) *after* its last caller-side staleness check, so opening
+ * task A then task B can leave both requests pending and let a late A
+ * response replace B's rendered drawer with A's edit controls while
+ * S.drawerId still points to B. Mirror the board-refresh guard already used
+ * in loadBoard(): each render captures the selected task id plus a
+ * monotonic sequence at entry, and rechecks both right after the await,
+ * before any drawer DOM is replaced. */
+let _drawerRenderSeq = 0;
+let _drawerRenderId = null;
+function drawerIsStale(myId, mySeq) {
+  // User switched cards while this render was in flight: the card now
+  // selected owns the drawer.
+  if (S.drawerId !== myId) return true;
+  // Still viewing this task, but a newer render of THIS task has started
+  // (e.g. refreshDrawer raced the open): the newest one wins. A late render
+  // started for a *different* task must not discard this one — that render
+  // is dropped by the selected-task check above instead, otherwise the
+  // drawer would be left stuck on "Loading…".
+  return _drawerRenderId === myId && mySeq !== _drawerRenderSeq;
+}
 async function openDrawer(id) {
   S.drawerId = id;
   drawerSig = "";
@@ -928,6 +949,9 @@ document.addEventListener("focusout", e => {
 
 async function renderDrawer(d) {
   const t = d.task;
+  const myId = t.id;
+  const mySeq = ++_drawerRenderSeq;   // PR#13 finding 4319617532, see drawerIsStale
+  _drawerRenderId = myId;
   const now = Math.floor(Date.now() / 1000);
   const drawer = $("#drawer");
 
@@ -954,6 +978,13 @@ async function renderDrawer(d) {
   const prioInput = h("input", { type: "number", value: String(t.priority ?? 0) });
   prioInput.addEventListener("change", () => act(api(`/tasks/${t.id}` + qs(), { method: "PATCH", body: { priority: parseInt(prioInput.value || "0", 10) } }).then(loadBoard), "Priority updated"));
   const modelSel = await modelSelect(t.model_override);
+  // PR#13 review finding 4319617532: the await above (uncached
+  // /model-options fetch) is the last suspension point before the drawer
+  // contents are replaced, and every caller-side check ran before it. If
+  // the user switched cards (or a newer render of this card started) while
+  // the fetch was in flight, drop this render entirely — the newer one
+  // owns the drawer.
+  if (drawerIsStale(myId, mySeq)) return;
   modelSel.addEventListener("change", async () => {
     if (!modelSel.value) { await act(api(`/tasks/${t.id}` + qs(), { method: "PATCH", body: { clear_model_override: true } }).then(loadBoard), "Model override cleared"); }
     else { const [prov, name] = modelSel.value.split("::"); await act(api(`/tasks/${t.id}` + qs(), { method: "PATCH", body: { model_override: name, provider_override: prov } }).then(loadBoard), "Model override set"); }
