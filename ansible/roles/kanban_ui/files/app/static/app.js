@@ -480,6 +480,21 @@ function cardMenuItems(t) {
   return items;
 }
 
+/* PR#13 review finding 4321368019: the drawer footer renders the first five
+ * cardMenuItems, so for a RUNNING task the slice includes the no-callback
+ * Ready item. The footer used to ignore the model's boolean `disabled` flag
+ * and `title` explanation and call `it.fn()` unguarded (TypeError). Render
+ * through the same contract as openCardMenu: real HTML disabled attribute +
+ * tooltip for flagged items, and an inert click guard so a missing callback
+ * can never be invoked here either. */
+function footerActionButtons(t) {
+  return cardMenuItems(t).filter(i => !i.sep).slice(0, 5).map(it => h("button", {
+    class: "btn btn-ghost btn-sm" + (it.danger ? " danger" : ""),
+    ...(it.disabled ? { disabled: "" } : {}), ...(it.title ? { title: it.title } : {}),
+    onclick: () => { if (it.disabled || typeof it.fn !== "function") return; it.fn(); }
+  }, it.label));
+}
+
 function openCardMenu(t, x, y) {
   closeMenus();
   const menu = h("div", { class: "modal", style: `position:fixed;left:${Math.min(x, innerWidth - 260)}px;top:${Math.min(y, innerHeight - 360)}px;width:250px;padding:6px;z-index:100` });
@@ -1143,11 +1158,10 @@ async function renderDrawer(d) {
     } catch (e) { notifyBox.append(h("div", { class: "col-empty" }, e.message)); }
   })();
 
-  // actions footer
+  // actions footer (rendered via footerActionButtons so disabled menu-model
+  // items keep their state here too — PR#13 finding 4321368019)
   const actions = h("div", { class: "drawer-actions" },
-    ...cardMenuItems(t).filter(i => !i.sep).slice(0, 5).map(it => h("button", {
-      class: "btn btn-ghost btn-sm" + (it.danger ? " danger" : ""), onclick: () => it.fn()
-    }, it.label)),
+    ...footerActionButtons(t),
     h("button", { class: "btn btn-ghost btn-sm", style: "margin-left:auto", onclick: () => openCardMenu(t, innerWidth - 260, innerHeight - 320) }, "⋯ More"));
 
   drawer.replaceChildren(head,
