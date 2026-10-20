@@ -759,6 +759,22 @@ class TestLoginTransportGate(unittest.TestCase):
         self.assertIn("gather_facts: true", play[facts - 200 : facts + 300])
         self.assertLess(facts, play.index("hosts: hermes_host"))
 
+    def test_hermes_play_delegated_proxy_setup(self):
+        # Round-5 finding 4323914956: --limit hermes (and --tags
+        # kanban_ui_firewall) excludes the proxy_host facts play, so the
+        # Hermes play must self-supply the proxy facts: a delegated setup
+        # with delegate_facts (facts land on proxy, where the role reads
+        # them), tagged `always` so any --tags selection keeps it, and a
+        # when-guard so the unbounded path does not pay the gather twice.
+        play = (HERE.parent.parent.parent / "deploy_kanban_ui.yaml").read_text()
+        hermes = play.index("hosts: hermes_host")
+        delegated = play.index("ansible.builtin.setup:", hermes)
+        segment = play[delegated : delegated + 700]
+        self.assertIn("delegate_to: \"{{ groups['proxy_host'][0] }}\"", segment)
+        self.assertIn("delegate_facts: true", segment)
+        self.assertIn("- always", segment)
+        self.assertIn("['ansible_default_ipv4'] is not defined", segment)
+
 
 class TestHomepageInfraIndentation(unittest.TestCase):
     """Round-3 finding 2: the Infra section uses 4-space list items /

@@ -14,6 +14,32 @@
   hosts: hermes_host
   become: true
   pre_tasks:
+    - name: Ensure proxy host facts are available for the upstream firewall rule
+      # ROUND-5 FINDING 4323914956: the facts play above is `hosts:
+      # proxy_host`, so a HOST-LIMITED run (--limit hermes) or a TAGGED run
+      # (--tags kanban_ui_firewall) never executes it, and the role's
+      # `hostvars[groups['proxy_host'][0]]['ansible_default_ipv4']` resolution
+      # (tasks/main.yaml, UFW source pin + DOCKER-USER enforcement) explodes
+      # undefined (reproduced: "'HostVarsVars object' has no attribute
+      # 'ansible_default_ipv4'"). Gather them HERE instead via a delegated
+      # setup; delegate_facts attaches them to the DELEGATED host (proxy),
+      # which is exactly where the role reads them. become:false since fact
+      # gathering needs no privilege and the proxy play above runs
+      # unprivileged too. The when-guard keeps this free on the unbounded
+      # path: the facts play (or the master playbook's earlier proxy play)
+      # already populated hostvars['proxy'], so the delegated setup only
+      # costs ~1-2s on the limited/tagged paths Copilot flagged. Tagged
+      # `always` so it survives any --tags selection, including the
+      # firewall-only teardown run.
+      ansible.builtin.setup:
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      delegate_facts: true
+      become: false
+      when: >-
+        hostvars[groups['proxy_host'][0]]['ansible_default_ipv4'] is not defined
+      tags:
+        - always
+
     - name: Silence Grafana alerts
       ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
       vars:
