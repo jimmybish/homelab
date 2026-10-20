@@ -911,6 +911,12 @@ async function openDrawer(id) {
     drawerSig = drawerSigOf(d);
     renderDrawer(d);
   } catch (e) {
+    // PR#13 review finding 4321367982: same selected-task check as the
+    // success path above. If this request was abandoned (user opened task
+    // B, or closed the drawer — closeDrawer() nulls S.drawerId) while it
+    // was in flight, its failure must not replace the drawer currently on
+    // screen. Discard it; the task that owns the drawer owns its state.
+    if (S.drawerId !== id) return;              // stale failure for an abandoned task
     drawer.replaceChildren(h("div", { class: "drawer-body" }, "Failed: " + e.message));
   }
 }
