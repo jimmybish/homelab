@@ -30,7 +30,13 @@
 #   --check: exit 0 when every managed rule is live, 42 on drift, 44 when
 #     the container is not running (nothing published, nothing enforced).
 #   --teardown: remove every jump into the chain (any destination variant)
-#     then flush + unregister the chain. Idempotent on a clean host.
+#     then flush + unregister the chain. Designed to run via
+#     ansible.builtin.script pushed from the role's files/ (PR#13 round-5
+#     finding 4323915133): the absent-state playbook path deletes the
+#     installed copy at /usr/local/sbin, so repeatable cleanup must not
+#     depend on it. Fully rc-tolerant: missing chain, no jumps, and even a
+#     missing DOCKER-USER chain (no Docker on the host) exit 0 while still
+#     removing any leftover rules it can find.
 set -uo pipefail
 
 : "${KANBAN_UI_CONTAINER:?KANBAN_UI_CONTAINER must be set}"

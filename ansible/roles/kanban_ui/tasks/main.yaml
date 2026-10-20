@@ -457,11 +457,19 @@
   # Declarative uninstall path (kanban_ui_state: absent): remove every jump
   # (including stale container-IP variants) then flush + unregister the
   # chain. The script resolves no container state here, so teardown works
-  # even after the container is already gone. Idempotent on a clean host.
-  ansible.builtin.command:
-    argv:
-      - "{{ kanban_ui_fw_script_path }}"
-      - "--teardown"
+  # even after the container is already gone.
+  # ROUND-5 FINDING 4323915133: this used ansible.builtin.command against
+  # kanban_ui_fw_script_path, which the FIRST teardown deletes while the
+  # deploy task is skipped under state=absent -- a second absent run died
+  # with rc=2 (No such file or directory) and a never-installed host died
+  # with rc=127 (reproduced on hermes and proxy). The helper now runs via
+  # ansible.builtin.script, pushed from the role's files/ at run time
+  # (same mechanism as the systemd unit does NOT get: teardown never
+  # depends on a previously-installed copy). Idempotent on a clean host:
+  # the helper reports "no ... rules present" and exits 0 when the chain
+  # and jumps are already gone (missing DOCKER-USER entirely included).
+  ansible.builtin.script:
+    cmd: docker_user_enforce.sh --teardown
   environment:
     KANBAN_UI_CONTAINER: kanban-ui
     KANBAN_UI_PORT: "{{ kanban_ui_port }}"
