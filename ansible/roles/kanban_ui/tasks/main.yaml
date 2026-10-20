@@ -359,10 +359,18 @@
 # guidance: whenever docker.service restarts (upgrade, maintenance) the unit
 # re-fires and re-converges DOCKER-USER (drift recovery proved live: jump
 # manually removed, oneshot re-run restored the exact managed ruleset).
+# Reconvergence is fail-closed (PR#13 round-5 finding 4323915092): the
+# script inserts a temporary service-scoped DROP (same container tuple,
+# comment kanban-ui-guard) at DOCKER-USER position 1 BEFORE deleting the
+# stale jump, so no step of the delete/flush/append/insert sequence can
+# leave the published tuple falling through to Docker's ACCEPT rules -
+# a mid-script failure exits non-zero with the guard still DROPping, and
+# the guard is removed only after the full managed set verifies live.
 # Teardown
 # (ansible-playbook ... -e kanban_ui_state=absent --tags kanban_ui_firewall)
-# removes jump+chain+unit+script declaratively so no orphaned ACCEPT can
-# fail open if the port is ever reused.
+# removes jump+guard+chain+unit+script declaratively so no orphaned ACCEPT
+# can fail open (and no orphaned guard can fail stuck) if the port is ever
+# reused.
 - name: Deploy the DOCKER-USER kanban-ui enforcement script
   ansible.builtin.copy:
     src: docker_user_enforce.sh

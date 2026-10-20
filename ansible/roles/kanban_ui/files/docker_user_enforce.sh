@@ -22,14 +22,21 @@
 # Modes:
 #   enforce (default): idempotent converge; exit 0 always unless an
 #     iptables operation itself fails (a missing container is not a failure:
-#     nothing is published, nothing to enforce). On drift: ensure the chain
-#     exists, remove any stale jump variant, populate the chain (terminal
-#     DROP last), then insert the jump at DOCKER-USER position 1 — the jump
-#     is only ever present while the full ACCEPT/DROP set is live, so there
-#     is no window where it points at an empty (fail-open) chain.
+#     nothing is published, nothing to enforce). Reconvergence is
+#     FAIL-CLOSED (PR#13 round-5 finding 4323915092): before the stale jump
+#     is removed, a temporary service-scoped DROP matching the same
+#     container tuple (-m comment kanban-ui-guard) is inserted at
+#     DOCKER-USER position 1, so the published port stays DROP'd for every
+#     source THROUGHOUT the delete/flush/append/insert sequence. The guard
+#     is deleted ONLY after the jump+chain set verifies live; any mid-script
+#     failure exits non-zero with the guard still in place (restriction
+#     stays ON, never off). Normal completion leaves no orphan guard.
 #   --check: exit 0 when every managed rule is live, 42 on drift, 44 when
 #     the container is not running (nothing published, nothing enforced).
+#     The transient guard is deliberately NOT part of the managed live set.
 #   --teardown: remove every jump into the chain (any destination variant)
+#     and any leftover kanban-ui-guard DROP (a fail-closed guard surviving
+#     a mid-script failure must not outlive an absent-state teardown),
 #     then flush + unregister the chain. Designed to run via
 #     ansible.builtin.script pushed from the role's files/ (PR#13 round-5
 #     finding 4323915133): the absent-state playbook path deletes the
@@ -37,6 +44,13 @@
 #     depend on it. Fully rc-tolerant: missing chain, no jumps, and even a
 #     missing DOCKER-USER chain (no Docker on the host) exit 0 while still
 #     removing any leftover rules it can find.
+#
+# Fault injection (TEST ONLY): KANBAN_UI_TEST_FAIL_AFTER=guard|delete|flush|
+# append|insert makes the script exit 1 immediately after that stage
+# completes, emulating a mid-script iptables failure so the fail-closed
+# property can be proven live. Unset/empty in every production invocation
+# (role tasks and the systemd unit never set it); an invalid value is a
+# usage error (exit 2) so a typo can never half-arm.
 set -uo pipefail
 
 : "${KANBAN_UI_CONTAINER:?KANBAN_UI_CONTAINER must be set}"
@@ -46,6 +60,10 @@ case "$KANBAN_UI_PORT" in (*[!0-9]*|'') echo "invalid port" >&2; exit 2 ;; esac
 case "$KANBAN_UI_PROXY_IP" in
   (*[!0-9.]*|'') echo "invalid proxy ip" >&2; exit 2 ;;
 esac
+case "${KANBAN_UI_TEST_FAIL_AFTER:-}" in
+  (''|guard|delete|flush|append|insert) ;;
+  (*) echo "invalid KANBAN_UI_TEST_FAIL_AFTER" >&2; exit 2 ;;
+esac
 
 # -w serialises against Docker's own concurrent rule writes (observed live
 # on this host: per-command iptables-nft calls race with the daemon during
@@ -54,6 +72,7 @@ ipt() { iptables -w 30 "$@"; }
 
 CHAIN=DOCKER-USER-KANBAN
 JUMP_COMMENT=kanban-ui-jump
+GUARD_COMMENT=kanban-ui-guard
 # Each entry is "<chain> <rulespec>" (no -A/-C flag) so the same string
 # serves both `ipt -A ${r}` and `ipt -C ${r}` without re-quoting.
 RULES=(
@@ -73,12 +92,21 @@ if [ "${1:-}" = "--teardown" ]; then
     ipt -D DOCKER-USER ${r#-A DOCKER-USER } || true
     removed=1
   done < <(ipt -S DOCKER-USER | grep -- "-j ${CHAIN}$" || true)
+  # A fail-closed guard surviving a mid-script failure must not outlive the
+  # service: delete any guard DROP variant too (comment-matched, always
+  # present on guard rules regardless of the resolved container IP).
+  while read -r r; do
+    [ -n "$r" ] || continue
+    # shellcheck disable=SC2086  # rule spec must be separate argv words
+    ipt -D DOCKER-USER ${r#-A DOCKER-USER } || true
+    removed=1
+  done < <(ipt -S DOCKER-USER | grep -- "--comment ${GUARD_COMMENT} " || true)
   if ipt -n -L "${CHAIN}" >/dev/null 2>&1; then
     ipt -F "${CHAIN}" && ipt -X "${CHAIN}"
     removed=1
   fi
   if [ "$removed" = 1 ]; then
-    echo "torn down ${CHAIN} (jumps + chain)"
+    echo "torn down ${CHAIN} (jumps + guard + chain)"
   else
     echo "no ${CHAIN} rules present"
   fi
@@ -109,8 +137,18 @@ if [ -z "$ip" ]; then
   exit 0
 fi
 
+# Shared matcher for the jump and the transient guard: the exact post-DNAT
+# container tuple, so nothing but kanban-ui's published port is affected.
+tuple_spec() {
+  echo "-d ${ip}/32 -p tcp -m tcp --dport ${KANBAN_UI_PORT}"
+}
+
 jump_spec() {
-  echo "-d ${ip}/32 -p tcp -m tcp --dport ${KANBAN_UI_PORT} -m comment --comment ${JUMP_COMMENT}"
+  echo "$(tuple_spec) -m comment --comment ${JUMP_COMMENT}"
+}
+
+guard_spec() {
+  echo "$(tuple_spec) -m comment --comment ${GUARD_COMMENT} -j DROP"
 }
 
 all_rules_live() {
@@ -133,6 +171,20 @@ fi
 
 if all_rules_live; then
   # Exact managed state already live: touch nothing (byte-stable rerun).
+  # A leftover guard from an earlier failed run is still worth clearing —
+  # the restriction is redundant while the jump is live, and a guard alone
+  # (jump gone) would keep the port dead for the proxy too.
+  while read -r r; do
+    [ -n "$r" ] || continue
+    # shellcheck disable=SC2086  # rule spec must be separate argv words
+    ipt -D DOCKER-USER ${r#-A DOCKER-USER } || exit 1
+  done < <(ipt -S DOCKER-USER | grep -- "--comment ${GUARD_COMMENT} " || true)
+  if ipt -S DOCKER-USER | grep -q -- "--comment ${GUARD_COMMENT} "; then
+    # A guard that will not delete leaves the proxy path DROPped; a stale
+    # restriction the role cannot clear is a failure, not "already converged".
+    echo "stale guard removal did not take effect" >&2
+    exit 1
+  fi
   echo "DOCKER-USER-KANBAN already converged for ${ip}:${KANBAN_UI_PORT} (proxy ${KANBAN_UI_PROXY_IP})"
   exit 0
 fi
@@ -140,25 +192,62 @@ fi
 # Chain must exist before anything jumps to it.
 ipt -n -L "${CHAIN}" >/dev/null 2>&1 || ipt -N "${CHAIN}" || exit 1
 
-# Remove every existing jump into our chain (stale IP variants included);
-# re-added below only after the chain is fully populated, so there is no
-# window where transit traffic meets a partially built chain.
+# FAIL-CLOSED RECONVERGENCE (PR#13 round-5 finding 4323915092):
+# From here until the final verified guard deletion, the container tuple is
+# DROP'd in DOCKER-USER no matter which step fails next. Deleting a
+# pre-existing guard first keeps this idempotent after a failed run (two
+# identical guards would otherwise stack); the insertion is a single
+# xtables-locked operation, atomic against Docker's own rule writes.
+while read -r r; do
+  [ -n "$r" ] || continue
+  # shellcheck disable=SC2086  # rule spec must be separate argv words
+  ipt -D DOCKER-USER ${r#-A DOCKER-USER } || exit 1
+done < <(ipt -S DOCKER-USER | grep -- "--comment ${GUARD_COMMENT} " || true)
+# shellcheck disable=SC2086  # spec is deliberately word-split into argv
+ipt -I DOCKER-USER 1 $(guard_spec) || exit 1
+[ "${KANBAN_UI_TEST_FAIL_AFTER:-}" = "guard" ] && { echo "injected failure after guard" >&2; exit 1; }
+
+# Remove every existing jump into our chain (stale IP variants included).
+# The guard above already covers the tuple, so removing the jump here opens
+# no exposure window; the jump is re-added below only after the chain is
+# fully populated, so it never sees a partially built (fail-open) chain.
 while read -r r; do
   [ -n "$r" ] || continue
   # shellcheck disable=SC2086  # rule spec must be separate argv words
   ipt -D DOCKER-USER ${r#-A DOCKER-USER } || true
 done < <(ipt -S DOCKER-USER | grep -- "-j ${CHAIN}$" || true)
+[ "${KANBAN_UI_TEST_FAIL_AFTER:-}" = "delete" ] && { echo "injected failure after delete" >&2; exit 1; }
 
 # Populate the chain; -A order guarantees the terminal DROP is last.
 ipt -F "${CHAIN}" || exit 1
+[ "${KANBAN_UI_TEST_FAIL_AFTER:-}" = "flush" ] && { echo "injected failure after flush" >&2; exit 1; }
 for r in "${RULES[@]}"; do
   # shellcheck disable=SC2086  # rule is deliberately word-split into argv
   ipt -A ${r} || exit 1
 done
+[ "${KANBAN_UI_TEST_FAIL_AFTER:-}" = "append" ] && { echo "injected failure after append" >&2; exit 1; }
 
 # Managed jump at the head of DOCKER-USER (Docker guidance: user rules
 # precede everything else there), added LAST so it never sees an empty chain.
 # shellcheck disable=SC2086  # spec is deliberately word-split into argv
 ipt -I DOCKER-USER 1 $(jump_spec) -j "${CHAIN}" || exit 1
+[ "${KANBAN_UI_TEST_FAIL_AFTER:-}" = "insert" ] && { echo "injected failure after insert" >&2; exit 1; }
+
+# Verified success is the ONLY path that may relax anything: re-check the
+# full managed set against the kernel, then remove the transient guard. If
+# verification or guard removal fails, exit non-zero WITH the guard in
+# place — fail-closed, the restriction stays on.
+all_rules_live || exit 1
+while read -r r; do
+  [ -n "$r" ] || continue
+  # shellcheck disable=SC2086  # rule spec must be separate argv words
+  ipt -D DOCKER-USER ${r#-A DOCKER-USER } || exit 1
+done < <(ipt -S DOCKER-USER | grep -- "--comment ${GUARD_COMMENT} " || true)
+if ipt -S DOCKER-USER | grep -q -- "--comment ${GUARD_COMMENT} "; then
+  # Should be unreachable; belt-and-braces so a silent delete failure can
+  # never leave a "converged" verdict with an orphan guard.
+  echo "guard removal did not take effect" >&2
+  exit 1
+fi
 
 echo "converged DOCKER-USER-KANBAN for ${ip}:${KANBAN_UI_PORT} (proxy ${KANBAN_UI_PROXY_IP})"
