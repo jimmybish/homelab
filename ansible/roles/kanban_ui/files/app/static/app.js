@@ -463,8 +463,11 @@ function cardMenuItems(t) {
   // PR#13 review finding 4319617397: running cards cannot be requeued to
   // Ready here (server-side chokepoint guard in server.py refuses; the
   // item stays visible-but-disabled until host-side worker control lands).
+  // PR#13 review finding 4321367961: the flag must be a real boolean --
+  // the renderer below tests it for truthiness, and an empty string left
+  // this no-callback item clickable (onclick then threw on it.fn).
   if (t.status === "running") {
-    items.push({ label: "→ Ready (disabled in the WebUI)", disabled: "", title: "Requeuing a running task would release the worker claim without signalling the host worker; run `hermes kanban reclaim <id>` on the Hermes host instead" });
+    items.push({ label: "→ Ready (disabled in the WebUI)", disabled: true, title: "Requeuing a running task would release the worker claim without signalling the host worker; run `hermes kanban reclaim <id>` on the Hermes host instead" });
   } else {
     move("ready", "→ Ready");
   }
@@ -485,7 +488,10 @@ function openCardMenu(t, x, y) {
     menu.append(h("button", {
       class: "btn btn-quiet" + (it.danger ? " danger" : ""), style: "width:100%;justify-content:flex-start;border-radius:8px",
       ...(it.disabled ? { disabled: "" } : {}), ...(it.title ? { title: it.title } : {}),
-      onclick: () => { closeMenus(); it.fn(); }
+      // PR#13 review finding 4321367961: no-callback items must be inert.
+      // The disabled flag now carries a real boolean, but guard the call
+      // too so a future falsy flag can never reach `it.fn()` and throw.
+      onclick: () => { if (it.disabled || typeof it.fn !== "function") return; closeMenus(); it.fn(); }
     }, it.label));
   }
   document.body.append(menu);
