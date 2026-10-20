@@ -50,7 +50,30 @@ async function api(path, { method = "GET", body, board = true, raw } = {}) {
     throw new Error(detail);
   }
   if (res.status === 204) return null;
-  return res.json();
+  return normalizeTaskDetail(await res.json());
+}
+// PR#13 review finding 4319617504: the pinned plugin's _links_for() returns
+// links.parents / links.children as bare task-ID strings, but both
+// existingDepsBox() and renderDrawer() read {id,title,status} fields off
+// each entry (blank labels, /tasks/undefined on click-through, and
+// parent_id=undefined on removal). Normalize task-detail link entries at
+// this shared response boundary into the object shape the consumers expect,
+// enriched from the link_tasks rows that ship in the same payload. Gated to
+// task-detail responses only (d.task + d.links — no other endpoint shape
+// matches); object entries pass through untouched so a future upstream
+// change to objects needs no client change.
+function normalizeTaskDetail(d) {
+  if (!d || typeof d !== "object" || typeof d.task !== "object" || d.task === null
+      || typeof d.links !== "object" || d.links === null) return d;
+  const rows = new Map();
+  for (const r of (Array.isArray(d.link_tasks) ? d.link_tasks : [])) {
+    if (r && typeof r === "object" && typeof r.id === "string") rows.set(r.id, r);
+  }
+  const norm = (list) => (Array.isArray(list) ? list : [])
+    .map(x => (typeof x === "string" ? { id: x, ...(rows.get(x) || {}) } : x))
+    .filter(x => x && typeof x === "object" && x.id != null);
+  d.links = { ...d.links, parents: norm(d.links.parents), children: norm(d.links.children) };
+  return d;
 }
 const qs = () => { const b = S.board ? `board=${encodeURIComponent(S.board)}` : ""; return b ? "?" + b : ""; };
 
