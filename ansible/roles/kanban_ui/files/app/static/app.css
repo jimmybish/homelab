@@ -221,9 +221,9 @@ input, select, textarea { font: inherit; color: var(--text); }
 .md ul, .md ol { margin: 4px 0 8px; padding-left: 22px; white-space: normal; }
 .md li { margin: 2px 0; }
 .md li > code, .md li > b { white-space: normal; }
-.md blockquote { border-left: 3px solid var(--line); margin: 6px 0; padding: 2px 10px; color: var(--text-dim); }
+.md blockquote { border-left: 3px solid var(--line); margin: 6px 0; padding: 2px 10px; color: var(--text-2); }
 .md hr { border: none; border-top: 1px solid var(--line); margin: 8px 0; }
-.md b, .md strong { color: var(--text-bright, #fff); }
+.md b, .md strong { color: var(--text); }
 .body-edit textarea { width: 100%; min-height: 110px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px; resize: vertical; }
 .comment { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; }
 .comment .who { font-size: .74rem; color: var(--accent-2); font-weight: 700; display: flex; gap: 8px; }
