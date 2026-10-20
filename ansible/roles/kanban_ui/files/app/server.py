@@ -139,6 +139,40 @@ def worker_control_reassign_denied(body: object) -> bool:
     return bool(value)
 
 
+# PR#13 review finding (comment 4319617432): bulk reclaim-first reassign.
+# The route wrapper above attaches ONLY to POST /tasks/{id}/reassign, but
+# the pinned plugin's POST /tasks/bulk carries the same reclaim_first
+# switch on BulkTaskBody, and _bulk_apply_one's assignee branch calls
+# kanban_db.reassign_task(..., reclaim_first=True) directly when it is
+# set -- the exact claim-release-without-signalling op the deny-list
+# exists to refuse. An authenticated caller could therefore still release
+# a host worker's claim through the bulk endpoint. build_app() wraps the
+# bulk endpoint's dependant.call with a guard built from this predicate,
+# keyed on exactly the condition that reaches reassign_task:
+# reclaim_first truthy AND assignee present (payload.assignee is not
+# None). reclaim_first without an assignee is a no-op upstream (the
+# branch only runs under `payload.assignee is not None`) and ordinary
+# bulk ops -- status, priority, archive, assignee without reclaim_first
+# -- are untouched.
+def worker_control_bulk_reassign_denied(payload: object) -> bool:
+    """True when a (validated or raw) bulk payload requests the reclaim-
+    first reassign branch of _bulk_apply_one: ``assignee`` set AND
+    ``reclaim_first`` truthy. Accepts the endpoint's Pydantic model or a
+    plain dict so it is testable without fastapi; anything unrecognised
+    FAILS CLOSED (denied) -- an assembly that cannot read the two fields
+    must not forward the batch blind."""
+    if isinstance(payload, dict):
+        assignee = payload.get("assignee", None)
+        value = payload.get("reclaim_first", False)
+    elif payload is not None and hasattr(payload, "reclaim_first") \
+            and hasattr(payload, "assignee"):
+        assignee = payload.assignee
+        value = payload.reclaim_first
+    else:
+        return True
+    return assignee is not None and bool(value)
+
+
 # PR#13 review finding (comment 4319617397): status-driven reclaim.
 # The deny-list above only refuses the EXPLICIT reclaim endpoints, but the
 # pinned plugin's PATCH /tasks/{id} and POST /tasks/bulk both dispatch
@@ -666,6 +700,62 @@ def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_a
     _reassign_guarded_call._worker_control_guarded = True
     _reassign_guarded_call._worker_control_upstream = _reassign_upstream_call
     _reassign_route.dependant.call = _reassign_guarded_call
+
+    # ---- bulk reclaim-first guard (PR#13 review finding 4319617432) ------
+    # POST /tasks/bulk takes BulkTaskBody (ids + assignee + reclaim_first)
+    # and _bulk_apply_one calls reassign_task(..., reclaim_first=True) on
+    # that flag -- the same claim release the single-reassign wrapper
+    # above refuses, through an endpoint the path-deny middleware never
+    # matches. Wrap the bulk endpoint's dependant.call the SAME way (after
+    # FastAPI has parsed and validated the body with BulkTaskBody, BEFORE
+    # bulk_update opens _board_conn and mutates any item), so a guarded
+    # payload 403s with zero DB access and ordinary bulk operations keep
+    # their exact upstream semantics. Fail closed on router drift, same
+    # philosophy as the reassign and status guards.
+    _bulk_path = "/api/kanban/tasks/bulk"
+    _bulk_routes = [
+        r for r in app.routes
+        if isinstance(r, APIRoute) and r.path == _bulk_path
+        and "POST" in (r.methods or set())
+    ]
+    if len(_bulk_routes) != 1 or getattr(_bulk_routes[0], "dependant", None) is None \
+            or not callable(_bulk_routes[0].dependant.call):
+        raise SystemExit(
+            f"worker-control guard could not attach to {_bulk_path}; "
+            "refusing to start with the bulk reclaim-first reassign path unguarded "
+            "(mounted plugin router drifted from the pinned Hermes checkout)."
+        )
+    _bulk_route = _bulk_routes[0]
+    _bulk_upstream_call = _bulk_route.dependant.call
+    # Same dispatch-shape lock as the reassign wrapper: FastAPI captured
+    # is_coroutine_callable at route construction and dispatches
+    # dependant.call accordingly, so the wrapper must preserve it.
+    _bulk_upstream_is_async = bool(
+        getattr(_bulk_route.dependant, "is_coroutine_callable", False)
+    )
+    if not _bulk_upstream_is_async and asyncio.iscoroutinefunction(_bulk_upstream_call):
+        raise SystemExit(
+            f"worker-control guard: {_bulk_path} dispatch shape drifted "
+            "(dependant.is_coroutine_callable disagrees with the callable); "
+            "refusing to start unguarded."
+        )
+
+    if _bulk_upstream_is_async:
+        async def _bulk_guarded_call(**values):
+            if worker_control_bulk_reassign_denied(values.get("payload", values.get("body"))):
+                return JSONResponse(WORKER_CONTROL_REJECT_BODY, status_code=403)
+            return await _bulk_upstream_call(**values)
+    else:
+        def _bulk_guarded_call(**values):  # sync: FastAPI threadpools it
+            if worker_control_bulk_reassign_denied(values.get("payload", values.get("body"))):
+                return JSONResponse(WORKER_CONTROL_REJECT_BODY, status_code=403)
+            return _bulk_upstream_call(**values)
+
+    _bulk_guarded_call.__name__ = getattr(_bulk_upstream_call, "__name__", "bulk_update")
+    _bulk_guarded_call.__qualname__ = "bulk_update_endpoint[worker-control-guarded]"
+    _bulk_guarded_call._worker_control_guarded = True
+    _bulk_guarded_call._worker_control_upstream = _bulk_upstream_call
+    _bulk_route.dependant.call = _bulk_guarded_call
 
     # ---- status-driven reclaim guard (PR#13 review finding 4319617397) ----
     # The deny-list middleware above refuses the EXPLICIT reclaim endpoints,
