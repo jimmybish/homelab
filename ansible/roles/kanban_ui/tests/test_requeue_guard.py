@@ -12,9 +12,20 @@ lock lacks the LOCAL host prefix (always true inside this container). A
 running card dragged to Ready therefore released the claim without
 signalling the host worker, letting the dispatcher spawn a duplicate
 beside it. server.py now wraps ``plugin._set_status_direct`` (the single
-chokepoint BOTH update paths share) so running->ready raises
-``plugin._StatusRejected`` -- PATCH 400 + actionable detail, bulk per-id
-refusal -- and static/app.js disables the corresponding controls.
+chokepoint BOTH update paths share) so running->ready raises a refusal
+the endpoints map -- PATCH 400 + actionable detail, bulk per-id refusal
+-- and static/app.js disables the corresponding controls.
+
+PR#13 round-4 finding 4321367930: the refuse CHANNEL is checkout-
+contract dependent. Newer checkouts (live host) expose upstream's own
+``_StatusRejected`` (mapped to 400 via _map_errors); the pinned release
+revision b3aa561f has NO _StatusRejected, where the old mandatory lookup
+SystemExit'd the container at boot. The guard now prefers _StatusRejected
+when present and otherwise raises fastapi.HTTPException(400) (update_task
+has no catch-all there, bulk_update records per-id) -- identical refusal
+semantics on both shapes. Fail-closed anchor: the guard still refuses to
+boot when the _set_status_direct chokepoint itself is absent. See
+TestBootChannelMatrix for hermetic per-shape boot cases.
 
     python3 ansible/roles/kanban_ui/tests/test_requeue_guard.py
 
@@ -32,6 +43,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 # Deployed-container runs override the server path (the image ships
@@ -105,9 +117,9 @@ class TestRejectMessage(unittest.TestCase):
 
 class TestServerWiringContract(unittest.TestCase):
     """Static locks on build_app's chokepoint swap (contract, not
-    closure): the wrapper consults the predicate, raises the plugin's own
-    _StatusRejected, is swapped into the module global, and the attach
-    fails CLOSED on router drift."""
+    closure): the wrapper consults the predicate, raises through the
+    channel-selected refusal factory, is swapped into the module global,
+    and the attach fails CLOSED on router drift."""
 
     def test_chokepoint_swapped_into_plugin_module(self):
         src = SERVER.read_text()
@@ -115,12 +127,15 @@ class TestServerWiringContract(unittest.TestCase):
         self.assertIn("_set_status_direct_guarded._worker_control_guarded = True", src)
         self.assertIn("_set_status_direct_guarded._worker_control_upstream = _upstream_set_status", src)
 
-    def test_wrapper_uses_predicate_and_plugin_error_class(self):
+    def test_wrapper_uses_predicate_and_channel_refusal(self):
         src = SERVER.read_text()
         wrap = src[src.index("def _set_status_direct_guarded"):]
         wrap = wrap[: wrap.index("plugin._set_status_direct =")]
         self.assertIn("worker_requeue_denied(getattr(current, \"status\", None), new_status)", wrap)
-        self.assertIn("raise _status_rejected_cls(WORKER_REQUEUE_REJECT_MSG)", wrap)
+        # Round-4 finding 4321367930: refusal goes through the channel
+        # factory (either upstream _StatusRejected or HTTPException(400)),
+        # never a hard-coded mandatory class.
+        self.assertIn("raise _requeue_refusal()", wrap)
         # Current status read through upstream's own accessor, and the
         # refused path never calls the upstream write.
         self.assertIn("plugin.kanban_db.get_task(conn, task_id)", wrap)
@@ -130,15 +145,159 @@ class TestServerWiringContract(unittest.TestCase):
         src = SERVER.read_text()
         block = src[src.index('_upstream_set_status = getattr'):]
         block = block[: block.index("def _set_status_direct_guarded")]
+        # Fail-closed anchor: a missing/non-callable chokepoint refuses
+        # to boot on its own, independent of any refuse channel.
+        self.assertIn("if not callable(_upstream_set_status):", block)
         self.assertIn("raise SystemExit", block)
-        # Both drift conditions checked: helper callable, error class a
-        # real Exception subclass.
-        self.assertIn("callable(_upstream_set_status)", block)
+        # Channel A is preferred only when it is a real Exception class;
+        # channel B is fastapi's HTTPException(400); if even that cannot
+        # be imported the boot is refused (fail closed, no silent pass).
         self.assertIn("issubclass(_status_rejected_cls, Exception)", block)
+        self.assertIn("_status_rejected_cls(WORKER_REQUEUE_REJECT_MSG)", block)
+        self.assertIn("status_code=400, detail=WORKER_REQUEUE_REJECT_MSG", block)
+        self.assertGreaterEqual(block.count("raise SystemExit"), 2)
 
     def test_main_uses_build_app(self):
         src = SERVER.read_text()
         self.assertIn("app = build_app(", src[src.index("def main("):])
+
+
+# --------------------------------------------------------------------------
+# Boot-channel matrix (PR#13 round-4 finding 4321367930): the startup
+# guard must BOOT against both real plugin contracts and still fail
+# closed when the chokepoint is gone. Hermetic: a stub plugin module is
+# written to a temp dir and loaded through the exact same
+# spec_from_file_location path build_app uses (server.PLUGIN repointed);
+# no DB, no network, no real checkout. Needs fastapi (skipped where
+# absent; executed inside the deployed container).
+# --------------------------------------------------------------------------
+
+# The sibling guards (reassign, bulk reclaim-first) attach BEFORE the
+# status guard, so the stub router carries their two endpoints or the
+# boot would SystemExit on router drift for the wrong reason.
+_STUB_BASE = '''
+from types import SimpleNamespace
+from typing import Optional
+
+from fastapi import APIRouter
+
+router = APIRouter()
+
+_TASK = None
+kanban_db = SimpleNamespace(get_task=lambda conn, tid: _TASK)
+
+
+@router.post("/tasks/{task_id}/reassign")
+def reassign_task_endpoint(payload: Optional[dict] = None):
+    return {"ok": True}
+
+
+@router.post("/tasks/bulk")
+def bulk_update(payload: Optional[dict] = None):
+    return {"results": []}
+'''
+
+_STUB_PINNED = _STUB_BASE + '''
+
+def _set_status_direct(conn, task_id, new_status):
+    # b3aa561f shape: helper present, NO _StatusRejected anywhere.
+    return True
+'''
+
+_STUB_NEWER = _STUB_PINNED + '''
+
+class _StatusRejected(Exception):
+    pass
+'''
+
+_STUB_NEWER_NOCLASS = _STUB_PINNED + '''
+
+_StatusRejected = "not-a-class"
+'''
+
+_STUB_NO_HELPER = _STUB_BASE + '''
+
+class _StatusRejected(Exception):
+    pass
+'''
+
+
+class TestBootChannelMatrix(unittest.TestCase):
+    """build_app boots on the pinned contract (channel B), prefers
+    _StatusRejected when present (channel A), and always refuses to boot
+    when the _set_status_direct chokepoint itself is absent."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not _fastapi_available():
+            raise unittest.SkipTest("fastapi not importable here (run inside the container)")
+        os.environ["KANBAN_UI_COOKIE_INSECURE"] = "1"
+
+    def _build_with_stub(self, source: str):
+        import sys
+
+        d = tempfile.mkdtemp(prefix="kbui-stub-plugin-")
+        (Path(d) / "plugin_api.py").write_text(source)
+        saved_plugin = server.PLUGIN
+        try:
+            server.PLUGIN = Path(d)
+            app = server.build_app("synthetic-test-secret-0123456789abcdef", "", "", "")
+        finally:
+            server.PLUGIN = saved_plugin
+        return app, sys.modules["kanban_plugin_api"]
+
+    def test_pinned_shape_boots_and_refuses_via_http_exception(self):
+        # b3aa561f contract: guard must ATTACH (no SystemExit) and the
+        # refusal must be fastapi's HTTPException(400) carrying the
+        # actionable message.
+        from fastapi import HTTPException
+
+        _, plugin = self._build_with_stub(_STUB_PINNED)
+        wrapper = plugin._set_status_direct
+        self.assertTrue(getattr(wrapper, "_worker_control_guarded", False))
+        plugin._TASK = SimpleNamespace(status="running")
+        with self.assertRaises(HTTPException) as cm:
+            wrapper(None, "t_x", "ready")
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertEqual(cm.exception.detail, server.WORKER_REQUEUE_REJECT_MSG)
+        # Allowed transitions still reach the upstream write.
+        plugin._TASK = SimpleNamespace(status="todo")
+        self.assertTrue(wrapper(None, "t_x", "ready"))
+
+    def test_newer_shape_prefers_plugin_status_rejected(self):
+        _, plugin = self._build_with_stub(_STUB_NEWER)
+        wrapper = plugin._set_status_direct
+        self.assertTrue(getattr(wrapper, "_worker_control_guarded", False))
+        plugin._TASK = SimpleNamespace(status="running")
+        with self.assertRaises(plugin._StatusRejected) as cm:
+            wrapper(None, "t_x", "ready")
+        self.assertIn("hermes kanban reclaim", str(cm.exception))
+
+    def test_non_class_status_rejected_falls_back_to_http_exception(self):
+        # A _StatusRejected that is not an Exception subclass is not a
+        # usable channel; the guard must fall back to channel B rather
+        # than raise something the endpoints cannot map.
+        from fastapi import HTTPException
+
+        _, plugin = self._build_with_stub(_STUB_NEWER_NOCLASS)
+        plugin._TASK = SimpleNamespace(status="running")
+        with self.assertRaises(HTTPException):
+            plugin._set_status_direct(None, "t_x", "ready")
+
+    def test_missing_chokepoint_refuses_to_boot_even_with_error_class(self):
+        # Fail-closed anchor: the chokepoint itself is mandatory. The
+        # stub HAS _StatusRejected (so the old code would have booted
+        # the wrong way round) but NO _set_status_direct -> SystemExit.
+        d = tempfile.mkdtemp(prefix="kbui-stub-plugin-")
+        (Path(d) / "plugin_api.py").write_text(_STUB_NO_HELPER)
+        saved_plugin = server.PLUGIN
+        try:
+            server.PLUGIN = Path(d)
+            with self.assertRaises(SystemExit) as cm:
+                server.build_app("synthetic-test-secret-0123456789abcdef", "", "", "")
+        finally:
+            server.PLUGIN = saved_plugin
+        self.assertIn("_set_status_direct", str(cm.exception))
 
 
 class TestUiControlsDisabled(unittest.TestCase):

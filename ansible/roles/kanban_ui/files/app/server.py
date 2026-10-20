@@ -772,24 +772,62 @@ def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_a
     # _drag_to and _STATUS_HANDLERS resolve _set_status_direct as a module
     # global at call time (same mechanism as the WS-gate override below),
     # so the swap is authoritative without touching the pinned checkout.
-    # The refuse channel is upstream's own _StatusRejected: _patch_status
-    # maps it via _map_errors(400, _StatusRejected, ValueError) -> 400 +
-    # actionable detail, and bulk_update's per-id handler records it as
-    # {ok: false, error: <message>} without aborting siblings. The check
-    # runs BEFORE the write_txn opens -- a refused transition never touches
-    # the DB. Fail closed on router drift: if upstream renames the helper
-    # or the error class, refuse to boot rather than serve ready-requeue
-    # unguarded (same philosophy as the reassign guard and proxy marker).
+    # The refuse CHANNEL depends on the mounted checkout's contract
+    # (PR#13 round-4 finding 4321367930). Two shapes are real:
+    #   A. _StatusRejected (newer checkouts, e.g. the live host checkout):
+    #      _patch_status maps it via _map_errors(400, _StatusRejected,
+    #      ValueError) -> 400 + actionable detail, and bulk_update's
+    #      per-id handler records it as {ok: false, error: <message>}.
+    #   B. fastapi.HTTPException(400) (the pinned release revision
+    #      b3aa561f, whose plugin_api.py has NO _StatusRejected -- a
+    #      mandatory lookup there returned None and SystemExit'd the
+    #      container at boot, so the repo-managed deploy could never
+    #      start). At the pinned revision update_task has try/finally
+    #      only, so the HTTPException propagates to FastAPI -> 400 +
+    #      detail, and bulk_update's per-id `except Exception` records
+    #      str(exc) as {ok: false, error: <message>} -- identical refusal
+    #      semantics. On newer checkouts _map_errors re-raises unknown
+    #      types, so channel B stays correct there too; channel A is
+    #      simply preferred when upstream exposes its own class.
+    # The fail-closed anchor is the CHOKEPOINT itself: if upstream ever
+    # renames or removes _set_status_direct the guard cannot attach and
+    # refuses to boot (same philosophy as the reassign guard and proxy
+    # marker); if neither refuse channel can be constructed (not even
+    # fastapi's HTTPException) the guard cannot produce a refusal that
+    # the endpoints map, and also refuses to boot.
     _upstream_set_status = getattr(plugin, "_set_status_direct", None)
-    _status_rejected_cls = getattr(plugin, "_StatusRejected", None)
-    if not callable(_upstream_set_status) or not (
-        isinstance(_status_rejected_cls, type) and issubclass(_status_rejected_cls, Exception)
-    ):
+    if not callable(_upstream_set_status):
         raise SystemExit(
             "worker-control guard could not attach to plugin._set_status_direct; "
             "refusing to start with the running->ready status requeue unguarded "
             "(mounted plugin router drifted from the pinned Hermes checkout)."
         )
+    _status_rejected_cls = getattr(plugin, "_StatusRejected", None)
+    if isinstance(_status_rejected_cls, type) and issubclass(_status_rejected_cls, Exception):
+        _requeue_refuse_channel = "plugin._StatusRejected"
+
+        def _requeue_refusal():
+            return _status_rejected_cls(WORKER_REQUEUE_REJECT_MSG)
+    else:
+        try:
+            from fastapi import HTTPException as _RefuseHTTPException
+        except Exception as _exc:  # fastapi importable above; belt-and-braces
+            raise SystemExit(
+                "worker-control guard: mounted plugin exposes neither "
+                "_StatusRejected nor an importable fastapi.HTTPException; "
+                "refusing to start with the running->ready status requeue "
+                "unguarded (no refuse channel the endpoints can map)."
+            ) from _exc
+        _requeue_refuse_channel = "fastapi.HTTPException(400)"
+
+        def _requeue_refusal():
+            return _RefuseHTTPException(status_code=400, detail=WORKER_REQUEUE_REJECT_MSG)
+
+    print(
+        f"worker-control guard: running->ready requeue refusal channel: "
+        f"{_requeue_refuse_channel}",
+        flush=True,
+    )
 
     def _set_status_direct_guarded(conn, task_id, new_status):
         # Read the CURRENT status through upstream's own accessor; an
@@ -799,7 +837,7 @@ def build_app(secret: str, proxy_marker: str = "", trusted_proxy: str = "", ws_a
         # cards, running->blocked/scheduled/done/review, ...) is untouched.
         current = plugin.kanban_db.get_task(conn, task_id)
         if worker_requeue_denied(getattr(current, "status", None), new_status):
-            raise _status_rejected_cls(WORKER_REQUEUE_REJECT_MSG)
+            raise _requeue_refusal()
         return _upstream_set_status(conn, task_id, new_status)
 
     _set_status_direct_guarded.__name__ = "_set_status_direct"
