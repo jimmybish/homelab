@@ -114,8 +114,12 @@
   ansible.builtin.set_fact:
     kanban_ui_proxy_ip: >-
       {{ hostvars[groups['proxy_host'][0]]['ansible_default_ipv4']['address'] }}
+  # kanban_ui_firewall tag too: the standalone teardown run
+  # (--tags kanban_ui_firewall -e kanban_ui_state=absent) renders the
+  # enforcement script/unit references and must not depend on the UFW tasks.
   tags:
     - kanban_ui
+    - kanban_ui_firewall
 
 - name: Delete the legacy Anywhere UFW rule for the Kanban UI port
   community.general.ufw:
@@ -323,6 +327,197 @@
 
 - name: Apply pending Kanban UI restart
   ansible.builtin.meta: flush_handlers
+
+# 4b. DOCKER-USER enforcement (PR#13 round-4 finding 4321368046). The UFW
+# rules above are INPUT-chain allows: they never see traffic to the PUBLISHED
+# port, which takes Docker's bridge/DNAT path (FORWARD -> nat DOCKER DNAT ->
+# filter DOCKER ACCEPT) and reached the app from any LAN source pre-fix (live
+# proof: mgmt got HTTP 401/200 on the published port with only the proxy-
+# restricted UFW rule loaded - app auth, not network isolation). Docker's
+# documented hook is a jump into a dedicated service-scoped chain at DOCKER-
+# USER (https://docs.docker.com/engine/network/packet-filtering-firewalls/).
+# Blast radius is exactly one service tuple: the jump matches the kanban
+# container's live post-DNAT address (resolved from the Docker API on every
+# run, self-healing across recreate) + destination port only; transit traffic
+# for any other container, network, or host service never matches and the
+# jump is invisible to it. The chain holds exactly three rules: ACCEPT in
+# 'lo' (hairpin/userland-proxy path, kept so a future userland-proxy=false
+# flip cannot lock the host out of its own published port), ACCEPT the SWAG
+# proxy source, then a terminal DROP. Verified live with an atomic
+# counter-only DOCKER-USER probe on this host: host-originated curls to the
+# published port traverse NO FORWARD hook (docker-proxy userland, 0 packets
+# counted) while LAN curls all land in the chain - so the role's own
+# host-side probes and the container healthcheck (in-container loopback) are
+# unaffected by the DROP, and non-proxy LAN sources get network-level
+# silence. INPUT rules stay: they still gate the container's direct IP on the
+# host's own INPUT chain (not dead weight) and backstop any future
+# non-published bind. IPv6 needs no rule: the compose pins the IPv4 bind
+# only and the container has no v6 address. Convergence lives in one
+# idempotent script (files/docker_user_enforce.sh) run from this play AND
+# from a systemd oneshot ordered After=docker.service PartOf=docker.service
+# — the daemon-lifecycle belt-and-braces recommended by Docker's firewall
+# guidance: whenever docker.service restarts (upgrade, maintenance) the unit
+# re-fires and re-converges DOCKER-USER (drift recovery proved live: jump
+# manually removed, oneshot re-run restored the exact managed ruleset).
+# Teardown
+# (ansible-playbook ... -e kanban_ui_state=absent --tags kanban_ui_firewall)
+# removes jump+chain+unit+script declaratively so no orphaned ACCEPT can
+# fail open if the port is ever reused.
+- name: Deploy the DOCKER-USER kanban-ui enforcement script
+  ansible.builtin.copy:
+    src: docker_user_enforce.sh
+    dest: "{{ kanban_ui_fw_script_path }}"
+    owner: root
+    group: root
+    mode: '0750'
+  register: kanban_ui_fw_script
+  when: kanban_ui_state | default('present') == 'present'
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Install the boot-time DOCKER-USER convergence unit
+  # Type=oneshot + RemainAfterExit: runs once after docker.service at boot
+  # (daemon restarts re-run it manually or via the next playbook pass; the
+  # verify task below additionally heals drift on every play).
+  ansible.builtin.template:
+    src: kanban_ui_docker_user.service.j2
+    dest: /etc/systemd/system/kanban-ui-docker-user.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: kanban_ui_fw_unit
+  when: kanban_ui_state | default('present') == 'present'
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Enable the DOCKER-USER kanban-ui convergence unit
+  ansible.builtin.systemd:
+    name: kanban-ui-docker-user.service
+    enabled: true
+    daemon_reload: true
+    state: started
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Converge the DOCKER-USER kanban-ui ruleset now
+  # Immediate convergence in this play (the unit covers boot). The script
+  # exits 0 without touching the kernel when the exact managed state is
+  # already live, so re-runs report changed=false (idempotence evidence).
+  # Values here are credential-free (container name, port, proxy IP) and
+  # arrive via environment, never interpolated into shell syntax.
+  ansible.builtin.command:
+    argv:
+      - "{{ kanban_ui_fw_script_path }}"
+  environment:
+    KANBAN_UI_CONTAINER: kanban-ui
+    KANBAN_UI_PORT: "{{ kanban_ui_port }}"
+    KANBAN_UI_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
+  register: kanban_ui_fw_converge
+  changed_when: "'converged' in kanban_ui_fw_converge.stdout and 'already converged' not in kanban_ui_fw_converge.stdout"
+  failed_when: kanban_ui_fw_converge.rc != 0
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Verify the DOCKER-USER kanban-ui ruleset is live
+  # Behavior check per the post-deployment standard: --check exits 0 only
+  # when all four managed rules (jump + 3 chain rules) match the live kernel
+  # state for the CURRENT container IP. Runs every play, so drift from a
+  # docker daemon restart is detected here and healed by the converge task
+  # on the next pass; within this play, failure is fatal (fail-closed: a
+  # deployment must not report success without enforcement).
+  ansible.builtin.command:
+    argv:
+      - "{{ kanban_ui_fw_script_path }}"
+      - "--check"
+  environment:
+    KANBAN_UI_CONTAINER: kanban-ui
+    KANBAN_UI_PORT: "{{ kanban_ui_port }}"
+    KANBAN_UI_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
+  register: kanban_ui_fw_verify
+  changed_when: false
+  failed_when: kanban_ui_fw_verify.rc != 0
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Tear down the DOCKER-USER kanban-ui enforcement
+  # Declarative uninstall path (kanban_ui_state: absent): remove every jump
+  # (including stale container-IP variants) then flush + unregister the
+  # chain. The script resolves no container state here, so teardown works
+  # even after the container is already gone. Idempotent on a clean host.
+  ansible.builtin.command:
+    argv:
+      - "{{ kanban_ui_fw_script_path }}"
+      - "--teardown"
+  environment:
+    KANBAN_UI_CONTAINER: kanban-ui
+    KANBAN_UI_PORT: "{{ kanban_ui_port }}"
+    KANBAN_UI_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
+  register: kanban_ui_fw_teardown
+  changed_when: "'torn down' in kanban_ui_fw_teardown.stdout"
+  failed_when: kanban_ui_fw_teardown.rc != 0
+  when:
+    - kanban_ui_state | default('present') == 'absent'
+    - not ansible_check_mode
+  tags:
+    - kanban_ui_firewall
+
+- name: Disable and stop the DOCKER-USER kanban-ui convergence unit
+  # Runs BEFORE the unit file is deleted (systemctl disable needs the file).
+  # Type=oneshot means "stopped" simply marks the last run finished; enabled:
+  # false is what keeps it from re-firing at boot. Tolerates the never-
+  # installed case (teardown on a host that never got the role) by the
+  # registered-message allowance below; any other failure is fatal.
+  ansible.builtin.systemd:
+    name: kanban-ui-docker-user.service
+    state: stopped
+    enabled: false
+    daemon_reload: true
+  register: kanban_ui_fw_unit_teardown
+  failed_when:
+    - kanban_ui_fw_unit_teardown is failed
+    - "'Could not find the requested service' not in kanban_ui_fw_unit_teardown.msg | default('')"
+  when: kanban_ui_state | default('present') == 'absent'
+  tags:
+    - kanban_ui_firewall
+
+- name: Remove the DOCKER-USER kanban-ui enforcement unit and script
+  # Completes the absent path: unit file (disabled + daemon-reloaded above,
+  # so it can never re-fire) and the script itself. No orphaned rules, unit,
+  # or helper survives teardown.
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/kanban-ui-docker-user.service
+    - "{{ kanban_ui_fw_script_path }}"
+  when: kanban_ui_state | default('present') == 'absent'
+  tags:
+    - kanban_ui_firewall
+
+- name: Reload systemd after unit removal
+  # Forget the deleted unit so a later boot cannot resurrect it from the
+  # systemd in-memory cache. name is a required module parameter; with only
+  # daemon_reload set the task touches no unit state.
+  ansible.builtin.systemd:
+    name: kanban-ui-docker-user.service
+    daemon_reload: true
+  when: kanban_ui_state | default('present') == 'absent'
+  tags:
+    - kanban_ui_firewall
 
 # 5. Proxy configuration (SWAG Internal) — DEPLOYED BEFORE VERIFICATION.
 # The session verification below speaks only HTTPS through this vhost, so

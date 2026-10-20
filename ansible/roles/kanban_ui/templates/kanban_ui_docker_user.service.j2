@@ -1,0 +1,30 @@
+[Unit]
+# DOCKER-USER enforcement for the kanban-ui published port (PR#13 round-4
+# finding 4321368046). Converges the service-scoped pre-Docker forwarding
+# filter after the Docker daemon (re)builds its own chains — the documented
+# mitigation for user DOCKER-USER rules lost across daemon restart/upgrade
+# (https://docs.docker.com/engine/network/packet-filtering-firewalls/).
+# PartOf=docker.service makes systemd re-run this oneshot every time the
+# daemon restarts (docker upgrades, systemctl restart docker), which is
+# exactly when DOCKER-USER gets rebuilt and our jump disappears.
+# Managed by Ansible (roles/kanban_ui); do not edit on the host.
+Description=Converge DOCKER-USER kanban-ui pre-Docker forwarding filter
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# The enforce script is idempotent and touch-free when the exact managed
+# ruleset is already live (see files/docker_user_enforce.sh).
+Environment=KANBAN_UI_CONTAINER=kanban-ui
+Environment=KANBAN_UI_PORT={{ kanban_ui_port }}
+Environment=KANBAN_UI_PROXY_IP={{ kanban_ui_proxy_ip }}
+ExecStart={{ kanban_ui_fw_script_path }}
+# The script waits for the container (up to 30s) and serialises against
+# Docker's concurrent rule writes (iptables -w 30); allow headroom.
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

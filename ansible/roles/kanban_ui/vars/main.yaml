@@ -122,6 +122,15 @@ kanban_ui_version: "2026.10.20j"
 # Host port (POC port kept so existing bookmarks keep working)
 kanban_ui_port: 9470
 
+# DOCKER-USER pre-Docker forwarding enforcement (PR#13 round-4 finding
+# 4321368046). Converger script path (root-owned, deployed by the role; the
+# systemd oneshot below the daemon invokes the SAME script so boot-time
+# re-convergence cannot drift from the playbook's declared state) and the
+# teardown switch: kanban_ui_state=absent removes jump+chain+unit+script
+# (run with --tags kanban_ui_firewall).
+kanban_ui_fw_script_path: /usr/local/sbin/kanban-ui-docker-user-enforce.sh
+kanban_ui_state: present
+
 kanban_ui_folder: "{{ docker_storage_folder }}/kanban-ui"
 kanban_ui_compose_file: "{{ kanban_ui_folder }}/docker-compose.yaml"
 kanban_ui_token_file: "{{ kanban_ui_folder }}/token.txt"
