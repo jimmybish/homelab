@@ -192,17 +192,18 @@ fi
 # Chain must exist before anything jumps to it.
 ipt -n -L "${CHAIN}" >/dev/null 2>&1 || ipt -N "${CHAIN}" || exit 1
 
-# FAIL-CLOSED RECONVERGENCE (PR#13 round-5 finding 4323915092):
+# FAIL-CLOSED RECONVERGENCE (PR#13 round-5 finding 4323915092, hardened by
+# round-6 finding 4331497704):
 # From here until the final verified guard deletion, the container tuple is
-# DROP'd in DOCKER-USER no matter which step fails next. Deleting a
-# pre-existing guard first keeps this idempotent after a failed run (two
-# identical guards would otherwise stack); the insertion is a single
-# xtables-locked operation, atomic against Docker's own rule writes.
-while read -r r; do
-  [ -n "$r" ] || continue
-  # shellcheck disable=SC2086  # rule spec must be separate argv words
-  ipt -D DOCKER-USER ${r#-A DOCKER-USER } || exit 1
-done < <(ipt -S DOCKER-USER | grep -- "--comment ${GUARD_COMMENT} " || true)
+# DROP'd in DOCKER-USER no matter which step fails next. Surviving guards
+# from an earlier failed run are deliberately KEPT while the fresh guard is
+# inserted: deleting them first opened a window (and, if the -I below then
+# failed, a terminal state) with neither jump nor guard covering the port.
+# Stacked duplicate guards are harmless -- every copy is a DROP on an equal
+# matcher -- and the verified-success cleanup below (and --teardown) remove
+# ALL guard copies by comment match, so no guard can orphan. The insertion
+# is a single xtables-locked operation, atomic against Docker's own writes,
+# so at every instant at least one guard or the jump restricts the tuple.
 # shellcheck disable=SC2086  # spec is deliberately word-split into argv
 ipt -I DOCKER-USER 1 $(guard_spec) || exit 1
 [ "${KANBAN_UI_TEST_FAIL_AFTER:-}" = "guard" ] && { echo "injected failure after guard" >&2; exit 1; }

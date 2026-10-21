@@ -366,6 +366,10 @@
 # leave the published tuple falling through to Docker's ACCEPT rules -
 # a mid-script failure exits non-zero with the guard still DROPping, and
 # the guard is removed only after the full managed set verifies live.
+# Round-6 finding 4331497704: a retry KEEPS any guard surviving from the
+# failed run while inserting its replacement (stacked DROPs are harmless;
+# the verified-success cleanup removes all copies by comment match), so no
+# retry path can ever open a neither-guard-nor-jump window.
 # Teardown
 # (ansible-playbook ... -e kanban_ui_state=absent --tags kanban_ui_firewall)
 # removes jump+guard+chain+unit+script declaratively so no orphaned ACCEPT
