@@ -28,6 +28,33 @@
   --text: #1a2138; --text-2: #4d5878; --text-3: #8b94b0;
   --accent-soft: rgba(99,102,241,.12); --shadow: 0 8px 30px rgba(30,40,90,.14);
 }
+/* ---------- stacking scale ----------
+ * PR#13 review finding 4331497777 (round 6): the re-login overlay used an
+ * inline z-index 60 — BELOW the drawer scrim (70) and drawer (80), and
+ * level with the bulk bar — so a 401 while a drawer/modal/menu was open
+ * buried the re-auth form (worst case: mobile, where the drawer is
+ * full-width). Rather than a one-off magic number, every layering value in
+ * this stylesheet (and the inline menu z-indexes in app.js) now references
+ * this single documented scale. Strict order, low to high:
+ *   topbar < trash < bulkbar < drawer-scrim < drawer < modal
+ *   < menu-scrim < menu < toasts < auth-overlay
+ * The auth overlay is TOPMOST, above even the toast stack: reauth is
+ * blocking, and it must work without first dismissing the drawer, modal,
+ * or context menu underneath (users should never have to reload to log in
+ * again). New overlays go here, never ad-hoc integers.
+ */
+:root {
+  --z-topbar: 40;
+  --z-trash: 55;
+  --z-bulkbar: 60;
+  --z-scrim: 70;
+  --z-drawer: 80;
+  --z-modal: 90;
+  --z-menu-scrim: 95;
+  --z-menu: 100;
+  --z-toasts: 120;
+  --z-auth: 130;
+}
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
@@ -51,7 +78,7 @@ input, select, textarea { font: inherit; color: var(--text); }
   padding: 10px 16px; border-bottom: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: blur(12px);
-  position: sticky; top: 0; z-index: 40;
+  position: sticky; top: 0; z-index: var(--z-topbar);
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .2px; }
 .brand-thin { font-weight: 300; margin-left: 2px; color: var(--text-2); }
@@ -188,13 +215,13 @@ input, select, textarea { font: inherit; color: var(--text); }
 /* bulk action bar */
 .bulkbar {
   position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
-  display: flex; gap: 6px; align-items: center; z-index: 60;
+  display: flex; gap: 6px; align-items: center; z-index: var(--z-bulkbar);
   background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px;
   padding: 6px 10px; box-shadow: var(--shadow);
 }
 .trash {
   position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
-  z-index: 55; background: rgba(248,113,113,.15); border: 1px dashed var(--danger);
+  z-index: var(--z-trash); background: rgba(248,113,113,.15); border: 1px dashed var(--danger);
   color: var(--danger); border-radius: 12px 12px 0 0; padding: 10px 30px;
 }
 .trash.over { background: rgba(248,113,113,.35); }
@@ -203,12 +230,17 @@ input, select, textarea { font: inherit; color: var(--text); }
 [hidden] { display: none !important; }
 
 /* ---------- drawer ---------- */
-.scrim { position: fixed; inset: 0; background: rgba(4,6,14,.55); backdrop-filter: blur(2px); z-index: 70; animation: fadeIn .18s; }
+.scrim { position: fixed; inset: 0; background: rgba(4,6,14,.55); backdrop-filter: blur(2px); z-index: var(--z-scrim); animation: fadeIn .18s; }
+/* Re-login overlay (PR#13 review finding 4331497777): reuses the scrim
+ * backdrop but sits on the TOPMOST auth tier so a 401 arriving while the
+ * drawer, a modal, or the context menu is open can never bury the
+ * re-authentication form. app.js attaches this class; no inline z-index. */
+.auth-overlay { z-index: var(--z-auth); display: flex; align-items: center; justify-content: center; }
 @keyframes fadeIn { from { opacity: 0 } }
 .drawer {
   position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 100vw);
   background: var(--bg-2); border-left: 1px solid var(--line);
-  z-index: 80; display: flex; flex-direction: column;
+  z-index: var(--z-drawer); display: flex; flex-direction: column;
   animation: slideIn .22s cubic-bezier(.2,.8,.25,1);
   box-shadow: -18px 0 60px rgba(0,0,0,.4);
 }
@@ -261,7 +293,7 @@ input, select, textarea { font: inherit; color: var(--text); }
 .logbox { background: #0a0c14; color: #c9d4f5; font-family: var(--mono); font-size: .74rem; border-radius: 10px; padding: 10px; max-height: 300px; overflow: auto; white-space: pre-wrap; }
 
 /* ---------- modal ---------- */
-.modal-wrap { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; padding: 18px; }
+.modal-wrap { position: fixed; inset: 0; z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; padding: 18px; }
 .modal { width: min(560px, 100%); max-height: 92vh; overflow-y: auto; background: var(--bg-2); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 18px 20px; animation: pop .18s cubic-bezier(.2,.8,.25,1); }
 @keyframes pop { from { transform: scale(.96) translateY(8px); opacity: 0 } }
 .modal h2 { margin: 0 0 14px; font-size: 1.05rem; }
@@ -282,7 +314,7 @@ input, select, textarea { font: inherit; color: var(--text); }
 .wrow .t { color: var(--text-2); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- toasts ---------- */
-.toasts { position: fixed; bottom: 16px; right: 16px; z-index: 120; display: flex; flex-direction: column; gap: 8px; }
+.toasts { position: fixed; bottom: 16px; right: 16px; z-index: var(--z-toasts); display: flex; flex-direction: column; gap: 8px; }
 .toast { background: var(--surface-2); border: 1px solid var(--line); border-left: 4px solid var(--accent); color: var(--text); border-radius: 12px; padding: 10px 14px; box-shadow: var(--shadow); font-size: .88rem; max-width: 360px; animation: slideIn .2s; }
 .toast.err { border-left-color: var(--danger); }
 .toast.ok { border-left-color: var(--ok); }

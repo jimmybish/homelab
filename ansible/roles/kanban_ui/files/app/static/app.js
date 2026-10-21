@@ -526,7 +526,7 @@ function footerActionButtons(t) {
 
 function openCardMenu(t, x, y) {
   closeMenus();
-  const menu = h("div", { class: "modal", style: `position:fixed;left:${Math.min(x, innerWidth - 260)}px;top:${Math.min(y, innerHeight - 360)}px;width:250px;padding:6px;z-index:100` });
+  const menu = h("div", { class: "modal", style: `position:fixed;left:${Math.min(x, innerWidth - 260)}px;top:${Math.min(y, innerHeight - 360)}px;width:250px;padding:6px;z-index:var(--z-menu)` });
   for (const it of cardMenuItems(t)) {
     if (it.sep) { menu.append(h("hr", { style: "border:none;border-top:1px solid var(--line);margin:4px 0" })); continue; }
     menu.append(h("button", {
@@ -539,7 +539,7 @@ function openCardMenu(t, x, y) {
     }, it.label));
   }
   document.body.append(menu);
-  const scrim = h("div", { class: "scrim", style: "z-index:95", onclick: closeMenus });
+  const scrim = h("div", { class: "scrim", style: "z-index:var(--z-menu-scrim)", onclick: closeMenus });
   document.body.append(scrim);
   window.__menuClose = () => { menu.remove(); scrim.remove(); window.__menuClose = null; };
 }
@@ -1313,6 +1313,57 @@ function renderBulkBar() {
 }
 
 /* ---------------- auth (session cookie; no credential in JS) ---------- */
+/* PR#13 review finding 4331497777 (round 6): the overlay used an inline
+ * z-index 60 — below the drawer scrim (70) and drawer (80), and level with
+ * the bulk bar — so a 401 arriving while a drawer, modal, or context menu
+ * was open buried the re-login form (worst case: mobile, full-width
+ * drawer). It now carries the .auth-overlay class, which pins it to
+ * var(--z-auth), the TOPMOST tier of the documented stacking scale in
+ * app.css. Accessibility: the overlay is a labelled modal dialog; focus
+ * moves into the token field when it appears and returns to the previously
+ * focused element when reauth succeeds. Success is a SOFT dismiss (remove
+ * the overlay, catch-up refresh) instead of location.reload(), so the
+ * previous view — an open drawer, an open modal — survives reauthenticating. */
+function authOverlayOpen(box) {
+  const previous = document.activeElement;
+  const overlay = h("div", {
+    id: "loginOverlay", class: "scrim auth-overlay",
+    role: "dialog", "aria-modal": "true", "aria-label": "Re-authentication required",
+  }, box);
+  overlay.hidden = false;
+  document.body.append(overlay);
+  return previous;
+}
+function authOverlayDismiss(previous) {
+  const overlay = document.getElementById("loginOverlay");
+  if (overlay) overlay.remove();
+  // Restore focus to whatever had it before the 401 surfaced, if it is
+  // still in the document; otherwise fall back to the body.
+  const target = previous && document.contains(previous) ? previous : document.body;
+  if (typeof target.focus === "function") target.focus();
+}
+/* PR#13 review round-9 blocking finding (t_d7bdedae): server.py gates every
+ * /api/ route on the session cookie, so a cold unauthenticated visit burns
+ * loadCfg/loadBoards/loadAssignees/loadBoard and the WS connect on 401s, and
+ * the old three-call soft dismiss (loadBoard/refreshDrawer/pollWorkers only)
+ * left the selector/config state empty until a manual page reload — the
+ * exact reload the soft dismiss was supposed to remove. Successful login
+ * therefore re-runs the FULL protected bootstrap the boot IIFE would have
+ * done with a session: config, board list, assignees, board payload, worker
+ * pill, model-option cache (a pre-login 401 poisons it with an empty
+ * provider list), and an explicit re-connect of the event socket (the boot
+ * socket was opened without a session cookie). Nothing here touches the
+ * drawer/modal underneath: loadBoard(true) renders columns only, and
+ * refreshDrawer() no-ops unless a drawer is already open. */
+async function postLoginBootstrap() {
+  S.modelOpts = null;                        // drop any 401-poisoned cache
+  await Promise.all([loadCfg(), loadBoards(), loadAssignees()]);
+  await loadBoard(true);
+  refreshDrawer();
+  pollWorkers();
+  S.wsBackoff = 1000;
+  connectWS();                               // replaces the pre-login socket
+}
 function showLogin() {
   if (document.getElementById("loginOverlay")) return;
   // Round-3 finding 1: never render a credential form on a plaintext
@@ -1324,9 +1375,7 @@ function showLogin() {
       h("div", { class: "dsec" }, "Hermes Kanban — login"),
       h("div", { class: "chip err", style: "min-height:18px;margin-bottom:8px" }, "plaintext origin: use the https endpoint"),
       h("a", { class: "btn btn-accent", style: "width:100%", href: "https://" + location.host + location.pathname }, "Continue over HTTPS"));
-    const overlay = h("div", { id: "loginOverlay", class: "scrim", style: "display:flex;align-items:center;justify-content:center;z-index:60" }, box);
-    overlay.hidden = false;
-    document.body.append(overlay);
+    authOverlayOpen(box);
     return;
   }
   const input = h("input", { type: "password", placeholder: "Access token", autocomplete: "current-password", style: "width:100%;margin-bottom:8px" });
@@ -1339,16 +1388,21 @@ function showLogin() {
     try {
       const r = await fetch("/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: v }), credentials: "same-origin" });
       if (!r.ok) { const j = await r.json().catch(() => ({})); err.textContent = typeof j.detail === "string" ? j.detail : "login failed"; btn.disabled = false; input.value = ""; input.focus(); return; }
-      location.reload();
+      // Soft dismiss: the new session cookie is set; drop the overlay and
+      // run the full authenticated bootstrap (config/boards/assignees/board/
+      // workers/WS), not just the three-call visibility catch-up. No reload
+      // — the drawer/modal underneath stays exactly where it was. Every
+      // loader inside catches its own failures, so a post-login hiccup can
+      // never re-show an error on the (already removed) overlay.
+      authOverlayDismiss(previous);
+      await postLoginBootstrap();
     } catch (e) { err.textContent = String(e); btn.disabled = false; }
   };
   btn.onclick = submit;
   input.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
   const box = h("div", { class: "panel", style: "width:min(340px,90vw);padding:18px" },
     h("div", { class: "dsec" }, "Hermes Kanban — login"), input, err, btn);
-  const overlay = h("div", { id: "loginOverlay", class: "scrim", style: "display:flex;align-items:center;justify-content:center;z-index:60" }, box);
-  overlay.hidden = false;
-  document.body.append(overlay);
+  const previous = authOverlayOpen(box);
   input.focus();
 }
 
