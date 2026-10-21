@@ -131,6 +131,15 @@ kanban_ui_port: 9470
 kanban_ui_fw_script_path: /usr/local/sbin/kanban-ui-docker-user-enforce.sh
 kanban_ui_state: present
 
+# PR#13 review finding 4331497811: when true, an ADDITIONAL verifier run
+# executes the pinned _dispatch_once_locked against the disposable gate
+# board between the non-mutation fingerprints and asserts the persisted-
+# state gate DETECTS the mutation (positive control; see the sibling
+# task in tasks/main.yaml and tests/test_dispatch_nonmutation_gate.py).
+# False in production: the injection branch is never reached. Flip on
+# with -e kanban_ui_verify_fault_inject=true for the controlled proof.
+kanban_ui_verify_fault_inject: false
+
 kanban_ui_folder: "{{ docker_storage_folder }}/kanban-ui"
 kanban_ui_compose_file: "{{ kanban_ui_folder }}/docker-compose.yaml"
 kanban_ui_token_file: "{{ kanban_ui_folder }}/token.txt"

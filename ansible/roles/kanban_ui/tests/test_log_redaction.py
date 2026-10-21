@@ -391,7 +391,10 @@ class TestVerifierArgvHygiene(unittest.TestCase):
         src = self.VERIFIER.read_text()
         self.assertIn("mktemp -d", src)
         self.assertIn('chmod 700', src)
-        self.assertIn("trap 'rm -rf \"$WORK\"' EXIT", src)
+        # Private-dir teardown stays on the EXIT trap; the trap now also
+        # runs the step-10b gate-board teardown hook first (PR#13 review
+        # finding 4331497811), so assert both halves of the shipped trap.
+        self.assertIn("trap 'gate_teardown; rm -rf \"$WORK\"' EXIT", src)
         self.assertNotIn("/tmp/kbui", src)
         self.assertIn('https://*)', src)  # refuses any non-https base
         self.assertIn('argv_leak', src)   # the watcher gates the exit code

@@ -55,14 +55,46 @@
 #      reassign reaches its handler and the anon reclaim 401s at the
 #      session gate (PR#13 review finding 4301554389)
 #  10b. the container-local dispatcher pass (POST /api/kanban/dispatch)
-#      rejects a FULL session with the documented 403 body and leaves the
-#      board byte-identical; the anon tick 401s at the session gate
-#      (PR#13 review finding 4323915007)
+#      rejects a FULL session with the documented 403 body, and the
+#      refused tick leaves the DISPATCH GATE BOARD's persisted state
+#      fingerprint-identical; the anon tick 401s at the session gate
+#      (PR#13 review finding 4323915007; non-mutation measured on an
+#      isolated on-disk gate board, not the live /board presentation
+#      JSON, per PR#13 review finding 4331497811)
 set -u
 
 : "${KANBAN_UI_VERIFY_URL:?}"
 : "${KANBAN_UI_VERIFY_TOKEN_FILE:?}"
 : "${KANBAN_UI_VERIFY_BOARD:?}"
+# Gate-board plumbing for step 10b (all credential-free; see 10b): the
+# Hermes home anchoring kanban state (same value the container gets as
+# HERMES_KANBAN_HOME), the pinned hermes-agent checkout + its venv
+# python (used ONLY by the task-gated fault-injection tick), and the
+# numeric ids owning board state (the gate dispatch-lock file is chowned
+# to them so the real gateway tick contends on the flock).
+: "${KANBAN_UI_KANBAN_HOME:?}"
+: "${KANBAN_UI_HERMES_REPO:?}"
+: "${KANBAN_UI_HERMES_PY:?}"
+# Numeric ids owning board state. The dispatch-lock file must ALREADY be
+# owned by the board owner the instant it becomes visible at its final
+# path: the pinned _dispatch_tick_lock maps any OSError from open() to
+# "acquired" (hermes_cli/kanban_db.py, except OSError -> acquired=True),
+# so ANY root-owned window between create and chown lets a gateway tick
+# bypass flock contention and write INSIDE the fingerprint window
+# (PR#13 round-6d review finding 3). Step 10b therefore publishes the
+# lock via an O_EXCL staging file + fchown + os.link: the final path
+# goes from absent to board-owned 0644 atomically, with no root-owned
+# intermediate state for a tick to trip over.
+: "${KANBAN_UI_BOARD_UID:?}"
+: "${KANBAN_UI_BOARD_GID:?}"
+# Task-gated fault injection, NEVER set in production (see the sibling
+# playbook task). Only the literal 'dispatch-once' means anything: it
+# runs a real pinned dispatch_once against the gate board between the
+# before/after fingerprints, so the gate must FAIL if detection ever
+# regresses. Unset/anything else = the branch is dead code. The flake
+# evidence for the retired live-board hash lives in
+# tests/test_dispatch_nonmutation_gate.py (presentation-drift model).
+KANBAN_UI_VERIFY_TEST_INJECT="${KANBAN_UI_VERIFY_TEST_INJECT:-}"
 BASE="${KANBAN_UI_VERIFY_URL%/}"
 
 FAIL=0
@@ -100,7 +132,12 @@ IFS= read -r TOK < "$KANBAN_UI_VERIFY_TOKEN_FILE"
 
 WORK=$(mktemp -d) || exit 1
 chmod 700 "$WORK"
-trap 'rm -rf "$WORK"' EXIT
+# Teardown hook for the step-10b disposable gate board (no-op until 10b
+# defines the real one; the trap fires on EVERY exit path, including
+# abort() and fail-and-continue endings, so a gate board can never be
+# orphaned by a later failing step).
+gate_teardown() { :; }
+trap 'gate_teardown; rm -rf "$WORK"' EXIT
 
 # Live argv-hygiene watcher (round-2 finding 1 regression, proven live).
 # Samples every readable /proc/<pid>/cmdline while this script runs and
@@ -320,20 +357,269 @@ wop reassign-reclaim "/api/kanban/tasks/kanban-ui-probe/reassign" '{"profile":"p
 # pass (POST /api/kanban/dispatch -> dispatch_once -> release_stale_claims
 # clearing foreign host claims without signalling) must be refused with
 # the documented 403 body for a full session, must 401 anonymously at the
-# session gate, and the refused tick must leave the board byte-identical
-# (the request never reaches dispatch_once).
-{
-  printf 'header = "Cookie: kanban_ui_session=%s"\n' "$SESS"
-  printf 'url = "%s/api/kanban/board?board=%s"\n' "$BASE" "$KANBAN_UI_VERIFY_BOARD"
-} > "$WORK/board_sha.conf"
-chmod 600 "$WORK/board_sha.conf"
-board_sha() {
-  curl -s --max-time 60 --config "$WORK/board_sha.conf" -H 'X-Kanban-UI: 1' | sha256sum | cut -d' ' -f1
+# session gate, and the refused tick must leave persisted kanban state
+# untouched (the request never reaches dispatch_once).
+# PR#13 review finding 4331497811: non-mutation is NOT measured by hashing
+# the live /board response of the shared homelab board. That render embeds
+# per-read computed fields (task ages, current-run started-ats) and the
+# gateway's embedded dispatcher ticks every live board every 60s, so two
+# reads of an UNCHANGED database can legitimately differ and a correctly
+# refused dispatch could fail this gate. Instead, non-mutation is measured
+# against ISOLATED persisted state: a disposable gate board (unique slug,
+# torn down on every exit path) seeded with a sentinel card that a real
+# dispatch_once WOULD mutate (expired foreign claim => release_stale_claims
+# CAS + bookkeeping events; parked blocked row pins recompute_ready), with
+# the fingerprint read DIRECTLY from the board's SQLite file - a refused
+# endpoint cannot fake a persisted-state fingerprint the way it could fake
+# a presentation render. The board's own .dispatch.lock (the same
+# non-blocking advisory lock the pinned dispatcher's _dispatch_tick_lock
+# takes; the loser writes nothing) is held for the whole seed->compare
+# window so the 60s gateway tick on this board skips instead of injecting
+# legitimate reclaim churn between the fingerprints. Task-gated fault
+# injection (KANBAN_UI_VERIFY_TEST_INJECT=dispatch-once, never set in
+# production) runs the REAL pinned _dispatch_once_locked between the reads
+# and inverts the expectation, proving the fingerprint catches a mutation
+# rather than trivially passing.
+gate_teardown() {
+  [ -n "${GATE_SLUG:-}" ] || return 0
+  # Primary teardown through the API (the container owns the board dir),
+  # best-effort; the root fallback below is unconditional.
+  if [ -n "${SESS:-}" ]; then
+    {
+      printf 'header = "Cookie: kanban_ui_session=%s"\n' "$SESS"
+      printf 'url = "%s/api/kanban/boards/%s?delete=true"\n' \
+        "$BASE" "$GATE_SLUG"
+    } > "$WORK/gate_delete.conf"
+    chmod 600 "$WORK/gate_delete.conf"
+    curl -s -o /dev/null --max-time 30 -X DELETE \
+      --config "$WORK/gate_delete.conf" -H 'X-Kanban-UI: 1' || true
+  fi
+  # Root fallback: only ever OUR OWN board, and only when its slug
+  # matches the exact disposable grammar kanban-ui-verify-<pid>-<epoch>
+  # (PR#13 round-6d review finding 2: the retired case pattern
+  # 'kanban-ui-verify-[0-9]*' admitted arbitrary suffixes such as
+  # kanban-ui-verify-1-production). Never a glob, never an absolute
+  # value, never outside the boards root.
+  if [[ "$GATE_SLUG" =~ ^kanban-ui-verify-[0-9]+-[0-9]+$ ]]; then
+    rm -rf -- "${KANBAN_UI_KANBAN_HOME:?}/kanban/boards/$GATE_SLUG"
+  else
+    echo "REFUSING cleanup of unexpected gate slug shape: $GATE_SLUG" >&2
+  fi
 }
-SHA_BEFORE=$(board_sha)
+GATE_SLUG="kanban-ui-verify-$$-$(date +%s)"
+GATE_DIR="${KANBAN_UI_KANBAN_HOME:?}/kanban/boards/$GATE_SLUG"
+GATE_DB="$GATE_DIR/kanban.db"
+# PR#13 round-6d review finding 2: the previous crash-recovery sweep
+# (a root-side find over the boards root, pruning age-stale directories
+# with a recursive forced delete) is REMOVED, not merely tightened. Its
+# permissive glob admitted unrelated names (e.g.
+# kanban-ui-verify-1-production) and its age test could delete a
+# legitimate verifier board belonging to a run that was still going (or
+# hung) past the age threshold. The only root rm -rf allowed against the
+# boards root is gate_teardown above, on this run's OWN exact-grammar
+# slug, from the EXIT trap that fires on every non-SIGKILL exit path. An
+# orphaned gate board after a SIGKILL is a harmless empty disposable
+# dir; it is never swept by a later run because guessing "orphaned" from
+# a glob and an mtime is exactly the false-mutation-by-root-deletion
+# this step must not contain.
 {
   printf 'header = "Cookie: kanban_ui_session=%s"\n' "$SESS"
-  printf 'url = "%s/api/kanban/dispatch?board=%s"\n' "$BASE" "$KANBAN_UI_VERIFY_BOARD"
+  printf 'url = "%s/api/kanban/boards"\n' "$BASE"
+} > "$WORK/gate_create.conf"
+chmod 600 "$WORK/gate_create.conf"
+( umask 077; printf '{"%s":"%s"}' 'slug' "$GATE_SLUG" > "$WORK/gate_body.json" )
+C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST \
+  --config "$WORK/gate_create.conf" -H 'X-Kanban-UI: 1' \
+  -H 'Content-Type: application/json' --data-binary "@$WORK/gate_body.json")
+[ "$C" = "200" ] || fail "gate board creation expected 200, got $C"
+# Hold the board's dispatch lock for the whole gate window (same lock the
+# pinned dispatcher uses; flock(2) - compatible with _try_lock_nb).
+# PR#13 round-6d review finding 3: the lock must NEVER be visible at its
+# final path while root-owned. The retired sequence (exec 9> as root ->
+# flock -> chown) left a window where the gateway's _dispatch_tick_lock
+# open() raised PermissionError, which the pinned code maps to
+# acquired=True ("degrade to a no-op so a probe failure never blocks
+# dispatch") - a 60s tick landing there entered _dispatch_once_locked
+# despite fd 9 and wrote inside the fingerprint window. Publication now
+# happens inside one python process: O_EXCL-create the staging file (0600
+# via mkstemp), fchown it to the board owner, then os.link it to the
+# final path. Between stages the final path is ABSENT (a gateway tick
+# there creates it itself, takes the flock, and its legitimate reclaim
+# writes are absorbed by the repair-seed below); the instant it exists it
+# already carries final 0644 board-owner ownership, so every subsequent
+# gateway open is a real flock contention the loser loses. os.link fails
+# if the final path exists: on a unique pid+epoch slug that means
+# something else owns the lock and we fail closed rather than unlinking
+# a lock we never created.
+python3 - "$GATE_DB.dispatch.lock" "$KANBAN_UI_BOARD_UID" \
+  "$KANBAN_UI_BOARD_GID" <<'GATE_LOCK_PY' > "$WORK/lock_publish.err" 2>&1
+import os, stat, sys, tempfile
+final, uid, gid = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+d = os.path.dirname(final)
+fd, stage = tempfile.mkstemp(prefix=".dispatch.lock.stage-", dir=d)
+try:
+    os.fchown(fd, uid, gid)
+    os.fchmod(fd, 0o644)
+    os.close(fd)
+    fd = -1
+    try:
+        os.link(stage, final)
+        published = "created"
+    except FileExistsError:
+        # A legitimate gateway tick created the lock itself in the
+        # pre-link window (the final path was absent, so its open was
+        # ordinary, never a PermissionError degrade). If it already
+        # carries the board owner's uid the contention path stays real
+        # and we adopt it; our flock below then simply waits for the
+        # tick to finish and the repair-seed absorbs its writes. Any
+        # other shape is fail-closed: NEVER unlink a lock we did not
+        # create (that is the classic flock double-owner hazard).
+        published = "adopted"
+finally:
+    if fd != -1:
+        os.close(fd)
+    try:
+        os.unlink(stage)
+    except FileNotFoundError:
+        pass
+st = os.stat(final)
+assert stat.S_ISREG(st.st_mode), "lock path is not a regular file"
+assert st.st_uid == uid, st.st_uid
+assert st.st_gid == gid, st.st_gid
+if published == "created":
+    assert stat.S_IMODE(st.st_mode) == 0o644, hex(stat.S_IMODE(st.st_mode))
+else:
+    # Adopted (gateway-created): must at least be owner-writable so the
+    # gateway's own a+b open and our flock contend on one inode.
+    assert stat.S_IMODE(st.st_mode) & 0o200, hex(stat.S_IMODE(st.st_mode))
+print(published)
+GATE_LOCK_PY
+[ $? -eq 0 ] || fail "cannot publish the gate dispatch lock with final ownership"
+exec 9<>"$GATE_DB.dispatch.lock" || fail "cannot open the gate dispatch lock"
+flock -x 9 || fail "cannot take the gate dispatch lock"
+# Seed the sentinel rows directly (the play runs become:root). Fixed
+# created_at constants keep the fingerprint reproducible; claim_expires
+# is one hour in the past so a REAL dispatch_once pass reclaims the card
+# (release_stale_claims: running + foreign claim_lock prefix + expired).
+# The seed is a REPAIR-SEED: it deletes any pre-existing gate rows first
+# and re-inserts the canonical state. Between board creation and taking
+# the lock above, the 60s gateway tick may legitimately have already
+# reclaimed the sentinel; the repair runs UNDER the lock, so the
+# before-fingerprint always measures the canonical fixture and the
+# window after it is write-free.
+GATE_SEED_EPOCH=1780000000
+GATE_CLAIM_EXPIRES=$(( $(date +%s) - 3600 ))
+python3 - "$GATE_DB" "$GATE_SEED_EPOCH" "$GATE_CLAIM_EXPIRES" <<'GATE_SEED_PY' > "$WORK/seed.err" 2>&1
+import sqlite3, sys
+db, epoch, claim_expires = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+conn = sqlite3.connect(db, timeout=30)
+try:
+    with conn:
+        # Repair-seed: clear any prior gate rows (e.g. a legitimate
+        # gateway reclaim that landed before the caller took the board
+        # dispatch lock) so the canonical fixture is what gets
+        # fingerprinted.
+        for gate_id in ("kanban-ui-gate", "kanban-ui-gate-parked"):
+            for table in ("tasks", "task_events", "task_runs",
+                          "task_comments", "task_links"):
+                column = "id" if table == "tasks" else (
+                    "parent_id" if table == "task_links" else "task_id")
+                conn.execute(
+                    f"DELETE FROM {table} WHERE {column} = ?", (gate_id,))
+            conn.execute(
+                "DELETE FROM kanban_notify_subs WHERE task_id = ?",
+                (gate_id,))
+        # Disposable board: only gate rows exist, so rewinding the
+        # AUTOINCREMENT counters makes the repaired fixture byte-canonical
+        # (fresh event ids), not merely logically equal.
+        try:
+            conn.execute(
+                "DELETE FROM sqlite_sequence WHERE name IN "
+                "('task_events', 'task_comments', 'task_runs')")
+        except sqlite3.OperationalError:
+            pass  # no autoincrement inserts have happened yet
+        conn.execute(
+            "INSERT INTO tasks (id,title,body,assignee,status,priority,"
+            "created_by,created_at,workspace_kind,claim_lock,claim_expires,"
+            "consecutive_failures,current_run_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("kanban-ui-gate", "gate sentinel", "disposable", None,
+             "running", 0, "kanban-ui-verifier", epoch, "scratch",
+             "kanban-ui-verifier:probe", claim_expires, 0, 1))
+        conn.execute(
+            "INSERT INTO tasks (id,title,status,priority,created_by,"
+            "created_at,workspace_kind) VALUES (?,?,?,?,?,?,?)",
+            ("kanban-ui-gate-parked", "gate parked row", "blocked", 0,
+             "kanban-ui-verifier", epoch, "scratch"))
+        conn.execute(
+            "INSERT INTO task_events (task_id,run_id,kind,payload,created_at) "
+            "VALUES (?,?,?,?,?)",
+            ("kanban-ui-gate", 1, "claimed",
+             '{"source_status": "ready", "claim_lock": '
+             '"kanban-ui-verifier:probe"}', epoch))
+        conn.execute(
+            "INSERT INTO task_events (task_id,run_id,kind,payload,created_at) "
+            "VALUES (?,?,?,?,?)",
+            ("kanban-ui-gate-parked", None, "blocked",
+             '{"reason": "gate fixture; sticky"}', epoch))
+        conn.execute(
+            "INSERT INTO task_runs (id,task_id,profile,status,claim_lock,"
+            "claim_expires,started_at) VALUES (?,?,?,?,?,?,?)",
+            (1, "kanban-ui-gate", "kanban-ui-verifier-probe", "running",
+             "kanban-ui-verifier:probe", claim_expires, epoch))
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+finally:
+    conn.close()
+GATE_SEED_PY
+[ $? -eq 0 ] || fail "gate board seeding failed (see playbook stderr)"
+# The API create ran as the container uid, but the seed (and a possible
+# WAL sidecar) ran as root: hand the whole pinned board dir back to the
+# board owner so the gateway's connect() (init_db opens BEGIN IMMEDIATE
+# even before the tick lock) touches ordinary permissions, not a root-
+# owned -wal it cannot write.
+chown -R "$KANBAN_UI_BOARD_UID:$KANBAN_UI_BOARD_GID" "$GATE_DIR" \
+  || fail "cannot chown the gate board dir back to the board owner"
+# Canonical logical fingerprint of the gate board's persisted state.
+# Every table the dispatcher's reclaim/reclaim-record/failure path can
+# write is covered with a deterministic ORDER BY; presentation-only
+# computed fields (the flake source Copilot flagged) are structurally
+# absent because this reads the SQLite rows, not the /board render.
+gate_fingerprint() {
+  python3 - "$GATE_DB" <<'GATE_FP_PY'
+import hashlib, sqlite3, sys
+conn = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True, timeout=30)
+try:
+    h = hashlib.sha256()
+    for sql in (
+        "SELECT id,status,assignee,priority,claim_lock,claim_expires,"
+        "worker_pid,worker_started_at,consecutive_failures,current_run_id,"
+        "started_at,completed_at,result,last_failure_error,block_kind,"
+        "block_recurrences FROM tasks ORDER BY id",
+        "SELECT id,task_id,profile,step_key,status,claim_lock,"
+        "claim_expires,worker_pid,last_heartbeat_at,started_at,ended_at,"
+        "outcome,summary,metadata,error FROM task_runs ORDER BY id",
+        "SELECT id,task_id,run_id,kind,payload,created_at "
+        "FROM task_events ORDER BY id",
+        "SELECT id,task_id,author,body,created_at "
+        "FROM task_comments ORDER BY id",
+        "SELECT parent_id,child_id FROM task_links "
+        "ORDER BY parent_id, child_id",
+        "SELECT task_id,platform,chat_id,thread_id,user_id,last_event_id,"
+        "last_ping_event_id,created_at FROM kanban_notify_subs ORDER BY rowid",
+    ):
+        for row in conn.execute(sql):
+            h.update("\x1f\n".join("" if v is None else str(v) for v in row).encode())
+            h.update(b"\n")
+    print(h.hexdigest())
+finally:
+    conn.close()
+GATE_FP_PY
+}
+SHA_BEFORE=$(gate_fingerprint)
+[ -n "$SHA_BEFORE" ] || fail "gate fingerprint (before) is empty"
+{
+  printf 'header = "Cookie: kanban_ui_session=%s"\n' "$SESS"
+  printf 'url = "%s/api/kanban/dispatch?board=%s"\n' "$BASE" "$GATE_SLUG"
 } > "$WORK/wo_dispatch.conf"
 chmod 600 "$WORK/wo_dispatch.conf"
 C=$(curl -s -o "$WORK/wo_dispatch.body" -w '%{http_code}' --max-time 15 -X POST \
@@ -342,8 +628,56 @@ C=$(curl -s -o "$WORK/wo_dispatch.body" -w '%{http_code}' --max-time 15 -X POST 
 [ "$C" = "403" ] || fail "dispatcher-pass dispatch expected 403, got $C"
 grep -q 'dispatcher passes are disabled' "$WORK/wo_dispatch.body" \
   || fail "dispatcher-pass dispatch 403 body is not the documented reject"
-SHA_AFTER=$(board_sha)
-[ "$SHA_BEFORE" = "$SHA_AFTER" ] || fail "refused dispatch pass mutated board state"
+if [ "$KANBAN_UI_VERIFY_TEST_INJECT" = "dispatch-once" ]; then
+  # TASK-GATED fault injection (never set in production): run the pinned
+  # upstream tick itself against the gate board (directly the *_locked
+  # variant, since the verifier intentionally holds the advisory tick
+  # lock). If the deny-list ever regresses, this is exactly the code the
+  # endpoint would run - and the fingerprint below MUST have changed.
+  # PR#13 round-6d review finding 1: the repo pins Hermes 0.20.0 at
+  # b3aa561f (ansible/roles/hermes/vars/main.yaml), whose tree contains
+  # ONLY the hermes_cli/kanban_db.py monolith - kanban_db_dispatch.py and
+  # kanban_db_connect.py exist in newer revisions (the live checkout HEAD
+  # that produced the earlier PASS postdates the pin, which is why the
+  # split-only import appeared to work). Both dispatcher and connect
+  # imports therefore try the split modules first and fall back to the
+  # pinned monolith, so injection executes on the declared revision.
+  # tests/test_dispatch_nonmutation_gate.py runs this exact heredoc
+  # against stub pinned-layout and split-layout trees.
+  env HOME=/tmp HERMES_HOME=/tmp/kanban-ui-verify-nohome \
+    HERMES_KANBAN_HOME="$KANBAN_UI_KANBAN_HOME" \
+    KANBAN_UI_HERMES_REPO="$KANBAN_UI_HERMES_REPO" \
+    "$KANBAN_UI_HERMES_PY" - "$GATE_SLUG" <<'GATE_INJECT_PY' > "$WORK/inject.log" 2>&1
+import os, sys
+sys.path.insert(0, os.environ["KANBAN_UI_HERMES_REPO"])
+try:
+    from hermes_cli import kanban_db_dispatch as _dispatch_mod
+except ImportError:  # pinned b3aa561f monolith layout
+    from hermes_cli import kanban_db as _dispatch_mod
+try:
+    from hermes_cli import kanban_db_connect as _connect_mod
+except ImportError:  # pinned b3aa561f: connect() lives in the monolith
+    _connect_mod = _dispatch_mod
+board = sys.argv[1]
+conn = _connect_mod.connect(board=board)
+def _no_spawn(task, workspace, board=None):
+    return None
+result = _dispatch_mod._dispatch_once_locked(conn, spawn_fn=_no_spawn, board=board)
+print("injected tick completed")
+conn.close()
+GATE_INJECT_PY
+  [ $? -eq 0 ] || fail "fault-injection tick did not complete (see playbook stderr)"
+fi
+SHA_AFTER=$(gate_fingerprint)
+[ -n "$SHA_AFTER" ] || fail "gate fingerprint (after) is empty"
+if [ "$KANBAN_UI_VERIFY_TEST_INJECT" = "dispatch-once" ]; then
+  [ "$SHA_BEFORE" != "$SHA_AFTER" ] \
+    || fail "fault injection mutated the gate board but the persisted-state gate did NOT detect it"
+else
+  [ "$SHA_BEFORE" = "$SHA_AFTER" ] \
+    || fail "refused dispatch pass mutated gate-board persisted state"
+fi
+exec 9>&- || true
 # Same middleware-ordering contrast as reclaim: anonymous dispatch tick
 # hits the OUTER session gate first (401), never the deny-list.
 C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST \

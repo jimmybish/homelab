@@ -779,6 +779,20 @@
     # wrong-token body only (never the real credential) to prove the
     # transport gate rejects direct-HTTP logins with 403.
     KANBAN_UI_DIRECT_URL: "http://{{ kanban_ui_bind_ip }}:{{ kanban_ui_port }}"
+    # PR#13 review finding 4331497811 (step 10b): the non-mutation gate
+    # reads the persisted SQLite state of a DISPOSABLE gate board instead
+    # of hashing the live /board render. These are the credential-free
+    # anchors the script needs to create/seed/fingerprint/tore-down that
+    # board: the kanban state root (same value the container receives as
+    # HERMES_KANBAN_HOME), the pinned checkout + venv python (used ONLY
+    # by the task-gated fault-injection tick), and the numeric ids that
+    # own board state (the dispatch-lock file must stay group-writable to
+    # the dispatcher uid so real flock contention is preserved).
+    KANBAN_UI_KANBAN_HOME: "{{ kanban_ui_hermes_home }}"
+    KANBAN_UI_HERMES_REPO: "{{ kanban_ui_hermes_repo }}"
+    KANBAN_UI_HERMES_PY: "{{ kanban_ui_hermes_repo }}/venv/bin/python"
+    KANBAN_UI_BOARD_UID: "{{ kanban_ui_run_uid }}"
+    KANBAN_UI_BOARD_GID: "{{ kanban_ui_run_gid }}"
   register: kanban_ui_session_verify
   until: kanban_ui_session_verify.rc == 0
   retries: "{{ kanban_ui_readiness_retries }}"
@@ -787,6 +801,45 @@
   changed_when: false
   check_mode: false
   when: not ansible_check_mode
+  tags:
+    - kanban_ui
+
+# PR#13 review finding 4331497811 (positive control for the persisted-
+# state non-mutation gate): when kanban_ui_verify_fault_inject is set
+# (set_fact at play level or -e at the CLI; default false in vars), run
+# the SAME verifier once more with KANBAN_UI_VERIFY_TEST_INJECT=dispatch-
+# once. Between the before/after fingerprints the script executes the
+# REAL pinned _dispatch_once_locked against the disposable gate board
+# (bypassing only the advisory tick lock the verifier itself holds), so
+# the fingerprint MUST have changed or the script fails with the
+# detection marker. A pass here proves the gate catches genuine
+# mutations instead of trivially passing; a production run (flag false)
+# never reaches the injection branch. rc==0 under injection is the
+# expected, gated outcome; there is no secret in either outcome.
+- name: Verify the non-mutation gate detects a real dispatch tick (fault injection)
+  ansible.builtin.script:
+    cmd: verify_session.sh
+  environment:
+    KANBAN_UI_VERIFY_URL: "{{ kanban_ui_url_base }}"
+    KANBAN_UI_VERIFY_TOKEN_FILE: "{{ kanban_ui_token_file }}"
+    KANBAN_UI_VERIFY_BOARD: "{{ kanban_ui_default_board }}"
+    KANBAN_UI_DIRECT_URL: "http://{{ kanban_ui_bind_ip }}:{{ kanban_ui_port }}"
+    KANBAN_UI_KANBAN_HOME: "{{ kanban_ui_hermes_home }}"
+    KANBAN_UI_HERMES_REPO: "{{ kanban_ui_hermes_repo }}"
+    KANBAN_UI_HERMES_PY: "{{ kanban_ui_hermes_repo }}/venv/bin/python"
+    KANBAN_UI_BOARD_UID: "{{ kanban_ui_run_uid }}"
+    KANBAN_UI_BOARD_GID: "{{ kanban_ui_run_gid }}"
+    KANBAN_UI_VERIFY_TEST_INJECT: "dispatch-once"
+  register: kanban_ui_session_verify_inject
+  until: kanban_ui_session_verify_inject.rc == 0
+  retries: "{{ kanban_ui_readiness_retries }}"
+  delay: "{{ kanban_ui_readiness_delay }}"
+  no_log: true
+  changed_when: false
+  check_mode: false
+  when:
+    - not ansible_check_mode
+    - kanban_ui_verify_fault_inject | bool
   tags:
     - kanban_ui
 
