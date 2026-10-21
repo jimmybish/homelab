@@ -332,6 +332,19 @@ function tickAges(now) {
 }
 
 function makeCard(id) {
+  // PR#13 review finding 4331497750 (keyboard operability) as corrected by
+  // the round-8 finding (W3C ACT rule 307n5z / WAI-ARIA 1.2 button children
+  // are presentational): the card wrapper itself must NOT be role="button"
+  // or a native button, because the focusable bulk checkbox lives inside it
+  // and would become a silent focus stop / lose its checkbox semantics.
+  // This wrapper is non-interactive (drag + context menu only). The two
+  // focusable controls are built in applyCard as siblings: a dedicated
+  // native <button type="button" class="card-open"> that opens the drawer
+  // (native Enter/Space activation, labelled) and the bulk-selection
+  // checkbox with its own label. Mouse clicks anywhere on the card body
+  // still open the drawer; the open control stops propagation on its own
+  // clicks (so native keyboard activation cannot double-open via bubbling)
+  // and the checkbox stops propagation so selection never opens the drawer.
   const el = h("div", { class: "card", draggable: "true", "data-id": id });
   el.addEventListener("click", e => {
     if (e.target.classList.contains("card-check")) return;
@@ -354,12 +367,25 @@ function makeCard(id) {
 function applyCard(el, t, now) {
   if (el._sig !== cardSig(t)) {
     el._sig = cardSig(t);
+    const label = t.title || t.id;
     const checked = S.sel.has(t.id);
-    const chk = h("input", { type: "checkbox", class: "card-check", title: "Select for bulk actions", ...(checked ? { checked: "" } : {}), onclick: e => { e.stopPropagation(); if (e.target.checked) S.sel.add(t.id); else S.sel.delete(t.id); render(); } });
-    el.replaceChildren(
-      h("div", { class: "card-top" }, chk, h("div", { class: "card-title" }, t.title)),
-      ...(t.latest_summary ? [h("div", { class: "card-summary" }, t.latest_summary)] : []),
+    // Round-8 finding (W3C ACT 307n5z / WAI-ARIA 1.2 button children are
+    // presentational): the bulk checkbox and the task-open control are
+    // SIBLING focusable controls directly under the non-interactive card
+    // wrapper — the checkbox is never a descendant of a button-role/node,
+    // so it keeps its checkbox role/name/state and its own tab stop. The
+    // open control is a native <button type="button"> (free Enter/Space
+    // activation); its spans (not divs) keep the button content model
+    // phrasing-valid. Each control stops its own click propagation: the
+    // button's stop prevents the wrapper click handler from double-opening
+    // after native activation bubbles, the checkbox's stop keeps selection
+    // toggling from ever opening the drawer.
+    const chk = h("input", { type: "checkbox", class: "card-check", "aria-label": "Select task for bulk actions: " + label, title: "Select for bulk actions", ...(checked ? { checked: "" } : {}), onclick: e => { e.stopPropagation(); if (e.target.checked) S.sel.add(t.id); else S.sel.delete(t.id); render(); } });
+    const open = h("button", { type: "button", class: "card-open", "aria-label": "Open task: " + label, onclick: e => { e.stopPropagation(); openDrawer(t.id); } },
+      h("span", { class: "card-top" }, h("span", { class: "card-title" }, t.title)),
+      ...(t.latest_summary ? [h("span", { class: "card-summary" }, t.latest_summary)] : []),
       cardMeta(t, now));
+    el.replaceChildren(chk, open);
   }
   el.classList.toggle("selected", S.sel.has(t.id));
   el.classList.toggle("running", t.status === "running");
@@ -371,7 +397,10 @@ function applyCard(el, t, now) {
 }
 
 function cardMeta(t, now) {
-  const meta = h("div", { class: "card-meta" });
+  // Round-8 finding: this renders inside the native <button class="card-open">
+  // so it must be a <span> (phrasing content) — the .card-meta rule already
+  // sets display:flex, so layout is unchanged.
+  const meta = h("span", { class: "card-meta" });
   if (t.status === "running") meta.append(h("span", { class: "spark" }));
   if (t.assignee) meta.append(h("span", { class: "chip assignee" }, "@" + t.assignee));
   if ((t.priority || 0) !== 0) meta.append(h("span", { class: "chip prio" }, "P" + t.priority));
