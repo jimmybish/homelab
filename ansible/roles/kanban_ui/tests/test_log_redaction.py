@@ -113,32 +113,68 @@ class TestRedactCredentials(unittest.TestCase):
 
     def test_dictconfig_loads_and_scrubs(self):
         # End-to-end: logging.config.dictConfig must ACCEPT the config
-        # (build h crashed with 'Unable to add filter') and the configured
-        # handlers must scrub hostile records. Uses the real filter
-        # factory; formatters swapped to stdlib to avoid a uvicorn import.
+        # (build h crashed with 'Unable to add filter') and BOTH configured
+        # handlers must scrub hostile records through a genuinely valid
+        # stdlib pipeline (PR#13 review comment 4331497850). Formatters are
+        # replaced with complete stdlib specs -- no Uvicorn-only
+        # ``use_colors`` kwarg and message-only formats -- instead of
+        # in-place surgery on the Uvicorn formatter dicts. Note the dict
+        # key is "format": dictConfig's non-factory branch (logging/config.
+        # py configure_formatter) builds the class from (fmt, dfmt, style)
+        # read under the "format" key and silently ignores "fmt" and any
+        # extra keys, so the old swap only worked by accident -- Uvicorn's
+        # levelprefix/client_addr fields were dropped, not validated.
         import copy
-
-        cfg = copy.deepcopy(server.access_log_config(SECRET))
-        cfg["formatters"]["default"].pop("()", None)
-        cfg["formatters"]["default"]["class"] = "logging.Formatter"
-        cfg["formatters"]["access"].pop("()", None)
-        cfg["formatters"]["access"]["class"] = "logging.Formatter"
-        cfg["handlers"]["access"]["stream"] = "ext://sys.stdout"
-
         import io
 
+        cfg = copy.deepcopy(server.access_log_config(SECRET))
+        cfg["formatters"]["default"] = {
+            "class": "logging.Formatter",
+            "format": "%(message)s",
+        }
+        cfg["formatters"]["access"] = {
+            "class": "logging.Formatter",
+            "format": "%(message)s",
+        }
+        cfg["handlers"]["access"]["stream"] = "ext://sys.stdout"
+
+        # Fixture-validity tripwire: the swapped formatters must be pure
+        # stdlib. If anyone restores the Uvicorn dicts (or adds Uvicorn-only
+        # keys back here), dictConfig would again "pass" only by silently
+        # dropping unsupported kwargs/fields -- the vacuity this rewrite
+        # exists to prevent (review 4331497850).
+        for fname, fspec in cfg["formatters"].items():
+            self.assertEqual(fspec["class"], "logging.Formatter")
+            self.assertEqual(set(fspec), {"class", "format"})
+            self.assertNotIn("levelprefix", fspec["format"])
+            self.assertNotIn("client_addr", fspec["format"])
+            self.assertNotIn("use_colors", fspec)
+
         buf = io.StringIO()
-        saved = sys.stdout
-        sys.stdout = buf  # bind BEFORE dictConfig: ext:// resolves at config time
+        ebuf = io.StringIO()
+        saved_out, saved_err = sys.stdout, sys.stderr
+        # bind BEFORE dictConfig: ext:// resolves at config time
+        sys.stdout, sys.stderr = buf, ebuf
         try:
             logging.config.dictConfig(cfg)  # must not raise
             logging.getLogger("uvicorn.access").info("%s", hostile_line("INFO: 1.2.3.4 - "))
             logging.getLogger("uvicorn.error").info("%s", hostile_line("INFO: "))
+            for logger_name in ("uvicorn.access", "uvicorn"):
+                for handler in logging.getLogger(logger_name).handlers:
+                    handler.flush()
         finally:
-            sys.stdout = saved
-        out = buf.getvalue()
+            sys.stdout, sys.stderr = saved_out, saved_err
+        out = buf.getvalue() + ebuf.getvalue()
+        # A stdlib Formatter missing record fields swallows the ValueError
+        # into a '--- Logging error ---' dump on the stream; its absence
+        # proves both handlers formatted cleanly (the Uvicorn-only-field
+        # failure mode this fixture rewrite exists to prevent).
+        self.assertNotIn("Logging error", out)
+        # Positive redaction: both handlers emitted scrubbed lines.
         self.assertIn("[redacted]", out)
         self.assertNotIn(SECRET, out)
+        # Over-redaction guard on the same end-to-end path.
+        self.assertIn("board=homelab", out)
 
     def test_dictconfig_formatter_redacts(self):
         # The access formatter factory wraps every formatted access line
