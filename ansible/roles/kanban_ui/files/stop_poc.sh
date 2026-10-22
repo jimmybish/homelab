@@ -25,7 +25,12 @@ for pid_dir in /proc/[0-9]*; do
   [ -n "$cmd" ] || continue
   # argv[0] must be a python interpreter, and the argv must carry
   # server.py plus the exact --lan --port <port> flags.
-  first="$(printf '%s\n' "$cmd" | head -n 1)"
+  # First line via parameter expansion, NOT `printf | head -n 1`: under
+  # `set -euo pipefail` head exits after line 1 and printf takes SIGPIPE
+  # (141) once the remaining cmdline exceeds the 64KiB pipe buffer, which
+  # the role's failed_when turns into a fatal deploy abort while merely
+  # inspecting an unrelated process (round-7 finding 4343269737).
+  first="${cmd%%$'\n'*}"
   case "$first" in
     (*python*) : ;;
     (*) continue ;;
@@ -38,8 +43,19 @@ for pid_dir in /proc/[0-9]*; do
     fi
     prev="$arg"
   done <<< "$cmd"
-  printf '%s\n' "$cmd" | grep -qx 'server.py' || continue
-  printf '%s\n' "$cmd" | grep -qx -- '--lan' || continue
+  # Exact-line argv membership via case on the NUL-translated string,
+  # NOT `printf | grep -qx`: grep -q exits on first match, so with a
+  # command line larger than the pipe buffer printf takes SIGPIPE (141)
+  # under pipefail and `|| continue` silently skips the real POC (same
+  # round-7 finding 4343269737 class as the `| head -n 1` above).
+  case $'\n'"$cmd"$'\n' in
+    (*$'\n'server.py$'\n'*) : ;;
+    (*) continue ;;
+  esac
+  case $'\n'"$cmd"$'\n' in
+    (*$'\n'--lan$'\n'*) : ;;
+    (*) continue ;;
+  esac
   [ "$port_seen" -eq 1 ] || continue
   cwd="$(readlink "$pid_dir/cwd" 2>/dev/null || true)"
   [ "$cwd" = "$KANBAN_UI_POC_DIR" ] || continue
