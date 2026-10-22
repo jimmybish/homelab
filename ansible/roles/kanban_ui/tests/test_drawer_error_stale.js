@@ -43,6 +43,12 @@ const vm = require('vm');
 const APP_JS = path.join(__dirname, '..', 'files', 'app', 'static', 'app.js');
 const MD_JS = path.join(__dirname, '..', 'files', 'app', 'static', 'md.js');
 const GUARD = 'if (S.drawerId !== id) return;              // stale failure for an abandoned task';
+// PR#13 round-7 (4343269707) added a SECOND catch guard right after GUARD:
+// the same-task generation check. It passes the same scenario (S.drawerId
+// is B, so drawerIsStale(A, ...) is true), so reproducing the pre-fix
+// clobber requires stripping BOTH catch guards, same as the edit-race test
+// strips both editor checks.
+const GUARD2 = 'if (drawerIsStale(id, mySeq)) return;        // superseded by a newer same-task request — its error must not clobber the newer render (4343269707)';
 
 let failures = 0;
 function check(name, cond, detail) {
@@ -183,7 +189,9 @@ function editButtons(ctx) {
 async function staleErrorScenario(guard = true) {
   let src = fs.readFileSync(APP_JS, 'utf8');
   if (!src.includes(GUARD)) throw new Error('guard line missing from app.js — sensitivity test cannot run');
-  if (!guard) src = src.replace(GUARD, '/* guard removed for sensitivity check */');
+  if (!src.includes(GUARD2)) throw new Error('round-7 generation catch guard missing from app.js — sensitivity test cannot run');
+  if (!guard) src = src.replace(GUARD, '/* guard removed for sensitivity check */')
+                       .replace(GUARD2, '/* generation guard removed for sensitivity check */');
   const ctx = makeContext(src);
   ctx.__S.board = 'homelab';
 
@@ -263,7 +271,9 @@ async function staleErrorScenario(guard = true) {
   {
     let src = fs.readFileSync(APP_JS, 'utf8');
     if (!src.includes(GUARD)) throw new Error('guard line missing from app.js — sensitivity test cannot run');
-    src = src.replace(GUARD, '/* guard removed for sensitivity check */');
+    if (!src.includes(GUARD2)) throw new Error('round-7 generation catch guard missing from app.js — sensitivity test cannot run');
+    src = src.replace(GUARD, '/* guard removed for sensitivity check */')
+             .replace(GUARD2, '/* generation guard removed for sensitivity check */');
     const ctx = makeContext(src);
     ctx.__S.board = 'homelab';
     const pA = ctx.openDrawer('task-A').catch(e => String((e && e.stack) || e));

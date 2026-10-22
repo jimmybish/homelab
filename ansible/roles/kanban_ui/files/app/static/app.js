@@ -925,15 +925,27 @@ let drawerSig = "";
  * S.drawerId still points to B. Mirror the board-refresh guard already used
  * in loadBoard(): each render captures the selected task id plus a
  * monotonic sequence at entry, and rechecks both right after the await,
- * before any drawer DOM is replaced. */
+ * before any drawer DOM is replaced.
+ * PR#13 round-7 finding 4343269707: the sequence used to be allocated
+ * inside renderDrawer(), *after* openDrawer()/refreshDrawer() had already
+ * awaited the task-detail request, so two same-task requests were ordered
+ * by ARRIVAL instead of by ISSUE: an older response resolving last entered
+ * renderDrawer last, received the larger sequence, passed drawerIsStale(),
+ * and replaced the newer details and committed signature. Allocation now
+ * happens in each caller BEFORE its detail fetch (same capture-before-fetch
+ * shape as boardReqGen in loadBoard — one pattern, two scopes) and the
+ * sequence is carried through renderDrawer() and the signature commits. */
 let _drawerRenderSeq = 0;
 let _drawerRenderId = null;
+function nextDrawerRequestSeq(id) { _drawerRenderId = id; return ++_drawerRenderSeq; }
 function drawerIsStale(myId, mySeq) {
-  // User switched cards while this render was in flight: the card now
+  // User switched cards while this request was in flight: the card now
   // selected owns the drawer.
   if (S.drawerId !== myId) return true;
-  // Still viewing this task, but a newer render of THIS task has started
-  // (e.g. refreshDrawer raced the open): the newest one wins. A late render
+  // Still viewing this task, but a newer request for THIS task was issued
+  // while ours was in flight (e.g. refreshDrawer raced the open, or two
+  // refreshes overlap): the newest ISSUE wins, so a reversed same-task
+  // response holding the lower sequence is discarded. A late response
   // started for a *different* task must not discard this one — that render
   // is dropped by the selected-task check above instead, otherwise the
   // drawer would be left stuck on "Loading…".
@@ -966,6 +978,11 @@ function deferDrawerApply(id) {
 async function openDrawer(id) {
   S.drawerId = id;
   drawerSig = "";
+  // PR#13 round-7 finding 4343269707: allocate the drawer request
+  // generation BEFORE the detail fetch (capture-before-fetch, same shape as
+  // boardReqGen in loadBoard) so same-task requests are ordered by ISSUE,
+  // not by arrival. Carried through renderDrawer() and the sig commits below.
+  const mySeq = nextDrawerRequestSeq(id);
   $("#drawerScrim").hidden = false;
   const drawer = $("#drawer");
   drawer.hidden = false;
@@ -973,6 +990,7 @@ async function openDrawer(id) {
   try {
     const d = await api(`/tasks/${id}` + qs());
     if (S.drawerId !== id) return;              // user switched cards mid-fetch
+    if (drawerIsStale(id, mySeq)) return;        // a newer same-task request was issued mid-fetch — older response loses (4343269707)
     // PR#13 review finding 4321368000: the user may have started editing a
     // freshly-rendered field while THIS request was in flight. Defer; never
     // replace the drawer under an active editor.
@@ -981,9 +999,10 @@ async function openDrawer(id) {
     // renderDrawer's return). A render dropped by drawerIsStale() or deferred
     // by the editor check must leave drawerSig behind, so a later refresh
     // still sees the payload as changed and retries.
-    const applied = await renderDrawer(d).catch(() => false);
-    if (applied) { S.drawerData = d; drawerSig = drawerSigOf(d); }
-    else deferDrawerApply(id);
+    const applied = await renderDrawer(d, mySeq).catch(() => false);
+    if (!applied) { deferDrawerApply(id); return; }
+    if (drawerIsStale(id, mySeq)) return;        // superseded while the render awaited model options — the newer request owns the sig commit (4343269707)
+    S.drawerData = d; drawerSig = drawerSigOf(d);
   } catch (e) {
     // PR#13 review finding 4321367982: same selected-task check as the
     // success path above. If this request was abandoned (user opened task
@@ -991,6 +1010,7 @@ async function openDrawer(id) {
     // was in flight, its failure must not replace the drawer currently on
     // screen. Discard it; the task that owns the drawer owns its state.
     if (S.drawerId !== id) return;              // stale failure for an abandoned task
+    if (drawerIsStale(id, mySeq)) return;        // superseded by a newer same-task request — its error must not clobber the newer render (4343269707)
     drawer.replaceChildren(h("div", { class: "drawer-body" }, "Failed: " + e.message));
   }
 }
@@ -1012,9 +1032,15 @@ async function refreshDrawer() {
   const id = S.drawerId;
   const drawer = $("#drawer");
   if (drawerEditorActive()) { S.drawerPending = true; return; }
+  // PR#13 round-7 finding 4343269707: allocate the drawer request
+  // generation BEFORE the detail fetch (shared counter with openDrawer —
+  // one pattern, two scopes) so overlapping same-task requests are ordered
+  // by ISSUE, not arrival. Carried through renderDrawer() + sig commits.
+  const mySeq = nextDrawerRequestSeq(id);
   try {
     const d = await api(`/tasks/${id}` + qs());
     if (S.drawerId !== id) return;
+    if (drawerIsStale(id, mySeq)) return;        // a newer same-task request was issued mid-fetch — older response loses (4343269707)
     // PR#13 review finding 4321368000: recheck after the detail request —
     // the user may have started editing a description or comment while it
     // was in flight. renderDrawer() rechecks again after its own final
@@ -1027,8 +1053,9 @@ async function refreshDrawer() {
     const af = document.activeElement;
     const all = [...drawer.querySelectorAll("*")];
     const focusIdx = af && af !== document.body && drawer.contains(af) ? all.indexOf(af) : -1;
-    const applied = await renderDrawer(d).catch(() => false);
+    const applied = await renderDrawer(d, mySeq).catch(() => false);
     if (!applied) { deferDrawerApply(id); return; }
+    if (drawerIsStale(id, mySeq)) return;        // superseded while the render awaited model options — the newer request owns the sig commit (4343269707)
     // Commit only once the render actually landed, so a dropped or deferred
     // render leaves drawerSig behind and a later refresh retries the change.
     S.drawerData = d; drawerSig = sig;
@@ -1054,14 +1081,17 @@ document.addEventListener("focusout", e => {
   }
 }, true);
 
-async function renderDrawer(d) {
+async function renderDrawer(d, mySeq) {
   // Returns true only when the drawer DOM was actually replaced. Callers
   // commit drawerSig/S.drawerData on true and defer on false (PR#13 review
   // finding 4321368000) so a dropped swap stays retryable.
+  // PR#13 round-7 finding 4343269707: mySeq is the generation the caller
+  // allocated BEFORE its detail fetch (nextDrawerRequestSeq) — this function
+  // must not allocate its own, or same-task requests would be ordered by
+  // arrival again and a reversed older response could win the render race.
   const t = d.task;
   const myId = t.id;
-  const mySeq = ++_drawerRenderSeq;   // PR#13 finding 4319617532, see drawerIsStale
-  _drawerRenderId = myId;
+  if (mySeq === undefined) mySeq = nextDrawerRequestSeq(myId);  // defensive: non-caller entry keeps the r3 render-order guard
   const now = Math.floor(Date.now() / 1000);
   const drawer = $("#drawer");
 
