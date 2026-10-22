@@ -137,6 +137,17 @@ async function act(promise, okMsg) {
 }
 
 /* ---------------- data loads ---------------- */
+/* Request generation for loadBoard (PR#13 round-7 finding 4343269664): a
+ * monotonically increasing counter captured BEFORE the fetch. Two loadBoard
+ * calls for the SAME board can be in flight at once (the 30s safety-net poll
+ * vs. a WS/action-triggered refresh), and the board-identity guard below
+ * cannot tell them apart — requestedBoard still matches on both. Without the
+ * generation check, an older snapshot resolving last overwrites the newer
+ * task state while S.wsCursor already sits at the newer value, so the WS (which
+ * replays only events after the cursor) never heals the clobbered state.
+ * Newest request wins; superseded responses are discarded before any state
+ * mutation. Same pattern as the drawer-render sequence guard (_drawerRenderSeq). */
+let boardReqGen = 0;
 async function loadBoard(partialOk = false) {
   if (document.hidden) return;   // visibility handler catches up on return
   // Identity guard (PR#13 review 4301554435): capture the requested board at
@@ -146,9 +157,11 @@ async function loadBoard(partialOk = false) {
   // A's tasks under B's name and Math.max() A's event cursor into place (the
   // WS identity guard only covers socket messages, not HTTP responses).
   const requestedBoard = S.board;
+  const gen = ++boardReqGen;   // generation guard (4343269664) — see boardReqGen above
   try {
     const d = await api(`/board?include_archived=${S.archived}`);
     if (S.board !== requestedBoard) return;   // selection changed while awaiting — discard
+    if (gen !== boardReqGen) return;          // a newer loadBoard started while awaiting — discard
     S.data = d;
     S.wsCursor = Math.max(S.wsCursor, S.data.latest_event_id || 0);
     render();

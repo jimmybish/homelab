@@ -119,18 +119,22 @@ function makeContext(src) {
   ctx.__calls = calls;
 
   // resolve a queued fetch by key with a JSON payload
-  ctx.__settle = (key, payload) => {
-    const idx = pending.findIndex(p => p.key === key);
-    if (idx === -1) throw new Error('no in-flight request for ' + key + ' (pending: ' + pending.map(p => p.key).join(', ') + ')');
-    const [p] = pending.splice(idx, 1);
+  ctx.__settle = (key, payload) => ctx.__settleOcc(key, 0, payload);
+  // resolve the occ-th (0-based, oldest first) in-flight request for a key —
+  // lets the same-board reverse-order test settle the NEWER request first.
+  ctx.__settleOcc = (key, occ, payload) => {
+    const matching = pending.filter(p => p.key === key);
+    if (matching.length <= occ) throw new Error('no in-flight request #' + occ + ' for ' + key + ' (pending: ' + pending.map(p => p.key).join(', ') + ')');
+    const p = matching[occ];
+    pending.splice(pending.indexOf(p), 1);
     p.resolve({ ok: true, status: 200, statusText: 'OK', json: async () => payload });
   };
   return ctx;
 }
 
-const boardPayload = (name, cursor) => ({
+const boardPayload = (name, cursor, taskStatus) => ({
   board: name, latest_event_id: cursor,
-  columns: [{ name: 'ready', tasks: [{ id: name + '-task-1', title: 'task on ' + name, body: '', assignee: null, tenant: '' }] }],
+  columns: [{ name: 'ready', tasks: [{ id: name + '-task-1', title: 'task on ' + name, body: '', assignee: null, tenant: '', ...(taskStatus ? { status: taskStatus } : {}) }] }],
 });
 const BOARDS = { boards: [{ slug: 'A', name: 'Board A' }, { slug: 'B', name: 'Board B' }] };
 const ASSIGNEES = { assignees: [] };
@@ -196,29 +200,104 @@ async function testNormalRefresh() {
   check('normal: cursor never regresses', ctx.__S.wsCursor === 42, ctx.__S.wsCursor);
 }
 
-/* ---------------- test 3: harness sensitivity (guard removed) ---------------- */
+/* ---------------- test 3: same-board reverse-order completion (generation guard must discard the older poll) ---------------- */
+/* PR#13 round-7 finding 4343269664: the 30s safety-net poll and a
+ * WS/action-triggered refresh can both be in flight for the SAME board. The
+ * board-name identity guard cannot tell them apart, so before the generation
+ * guard the older snapshot resolving last overwrote the newer task state
+ * (Done -> Running) while S.wsCursor sat at the newer value — and because
+ * the WS replays only events strictly after the cursor, the clobbered state
+ * was never healed. Harness: fire poll P1, fire refresh P2, settle P2 (the
+ * NEWER, occ 1) first with the Done snapshot + cursor 10, then settle P1
+ * (occ 0) last with the stale Running snapshot + cursor 5. */
+async function testSameBoardReverseOrder() {
+  const ctx = makeContext(fs.readFileSync(APP_JS, 'utf8'));
+  ctx.__S.board = 'A';
+
+  const pPoll = ctx.loadBoard(true);                       // P1: safety-net poll
+  await tick();
+  const pAct = ctx.loadBoard(true);                        // P2: WS/action refresh, same board
+  await tick();
+  check('same-board: two A /board requests in flight',
+    ctx.__pending.filter(p => p.key === 'board:A').length === 2, ctx.__pending.map(p => p.key));
+
+  ctx.__settleOcc('board:A', 1, boardPayload('A', 10, 'done'));   // newer resolves first
+  await pAct;
+  await tick();
+  check('same-board: newer Done snapshot applied',
+    ctx.__S.data && ctx.__S.data.columns[0].tasks[0].status === 'done', ctx.__S.data);
+  check('same-board: cursor advanced to newer 10', ctx.__S.wsCursor === 10, ctx.__S.wsCursor);
+  const rendersAfterNewer = ctx.__renderCount();
+
+  // replay claim: the WS subscribes strictly after the cursor, so once the
+  // cursor sits at 10 the Done event (id 10) is never replayed — a clobber
+  // would stand until the next poll. Prove the URL really pins since=10.
+  ctx.connectWS();
+  check('same-board: WS replays only events after cursor 10',
+    ctx.__calls.some(c => c.startsWith('ws:') && c.includes('since=10')),
+    ctx.__calls.filter(c => c.startsWith('ws:')));
+
+  ctx.__settleOcc('board:A', 0, boardPayload('A', 5, 'running')); // older poll resolves LAST
+  await pPoll.catch(() => {});
+  await tick(); await tick();
+
+  check('same-board: stale Running snapshot never replaced Done',
+    ctx.__S.data && ctx.__S.data.columns[0].tasks[0].status === 'done',
+    ctx.__S.data && ctx.__S.data.columns[0].tasks[0].status);
+  check('same-board: wsCursor preserved at newer value', ctx.__S.wsCursor === 10, ctx.__S.wsCursor);
+  check('same-board: superseded response triggered no extra render',
+    ctx.__renderCount() === rendersAfterNewer, { before: rendersAfterNewer, after: ctx.__renderCount() });
+}
+
+/* ---------------- test 4: harness sensitivity (guards removed) ---------------- */
 async function testGuardlessIsDetected() {
   const src = fs.readFileSync(APP_JS, 'utf8');
   const GUARD = 'if (S.board !== requestedBoard) return;';
-  if (!src.includes(GUARD)) throw new Error('guard line missing from app.js — sensitivity test cannot run');
-  const ctx = makeContext(src.replace(GUARD, '/* guard removed for sensitivity check */'));
-  ctx.__S.board = 'A';
+  const GEN_GUARD = 'if (gen !== boardReqGen) return;';
+  if (!src.includes(GUARD)) throw new Error('identity guard line missing from app.js — sensitivity test cannot run');
+  if (!src.includes(GEN_GUARD)) throw new Error('generation guard line missing from app.js — sensitivity test cannot run');
 
-  const pA = ctx.loadBoard(true);
+  // (a) cross-board race: with BOTH guards stripped, A's late payload lands
+  // under B. Note the generation guard alone (identity guard stripped only)
+  // would ALSO discard it now — switchBoard() bumped boardReqGen — so this
+  // control must strip both to reproduce the round-2 bug.
+  const both = src.replace(GUARD, '/* identity guard removed */').replace(GEN_GUARD, '/* generation guard removed */');
+  const ctxA = makeContext(both);
+  ctxA.__S.board = 'A';
+  const pA = ctxA.loadBoard(true);
   await tick();
-  await switchToB(ctx);
-  ctx.__settle('board:A', boardPayload('A', 999));   // stale lands without the guard
+  await switchToB(ctxA);
+  ctxA.__settle('board:A', boardPayload('A', 999));   // stale lands without the guards
   await pA.catch(() => {});
   await tick(); await tick();
+  check('sensitivity: without both guards A overwrites B and restores A cursor',
+    ctxA.__S.data && ctxA.__S.data.board === 'A' && ctxA.__S.wsCursor === 999,
+    { board: ctxA.__S.data && ctxA.__S.data.board, cursor: ctxA.__S.wsCursor });
 
-  check('sensitivity: without the guard A overwrites B and restores A cursor',
-    ctx.__S.data && ctx.__S.data.board === 'A' && ctx.__S.wsCursor === 999,
-    { board: ctx.__S.data && ctx.__S.data.board, cursor: ctx.__S.wsCursor });
+  // (b) same-board reverse order: strip ONLY the generation guard (identity
+  // guard intact — it cannot catch this case) and the stale Running snapshot
+  // must clobber Done while the cursor sits at the newer value.
+  const genless = makeContext(src.replace(GEN_GUARD, '/* generation guard removed */'));
+  genless.__S.board = 'A';
+  const pPoll = genless.loadBoard(true);
+  await tick();
+  const pAct = genless.loadBoard(true);
+  await tick();
+  genless.__settleOcc('board:A', 1, boardPayload('A', 10, 'done'));
+  await pAct;
+  await tick();
+  genless.__settleOcc('board:A', 0, boardPayload('A', 5, 'running'));
+  await pPoll.catch(() => {});
+  await tick(); await tick();
+  check('sensitivity: without the generation guard the older Running snapshot clobbers Done',
+    genless.__S.data && genless.__S.data.columns[0].tasks[0].status === 'running',
+    genless.__S.data && genless.__S.data.columns[0].tasks[0].status);
 }
 
 (async () => {
   await testRace();
   await testNormalRefresh();
+  await testSameBoardReverseOrder();
   await testGuardlessIsDetected();
   console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
   process.exit(failures === 0 ? 0 : 1);
