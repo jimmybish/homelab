@@ -388,7 +388,9 @@ groups:
                     params:
                       - {{ grafana_alert_n8n_trigger_loop_threshold }}
 
-  # NVMe Drive Temperature High - fires when a Proxmox NVMe drive runs hot
+  # NVMe Drive Temperature - Proxmox Samsung 990 PRO drives.
+  # Only the Composite sensor (hwmon temp1) is evaluated: Samsung's 0-70°C operating
+  # spec is measured against it. Sensor 1/2 (temp2/temp3) read hotter and are dashboard-only.
   - orgId: 1
     name: proxmox_hardware
     folder: Infrastructure
@@ -397,12 +399,12 @@ groups:
       - uid: nvme-temp-high-1
         title: NVMe Drive Temperature High
         condition: C
-        for: 2m
+        for: {{ grafana_alert_nvme_temp_for }}
         noDataState: "OK"
         execErrState: "OK"
         annotations:
-          summary: "NVMe drive temperature high on {% raw %}{{ $labels.instance }}{% endraw %}"
-          description: "Current NVMe temperature: {% raw %}{{ $value }}{% endraw %}°C (threshold: {{ grafana_alert_nvme_temp_threshold }}°C)"
+          summary: "NVMe composite temperature high on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "NVMe composite temperature is {% raw %}{{ printf \"%.1f\" $values.B.Value }}{% endraw %}°C, above {{ grafana_alert_nvme_temp_threshold }}°C for {{ grafana_alert_nvme_temp_for }} (Samsung 990 PRO operating spec: 0-70°C). Resolves once it drops below {{ grafana_alert_nvme_temp_recovery_threshold }}°C."
           runbook_url: "https://wiki.{{ internal_domain }}/storage#nvme-temperature-management"
         labels:
           severity: warning
@@ -415,10 +417,10 @@ groups:
             datasourceUid: {{ grafana_prometheus_uid }}
             model:
               refId: A
-              # max() collapses the per-chip series to one value per instance, and
-              # the reduce step (B) is required so the threshold (C) evaluates a
-              # single instant value rather than a multi-point range frame.
-              expr: "max by (instance) (node_hwmon_temp_celsius{chip=\"nvme_nvme0\",instance=~\"proxmox-[12].*\"})"
+              # max() collapses to one value per instance, and the reduce step (B) is
+              # required so the threshold (C) evaluates a single instant value rather
+              # than a multi-point range frame.
+              expr: "max by (instance) (node_hwmon_temp_celsius{chip=\"nvme_nvme0\",sensor=\"temp1\",instance=~\"proxmox-[12].*\"})"
               intervalMs: 1000
               maxDataPoints: 43200
           - refId: B
@@ -445,3 +447,73 @@ groups:
                     type: gt
                     params:
                       - {{ grafana_alert_nvme_temp_threshold }}
+                  # Recovery threshold (hysteresis): once firing, stay firing until below this.
+                  unloadEvaluator:
+                    type: lt
+                    params:
+                      - {{ grafana_alert_nvme_temp_recovery_threshold }}
+
+      - uid: nvme-temp-critical-1
+        title: NVMe Drive Temperature Critical
+        condition: C
+        for: 2m
+        noDataState: "OK"
+        execErrState: "OK"
+        annotations:
+          summary: "NVMe composite temperature critical on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "NVMe composite temperature is {% raw %}{{ printf \"%.1f\" $values.B.Value }}{% endraw %}°C and has reached the drive's own warning temperature threshold (WCTEMP, ~82°C on the 990 PRO), or the drive is asserting its SMART temperature alarm. Expect thermal throttling; investigate cooling and I/O load immediately."
+          runbook_url: "https://wiki.{{ internal_domain }}/storage#nvme-temperature-management"
+        labels:
+          severity: critical
+          component: storage
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: {{ grafana_prometheus_uid }}
+            model:
+              refId: A
+              # Returns the composite temperature only while it is at/above the drive-reported
+              # warning threshold (hwmon temp1_max = WCTEMP) or the drive's temperature alarm
+              # (SMART critical-warning temperature bit) is set; otherwise no data (OK).
+              expr: >-
+                max by (instance) (node_hwmon_temp_celsius{chip="nvme_nvme0",sensor="temp1",instance=~"proxmox-[12].*"})
+                and on (instance)
+                (
+                  max by (instance) (node_hwmon_temp_celsius{chip="nvme_nvme0",sensor="temp1",instance=~"proxmox-[12].*"})
+                    >= on (instance)
+                  max by (instance) (node_hwmon_temp_max_celsius{chip="nvme_nvme0",sensor="temp1",instance=~"proxmox-[12].*"})
+                  or on (instance)
+                  max by (instance) (node_hwmon_temp_alarm{chip="nvme_nvme0",sensor="temp1",instance=~"proxmox-[12].*"}) == 1
+                )
+              # Instant query: the expr filters out healthy samples, so a range query's
+              # `last` reducer would keep returning an old breach after the drive cools.
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              intervalMs: 1000
+              maxDataPoints: 43200
+              settings:
+                mode: ""
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0
