@@ -442,9 +442,13 @@
 
 - name: Verify the DOCKER-USER kanban-ui ruleset is live
   # Behavior check per the post-deployment standard: --check exits 0 only
-  # when all four managed rules (jump + 3 chain rules) match the live kernel
-  # state for the CURRENT container IP. Runs every play, so drift from a
-  # docker daemon restart is detected here and healed by the converge task
+  # when the managed ruleset matches the live kernel state IN THE EXPECTED
+  # POSITION/ORDER for the CURRENT container IP (jump FIRST in DOCKER-USER
+  # once transient guard copies are excluded, private chain exactly the
+  # three ordered rules - PR#13 round-8 finding 4354363842: existence-only
+  # `iptables -C` checks passed even with a RETURN/ACCEPT ahead of the
+  # jump). Runs every play, so drift from a docker daemon restart is
+  # detected here and healed by the converge task
   # on the next pass; within this play, failure is fatal (fail-closed: a
   # deployment must not report success without enforcement).
   ansible.builtin.command:

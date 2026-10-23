@@ -31,9 +31,11 @@
 #     is deleted ONLY after the jump+chain set verifies live; any mid-script
 #     failure exits non-zero with the guard still in place (restriction
 #     stays ON, never off). Normal completion leaves no orphan guard.
-#   --check: exit 0 when every managed rule is live, 42 on drift, 44 when
-#     the container is not running (nothing published, nothing enforced).
-#     The transient guard is deliberately NOT part of the managed live set.
+#   --check: exit 0 when every managed rule is live IN THE EXPECTED
+#     POSITION/ORDER (managed jump first in DOCKER-USER, private chain
+#     exactly the ordered RULES), 42 on drift, 44 when the container is not
+#     running (nothing published, nothing enforced). The transient guard is
+#     deliberately NOT part of the managed live set.
 #   --teardown: remove every jump into the chain (any destination variant)
 #     and any leftover kanban-ui-guard DROP (a fail-closed guard surviving
 #     a mid-script failure must not outlive an absent-state teardown),
@@ -151,25 +153,119 @@ guard_spec() {
   echo "$(tuple_spec) -m comment --comment ${GUARD_COMMENT} -j DROP"
 }
 
-all_rules_live() {
-  local r
-  # -C prints the rule on success; stdout must stay quiet (the Ansible task
-  # uses only the exit code).
-  # shellcheck disable=SC2086  # spec is deliberately word-split into argv
-  ipt -C DOCKER-USER $(jump_spec) -j "${CHAIN}" >/dev/null 2>&1 || return 1
+# Canonical order-insensitive key for one rule spec: rule ORDER within the
+# chain is compared strictly (that is the position property the finding is
+# about), but OPTION ORDER WITHIN one rule is normalised away, because
+# `iptables -S` rendering order of tokens has varied across backends and
+# versions and the guaranteed invariant is only the kernel's rule-equivalence
+# semantics (verified against live iptables-nft 1.8.7 output on this host,
+# which round-trips our specs verbatim).
+#
+# Normalisation BUNDLES each known single-operand option with its operand
+# (option=operand) BEFORE sorting, so the sort permutes whole option/operand
+# PAIRS, never bare tokens (PR#13 round-15 review finding, blocking): a bare
+# token sort made `--comment DROP -j kanban-ui-guard` (a jump into a foreign
+# chain NAMED like the guard comment) collide with the real transient guard
+# `--comment kanban-ui-guard -j DROP`, and the same collision existed between
+# the managed jump's comment and target -- a bypass rule could masquerade as
+# the guard we skip or as the jump we accept in first position.
+#
+# Only the options our managed rules actually use (and the short forms
+# `iptables -S` emits) are paired; any other token stays bare. A token with
+# an `=` that was not produced by bundling -- or a known option left without
+# its operand (`opt=`, which no installable rule can encode) -- therefore
+# cannot collide with a managed rule's key: worst case is spurious drift and
+# a fail-closed reconvergence, never a false PASS. set -f in the subshell
+# keeps token expansion glob-safe; specs are our own or -S output (no
+# newlines, no glob metacharacters).
+norm_rule() {
+  # shellcheck disable=SC2086  # $1 is deliberately word-split into tokens
+  (
+    set -f
+    # shellcheck disable=SC2086  # word-splitting is the point of $1 here
+    set -- $1
+    out=()
+    while [ "$#" -gt 0 ]; do
+      case $1 in
+        (-j | -m | -p | -s | -d | -i | -o | --comment | --dport | --sport)
+          # Bundle the option with its operand; a trailing option with no
+          # operand encodes as "opt=" (a value no real rule can carry).
+          out+=("$1=${2-}")
+          shift
+          [ "$#" -gt 0 ] && shift
+          ;;
+        (*)
+          out+=("$1")
+          shift
+          ;;
+      esac
+    done
+    if [ "${#out[@]}" -gt 0 ]; then
+      printf '%s\n' "${out[@]}" | LC_ALL=C sort | tr '\n' ' '
+    fi
+  )
+}
+
+# POSITION verification, not mere existence (PR#13 round-8 finding
+# 4354363842): `iptables -C` answers "does this rule exist", so a RETURN or
+# ACCEPT injected BEFORE the managed jump -- or an extra/reordered rule in
+# the private chain -- left -C-only checks green while non-proxy traffic
+# bypassed the restriction. This verifier compares the live `iptables -S`
+# rendering against the EXPECTED ORDERED ruleset instead:
+#   * DOCKER-USER: the managed jump must be the FIRST rule once exact
+#     transient-guard copies (the only shape this script inserts, matched
+#     token-for-token below; the guard is deliberately not part of the
+#     managed live set) are skipped. Anything evaluated ahead of it --
+#     RETURN, ACCEPT, a foreign jump -- is drift.
+#   * private chain: exactly the RULES entries, in RULES order. A missing
+#     rule, an inserted extra, or any reorder fails.
+# -P/-N header lines from -S are skipped. Output is small (single-service
+# chains), so the read loops never risk a blocked process substitution.
+managed_state_live() {
+  local norm_guard norm_jump norm_rules=() key line i seen_jump r
+  norm_guard=$(norm_rule "$(guard_spec)")
+  norm_jump=$(norm_rule "$(jump_spec) -j ${CHAIN}")
   for r in "${RULES[@]}"; do
-    # shellcheck disable=SC2086  # rule is deliberately word-split into argv
-    ipt -C ${r} >/dev/null 2>&1 || return 1
+    norm_rules+=("$(norm_rule "${r#"${CHAIN}" }")")
   done
+  seen_jump=0
+  while IFS= read -r line; do
+    case "$line" in
+      (-P\ *|-N\ *) continue ;;
+    esac
+    key=$(norm_rule "${line#-A DOCKER-USER }")
+    [ "$key" = "$norm_guard" ] && continue
+    # First non-guard rule must BE the managed jump (position check).
+    # Anything ahead of the jump -- however harmless it looks -- is drift:
+    # netfilter evaluates in order, and only the jump's chain guarantees
+    # the terminal DROP for the published tuple.
+    [ "$key" = "$norm_jump" ] || return 1
+    seen_jump=1
+    break
+  done < <(ipt -S DOCKER-USER 2>/dev/null)
+  # The jump must be present AND first: an empty DOCKER-USER, a missing
+  # chain, or a guard-only residue (-S yields no jump line) must fail.
+  [ "$seen_jump" = 1 ] || return 1
+  i=0
+  while IFS= read -r line; do
+    case "$line" in
+      (-P\ *|-N\ *) continue ;;
+    esac
+    [ "$i" -lt "${#norm_rules[@]}" ] || return 1  # extra rule beyond managed set
+    key=$(norm_rule "${line#-A "${CHAIN}" }")
+    [ "$key" = "${norm_rules[$i]}" ] || return 1
+    i=$((i + 1))
+  done < <(ipt -S "${CHAIN}" 2>/dev/null)
+  [ "$i" -eq "${#norm_rules[@]}" ] || return 1  # missing rule(s)
   return 0
 }
 
 if [ "${1:-}" = "--check" ]; then
-  all_rules_live && exit 0
+  managed_state_live && exit 0
   exit 42
 fi
 
-if all_rules_live; then
+if managed_state_live; then
   # Exact managed state already live: touch nothing (byte-stable rerun).
   # A leftover guard from an earlier failed run is still worth clearing —
   # the restriction is redundant while the jump is live, and a guard alone
@@ -238,7 +334,7 @@ ipt -I DOCKER-USER 1 $(jump_spec) -j "${CHAIN}" || exit 1
 # full managed set against the kernel, then remove the transient guard. If
 # verification or guard removal fails, exit non-zero WITH the guard in
 # place — fail-closed, the restriction stays on.
-all_rules_live || exit 1
+managed_state_live || exit 1
 while read -r r; do
   [ -n "$r" ] || continue
   # shellcheck disable=SC2086  # rule spec must be separate argv words
