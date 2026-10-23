@@ -487,6 +487,10 @@ groups:
                   or on (instance)
                   max by (instance) (node_hwmon_temp_alarm{chip="nvme_nvme0",sensor="temp1",instance=~"proxmox-[12].*"}) == 1
                 )
+              # Instant query: the expr filters out healthy samples, so a range query's
+              # `last` reducer would keep returning an old breach after the drive cools.
+              instant: true
+              range: false
               intervalMs: 1000
               maxDataPoints: 43200
           - refId: B
