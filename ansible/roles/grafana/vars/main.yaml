@@ -50,7 +50,11 @@ grafana_influxdb_proxmox_uid: "PD46801E352F9449B"
 grafana_alert_disk_threshold_local: 20    # Alert when local FS has <20% free (>80% used)
 grafana_alert_loki_error_threshold: 10    # Alert when > 10 errors in 5m window
 grafana_alert_n8n_trigger_loop_threshold: 6  # Alert when > 6 trigger removals in 5m window
-grafana_alert_nvme_temp_threshold: 68     # Alert when a Proxmox NVMe drive exceeds 68°C
+# Proxmox NVMe (Samsung 990 PRO) composite temperature. Samsung's spec is
+# 0-70°C measured by SMART composite; secondary sensors run hotter and are excluded.
+grafana_alert_nvme_temp_threshold: 70           # Warn when composite exceeds 70°C...
+grafana_alert_nvme_temp_for: 10m                # ...continuously for 10 minutes
+grafana_alert_nvme_temp_recovery_threshold: 65  # Stay firing until composite drops below 65°C
 
 # Feature flags (ALL true - grafana has web interface)
 grafana_configure_homepage: true
