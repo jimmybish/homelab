@@ -9,7 +9,10 @@
 # Invoked by:
 #   1. the kanban_ui Ansible role (deploy convergence + drift check), and
 #   2. kanban-ui-docker-user.service (Type=oneshot After=docker.service
-#      PartOf=docker.service), Docker's documented mitigation for user rules
+#      PartOf=docker.service, and Wants=kanban-ui-docker-user.service from
+#      the docker.service.d drop-in so the daemon's own start pulls it in —
+#      PR#13 r8 finding 4354363965), Docker's documented mitigation for
+#      user rules
 #      lost when the daemon recreates DOCKER-USER at startup (boot, and
 #      every daemon restart/upgrade re-fires the unit):
 #      https://docs.docker.com/engine/network/packet-filtering-firewalls/

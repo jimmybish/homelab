@@ -1,0 +1,26 @@
+# Reverse-dependency drop-in for docker.service (PR#13 round-8 finding
+# 4354363965), installed and removed by role kanban_ui.
+#
+# Why this exists: Requires=/PartOf= on kanban-ui-docker-user.service only
+# propagate stop/deactivation DOWN to the oneshot; systemd never activates
+# a dependent back up when the required unit is (re)started. After a plain
+# `systemctl stop docker && systemctl start docker` the oneshot stayed
+# inactive (reproduced live: ExecMainStart unchanged, DOCKER-USER jump
+# gone until the next playbook run), and BindsTo= did not fix it (same
+# forward-only semantics). The activation edge must be a reverse
+# dependency declared on the Docker side: Wants= pulls the oneshot into
+# every docker start/restart transaction, and the oneshot's own
+# After=docker.service (its unit file) supplies the ordering edge, so it
+# runs after the daemon is ready — exactly when DOCKER-USER has just been
+# rebuilt. Proven on synthetic units on the target host (systemd 249): without
+# this drop-in the oneshot never re-fires across a daemon stop/start; with it,
+# it re-fires every time.
+#
+# Wants= (not Requires=): a failing convergence script must never take the
+# Docker daemon's activation down with it. This drop-in deliberately has
+# NO After=/Before= of its own: the daemon must never gain an ordering
+# edge onto the oneshot (that would be a start-order cycle against the
+# oneshot's After=docker.service).
+# Managed by Ansible (roles/kanban_ui); do not edit on the host.
+[Unit]
+Wants=kanban-ui-docker-user.service

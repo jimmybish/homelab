@@ -4,9 +4,23 @@
 # filter after the Docker daemon (re)builds its own chains — the documented
 # mitigation for user DOCKER-USER rules lost across daemon restart/upgrade
 # (https://docs.docker.com/engine/network/packet-filtering-firewalls/).
-# PartOf=docker.service makes systemd re-run this oneshot every time the
-# daemon restarts (docker upgrades, systemctl restart docker), which is
-# exactly when DOCKER-USER gets rebuilt and our jump disappears.
+#
+# PR#13 round-8 finding 4354363965: activation of docker.service must pull
+# this unit in. Requires=/PartOf= only propagate stop/deactivation DOWN to
+# us; systemd never activates a dependent back up when the required unit is
+# (re)started, so after `systemctl stop docker && systemctl start docker`
+# this oneshot stayed inactive (reproduced live on the target host:
+# ExecMainStart unchanged, DOCKER-USER jump gone) and BindsTo= did not fix
+# it either (same forward-only semantics; proved on synthetic units). The
+# activation edge is a REVERSE dependency declared on the Docker side:
+# docker.service.d/60-kanban-ui-docker-user.conf installs
+# Wants=kanban-ui-docker-user.service, so every docker start/restart
+# queues this oneshot; After=docker.service below orders it behind the
+# daemon (unit-file After and the daemon's Wants of us compose into the
+# documented requires+-style start-after set) — exactly when DOCKER-USER
+# gets rebuilt. Proven on synthetic units: with the drop-in, stop+start of
+# the "daemon" re-fires the oneshot; without it (and with BindsTo=) it
+# stays inactive.
 # Managed by Ansible (roles/kanban_ui); do not edit on the host.
 Description=Converge DOCKER-USER kanban-ui pre-Docker forwarding filter
 After=docker.service

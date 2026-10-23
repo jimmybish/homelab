@@ -392,8 +392,10 @@
 # non-published bind. IPv6 needs no rule: the compose pins the IPv4 bind
 # only and the container has no v6 address. Convergence lives in one
 # idempotent script (files/docker_user_enforce.sh) run from this play AND
-# from a systemd oneshot ordered After=docker.service PartOf=docker.service
-# — the daemon-lifecycle belt-and-braces recommended by Docker's firewall
+# from a systemd oneshot ordered After=docker.service PartOf=docker.service,
+# pulled into every docker.service start by the docker.service.d drop-in
+# installed below (PR#13 r8: Requires/PartOf alone are forward-only for
+# deactivation; the daemon side must Wants= us for activation), Docker's
 # guidance: whenever docker.service restarts (upgrade, maintenance) the unit
 # re-fires and re-converges DOCKER-USER (drift recovery proved live: jump
 # manually removed, oneshot re-run restored the exact managed ruleset).
@@ -427,9 +429,12 @@
     - kanban_ui_firewall
 
 - name: Install the boot-time DOCKER-USER convergence unit
-  # Type=oneshot + RemainAfterExit: runs once after docker.service at boot
-  # (daemon restarts re-run it manually or via the next playbook pass; the
-  # verify task below additionally heals drift on every play).
+  # Type=oneshot + RemainAfterExit: runs once after docker.service at boot.
+  # PR#13 round-8 finding 4354363965: activation of docker.service also
+  # pulls this unit in via the reverse-dependency drop-in installed below
+  # (Requires=/PartOf= alone only propagate stop DOWN to us, so a plain
+  # stop/start of the daemon left the oneshot inactive; reproduced live).
+  # The verify task below additionally heals drift on every play.
   ansible.builtin.template:
     src: kanban_ui_docker_user.service.j2
     dest: /etc/systemd/system/kanban-ui-docker-user.service
@@ -438,6 +443,84 @@
     mode: '0644'
   register: kanban_ui_fw_unit
   when: kanban_ui_state | default('present') == 'present'
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Ensure the docker.service.d drop-in directory exists
+  # The template module refuses to create parent directories, and a stock
+  # docker install has no docker.service.d (verified on the live host: this
+  # is the first drop-in this role ever installs).
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: kanban_ui_state | default('present') == 'present'
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Install the docker.service reverse-dependency drop-in
+  # PR#13 round-8 finding 4354363965: systemd dependency edges are
+  # forward-only for activation — Requires=/PartOf= on the oneshot stop it
+  # when Docker stops but never bring it back when Docker STARTS (no
+  # reverse activation; BindsTo= behaves the same). The pull-in must be
+  # declared on the Docker side: Wants=kanban-ui-docker-user.service makes
+  # every docker.service start/restart queue the oneshot, and the oneshot's
+  # own After=docker.service orders it behind the daemon, i.e. it re-fires
+  # exactly when DOCKER-USER has just been rebuilt. Proven on synthetic
+  # units on the live host (systemd 249): without the drop-in the oneshot
+  # never re-fires across a daemon stop/start; with it, every time.
+  # template: content-diffs the installed file, so EXISTING installations
+  # (installed before this drop-in existed) gain the dependency on the next
+  # role run with no manual systemctl; the reload task below applies it.
+  ansible.builtin.template:
+    src: docker_service_kanban_ui_pullin.conf.j2
+    dest: /etc/systemd/system/docker.service.d/60-kanban-ui-docker-user.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: kanban_ui_fw_dropin
+  when: kanban_ui_state | default('present') == 'present'
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Reload systemd after (re)installing the convergence unit or drop-in
+  # Deterministic daemon-reload whenever either unit-side artifact changed
+  # (upgrades of existing installs land here). Runs before the enable task
+  # so its state assertion sees the new dependency graph.
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
+    - kanban_ui_fw_unit is changed or kanban_ui_fw_dropin is changed
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Verify Docker activation pulls the convergence unit in
+  # Behavior check for the drop-in (runs every play): the LOADED systemd
+  # graph must show docker.service Wants the oneshot. A stale install
+  # (drop-in file present but never reloaded) or a deleted drop-in fails
+  # here instead of silently leaving the daemon without the pull-in.
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - docker.service
+      - -p
+      - Wants
+      - --value
+  register: kanban_ui_fw_wants
+  changed_when: false
+  failed_when: "'kanban-ui-docker-user.service' not in kanban_ui_fw_wants.stdout"
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
   tags:
     - kanban_ui
     - kanban_ui_firewall
@@ -560,13 +643,16 @@
 
 - name: Remove the DOCKER-USER kanban-ui enforcement unit and script
   # Completes the absent path: unit file (disabled + daemon-reloaded above,
-  # so it can never re-fire) and the script itself. No orphaned rules, unit,
-  # or helper survives teardown.
+  # so it can never re-fire), the Docker-side pull-in drop-in (PR#13
+  # round-8 finding 4354363965 — without this the daemon would keep Wants=
+  # on a unit that no longer exists), and the script itself. No orphaned
+  # rules, unit, drop-in, or helper survives teardown.
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
     - /etc/systemd/system/kanban-ui-docker-user.service
+    - /etc/systemd/system/docker.service.d/60-kanban-ui-docker-user.conf
     - "{{ kanban_ui_fw_script_path }}"
   when: kanban_ui_state | default('present') == 'absent'
   tags:
