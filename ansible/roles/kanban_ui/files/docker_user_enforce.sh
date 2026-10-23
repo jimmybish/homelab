@@ -16,10 +16,30 @@
 #
 # Configuration arrives via the environment (never interpolated into shell
 # syntax by the caller): KANBAN_UI_CONTAINER, KANBAN_UI_PORT,
-# KANBAN_UI_PROXY_IP. The container address is resolved from the live Docker
-# API on every run, so a recreate that reassigns the IP self-heals.
+# KANBAN_UI_PROXY_IP, KANBAN_UI_HOST_IP (the published host address;
+# required by every mode except --teardown). The container address is
+# resolved from the live Docker API on every run, so a recreate that
+# reassigns the IP self-heals.
 #
 # Modes:
+#   --pre-lock: install the fail-closed PRE-PUBLISH lockdown BEFORE the
+#     container publishes its port (PR#13 round-8 finding 4354363865): a
+#     DROP at DOCKER-USER position 1 matching the ORIGINAL host
+#     destination/port tuple (post-DNAT packets only expose the container
+#     address, so the original tuple is matched via conntrack
+#     --ctorigdst/--ctorigdstport). Needs no container IP and no Docker API:
+#     the role runs this ahead of the Compose build/up tasks so the
+#     readiness wait and any earlier failure can never leave the freshly
+#     published port reachable from non-proxy LAN hosts. Idempotent ONLY
+#     when an exact copy is the FIRST effective rule in DOCKER-USER (round-
+#     17 review finding: a RETURN/ACCEPT or foreign jump pushed ahead of a
+#     surviving copy must not be accepted as "already installed" -- any
+#     other head rule forces a fresh position-1 insert, and duplicate
+#     copies are comment-swept by converge/teardown). A live managed jump
+#     (steady state) makes the lockdown unnecessary and the run is a no-op.
+#     Survives every mid-play failure (including a failed Compose readiness
+#     wait); cleared ONLY by a successful converge (after the managed
+#     jump+chain verify live) or --teardown.
 #   enforce (default): idempotent converge; exit 0 always unless an
 #     iptables operation itself fails (a missing container is not a failure:
 #     nothing is published, nothing to enforce). Reconvergence is
@@ -30,15 +50,18 @@
 #     source THROUGHOUT the delete/flush/append/insert sequence. The guard
 #     is deleted ONLY after the jump+chain set verifies live; any mid-script
 #     failure exits non-zero with the guard still in place (restriction
-#     stays ON, never off). Normal completion leaves no orphan guard.
+#     stays ON, never off). Normal completion leaves no orphan guard, and
+#     sweeps any pre-publish lockdown left by the --pre-lock stage.
 #   --check: exit 0 when every managed rule is live IN THE EXPECTED
 #     POSITION/ORDER (managed jump first in DOCKER-USER, private chain
 #     exactly the ordered RULES), 42 on drift, 44 when the container is not
 #     running (nothing published, nothing enforced). The transient guard is
 #     deliberately NOT part of the managed live set.
-#   --teardown: remove every jump into the chain (any destination variant)
-#     and any leftover kanban-ui-guard DROP (a fail-closed guard surviving
-#     a mid-script failure must not outlive an absent-state teardown),
+#   --teardown: remove every jump into the chain (any destination variant),
+#     any leftover kanban-ui-guard DROP (a fail-closed guard surviving
+#     a mid-script failure must not outlive an absent-state teardown) and
+#     any leftover kanban-ui-prelock DROP (the pre-publish lockdown must not
+#     outlive the service either),
 #     then flush + unregister the chain. Designed to run via
 #     ansible.builtin.script pushed from the role's files/ (PR#13 round-5
 #     finding 4323915133): the absent-state playbook path deletes the
@@ -55,6 +78,17 @@
 # usage error (exit 2) so a typo can never half-arm.
 set -uo pipefail
 
+# The pre-lock and teardown modes never resolve the container, so they must
+# not require variables only the converge path consumes. KANBAN_UI_HOST_IP
+# (the published host address) is required by --pre-lock, enforce and
+# --check; it is deliberately NOT required by --teardown, which matches the
+# lockdown by comment alone.
+if [ "${1:-}" != "--teardown" ]; then
+  : "${KANBAN_UI_HOST_IP:?KANBAN_UI_HOST_IP must be set}"
+  case "$KANBAN_UI_HOST_IP" in
+    (*[!0-9.]*|'') echo "invalid host ip" >&2; exit 2 ;;
+  esac
+fi
 : "${KANBAN_UI_CONTAINER:?KANBAN_UI_CONTAINER must be set}"
 : "${KANBAN_UI_PORT:?KANBAN_UI_PORT must be set}"
 : "${KANBAN_UI_PROXY_IP:?KANBAN_UI_PROXY_IP must be set}"
@@ -75,6 +109,7 @@ ipt() { iptables -w 30 "$@"; }
 CHAIN=DOCKER-USER-KANBAN
 JUMP_COMMENT=kanban-ui-jump
 GUARD_COMMENT=kanban-ui-guard
+PRELOCK_COMMENT=kanban-ui-prelock
 # Each entry is "<chain> <rulespec>" (no -A/-C flag) so the same string
 # serves both `ipt -A ${r}` and `ipt -C ${r}` without re-quoting.
 RULES=(
@@ -96,19 +131,29 @@ if [ "${1:-}" = "--teardown" ]; then
   done < <(ipt -S DOCKER-USER | grep -- "-j ${CHAIN}$" || true)
   # A fail-closed guard surviving a mid-script failure must not outlive the
   # service: delete any guard DROP variant too (comment-matched, always
-  # present on guard rules regardless of the resolved container IP).
+  # present on guard rules regardless of the resolved container IP). The
+  # same applies to the pre-publish lockdown (round-8 finding 4354363865):
+  # a lockdown surviving an aborted play (or an abandoned absent-state
+  # run) must not orphan on a host that no longer runs kanban-ui, and
+  # would otherwise black-hole any future service reusing the port tuple.
   while read -r r; do
     [ -n "$r" ] || continue
     # shellcheck disable=SC2086  # rule spec must be separate argv words
     ipt -D DOCKER-USER ${r#-A DOCKER-USER } || true
     removed=1
   done < <(ipt -S DOCKER-USER | grep -- "--comment ${GUARD_COMMENT} " || true)
+  while read -r r; do
+    [ -n "$r" ] || continue
+    # shellcheck disable=SC2086  # rule spec must be separate argv words
+    ipt -D DOCKER-USER ${r#-A DOCKER-USER } || true
+    removed=1
+  done < <(ipt -S DOCKER-USER | grep -- "--comment ${PRELOCK_COMMENT} " || true)
   if ipt -n -L "${CHAIN}" >/dev/null 2>&1; then
     ipt -F "${CHAIN}" && ipt -X "${CHAIN}"
     removed=1
   fi
   if [ "$removed" = 1 ]; then
-    echo "torn down ${CHAIN} (jumps + guard + chain)"
+    echo "torn down ${CHAIN} (jumps + guard + prelock + chain)"
   else
     echo "no ${CHAIN} rules present"
   fi
@@ -120,8 +165,18 @@ resolve_ip() {
     "$KANBAN_UI_CONTAINER" 2>/dev/null | awk '{print $1}'
 }
 
+# Pre-lock mode must not depend on Docker at all: the container may not
+# exist yet (first deploy), and waiting for it would delay the lockdown
+# that is supposed to PRECEDE publishing. The boot-race wait is for the
+# converge/check paths only, where an absent container right after a
+# daemon restart is transient.
+PRELOCK_MODE=0
+if [ "${1:-}" = "--pre-lock" ]; then
+  PRELOCK_MODE=1
+fi
+
 ip=$(resolve_ip)
-if [ -z "$ip" ]; then
+if [ -z "$ip" ] && [ "$PRELOCK_MODE" = 0 ]; then
   # Boot-race tolerance (systemd path): the container (restart policy
   # unless-stopped) comes up alongside the daemon; give it up to 30s.
   for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -130,7 +185,7 @@ if [ -z "$ip" ]; then
     [ -n "$ip" ] && break
   done
 fi
-if [ -z "$ip" ]; then
+if [ -z "$ip" ] && [ "$PRELOCK_MODE" = 0 ]; then
   if [ "${1:-}" = "--check" ]; then
     echo "container $KANBAN_UI_CONTAINER not running; nothing enforced" >&2
     exit 44
@@ -151,6 +206,20 @@ jump_spec() {
 
 guard_spec() {
   echo "$(tuple_spec) -m comment --comment ${GUARD_COMMENT} -j DROP"
+}
+
+# Pre-publish lockdown (PR#13 round-8 finding 4354363865): matches the
+# ORIGINAL host destination/port. DOCKER-USER is evaluated AFTER nat PREROUTING,
+# so by then the packet's destination already reads as the container address;
+# the pre-DNAT tuple is only recoverable through conntrack. Matching the
+# original host address + published port therefore covers every LAN source
+# without knowing the container IP -- which is what makes it installable
+# BEFORE the container exists. Bare --ctorigdst address (no /32) so the
+# inserted spec is byte-identical to the `iptables -S` rendering (verified
+# live on iptables-nft 1.8.7: the mask is stripped at render time), keeping
+# exact-copy comparisons and deletions trivially exact.
+prelock_spec() {
+  echo "-p tcp -m tcp --dport ${KANBAN_UI_PORT} -m conntrack --ctorigdst ${KANBAN_UI_HOST_IP} --ctorigdstport ${KANBAN_UI_PORT} -m comment --comment ${PRELOCK_COMMENT} -j DROP"
 }
 
 # Canonical order-insensitive key for one rule spec: rule ORDER within the
@@ -187,9 +256,13 @@ norm_rule() {
     out=()
     while [ "$#" -gt 0 ]; do
       case $1 in
-        (-j | -m | -p | -s | -d | -i | -o | --comment | --dport | --sport)
+        (-j | -m | -p | -s | -d | -i | -o | --comment | --dport | --sport | --ctorigdst | --ctorigdstport)
           # Bundle the option with its operand; a trailing option with no
           # operand encodes as "opt=" (a value no real rule can carry).
+          # --ctorigdst/--ctorigdstport are bundled for the same reason as
+          # --comment/-j (PR#13 round-15 blocking finding): their operands
+          # (an address, a port) must never be sortable as bare tokens that
+          # could masquerade as a managed rule's comment or jump target.
           out+=("$1=${2-}")
           shift
           [ "$#" -gt 0 ] && shift
@@ -215,15 +288,19 @@ norm_rule() {
 #   * DOCKER-USER: the managed jump must be the FIRST rule once exact
 #     transient-guard copies (the only shape this script inserts, matched
 #     token-for-token below; the guard is deliberately not part of the
-#     managed live set) are skipped. Anything evaluated ahead of it --
-#     RETURN, ACCEPT, a foreign jump -- is drift.
+#     managed live set) and exact pre-publish lockdown copies (the
+#     --pre-lock artifact, likewise matched token-for-token and removed by
+#     the converge sweep once the jump verifies -- a surviving lockdown is
+#     redundantly DROP, never drift) are skipped. Anything evaluated ahead
+#     of it -- RETURN, ACCEPT, a foreign jump -- is drift.
 #   * private chain: exactly the RULES entries, in RULES order. A missing
 #     rule, an inserted extra, or any reorder fails.
 # -P/-N header lines from -S are skipped. Output is small (single-service
 # chains), so the read loops never risk a blocked process substitution.
 managed_state_live() {
-  local norm_guard norm_jump norm_rules=() key line i seen_jump r
+  local norm_guard norm_prelock norm_jump norm_rules=() key line i seen_jump r
   norm_guard=$(norm_rule "$(guard_spec)")
+  norm_prelock=$(norm_rule "$(prelock_spec)")
   norm_jump=$(norm_rule "$(jump_spec) -j ${CHAIN}")
   for r in "${RULES[@]}"; do
     norm_rules+=("$(norm_rule "${r#"${CHAIN}" }")")
@@ -235,6 +312,7 @@ managed_state_live() {
     esac
     key=$(norm_rule "${line#-A DOCKER-USER }")
     [ "$key" = "$norm_guard" ] && continue
+    [ "$key" = "$norm_prelock" ] && continue
     # First non-guard rule must BE the managed jump (position check).
     # Anything ahead of the jump -- however harmless it looks -- is drift:
     # netfilter evaluates in order, and only the jump's chain guarantees
@@ -265,22 +343,94 @@ if [ "${1:-}" = "--check" ]; then
   exit 42
 fi
 
+# Delete every DOCKER-USER rule carrying the given comment (guard or
+# pre-publish lockdown copies). Used only on paths where the restriction is
+# redundant (jump live and verified): a copy that refuses to delete must
+# make the caller fail, never report convergence while the proxy path stays
+# DROP'd. Rule text from iptables -S is word-split on purpose.
+sweep_comment() {
+  local comment="$1" r
+  while read -r r; do
+    [ -n "$r" ] || continue
+    # shellcheck disable=SC2086  # rule spec must be separate argv words
+    ipt -D DOCKER-USER ${r#-A DOCKER-USER } || return 1
+  done < <(ipt -S DOCKER-USER | grep -- "--comment ${comment} " || true)
+  if ipt -S DOCKER-USER | grep -q -- "--comment ${comment} "; then
+    return 1
+  fi
+  return 0
+}
+
+# PRE-PUBLISH LOCKDOWN (PR#13 round-8 finding 4354363865): the role invokes
+# this mode BEFORE the Compose build/up tasks, so the port is never
+# published without a DROP already covering the original host tuple. Runs
+# without the container being up (no boot-race wait, no Docker dependency
+# in the install path). Every failure path of the play afterwards --
+# including a failed Compose readiness wait, which aborts before the
+# converge tasks -- leaves the lockdown in place: fail-closed. Only a
+# successful converge (managed jump+chain verified live) or --teardown
+# removes it.
+if [ "$PRELOCK_MODE" = 1 ]; then
+  if [ -n "$ip" ] && managed_state_live; then
+    # Steady state: the managed jump (whose chain ends in the terminal
+    # DROP) already restricts the tuple; installing a lockdown here would
+    # make every converge play permanently non-idempotent (install ->
+    # sweep -> install...). Report unchanged and touch nothing.
+    echo "pre-publish lockdown not needed; managed DOCKER-USER ruleset live"
+    exit 0
+  fi
+  norm_want=$(norm_rule "$(prelock_spec)")
+  # Idempotency is POSITIONAL (PR#13 round-17 review finding 1): an exact
+  # copy that is no longer the FIRST effective rule is not protection.
+  # Netfilter evaluates DOCKER-USER in order, so a RETURN/ACCEPT or foreign
+  # jump inserted ahead of a surviving copy lets Compose publish behind the
+  # bypass while a mere-existence scan reported "already installed" (the
+  # High-severity exposure re-opened). Only an exact copy AT the head is a
+  # no-op; any other head rule (or none) re-arms a fresh position-1 DROP.
+  # Duplicate copies from repeated re-arms are harmless (all are DROPs on
+  # the equal matcher) and are comment-swept by every converge success path
+  # and by --teardown, so none can orphan.
+  first_rule=""
+  while IFS= read -r line; do
+    case "$line" in
+      (-P\ *|-N\ *) continue ;;
+    esac
+    first_rule="${line#-A DOCKER-USER }"
+    break
+  done < <(ipt -S DOCKER-USER 2>/dev/null)
+  if [ -n "$first_rule" ] && [ "$(norm_rule "$first_rule")" = "$norm_want" ]; then
+    # Retry-safe: a previous failed play already armed the lockdown at the
+    # head and nothing is evaluated ahead of it.
+    echo "pre-publish lockdown already installed for ${KANBAN_UI_HOST_IP}:${KANBAN_UI_PORT}"
+    exit 0
+  fi
+  # Single xtables-locked insertion at position 1, ahead of everything
+  # (including any stale jump or bypass pushed above a surviving copy), so
+  # the tuple is restricted from the instant this returns until converge
+  # verifies the managed set.
+  # shellcheck disable=SC2046  # $(prelock_spec) is deliberately word-split into argv
+  ipt -I DOCKER-USER 1 $(prelock_spec) || exit 1
+  echo "pre-publish lockdown installed for ${KANBAN_UI_HOST_IP}:${KANBAN_UI_PORT}"
+  exit 0
+fi
+
 if managed_state_live; then
   # Exact managed state already live: touch nothing (byte-stable rerun).
   # A leftover guard from an earlier failed run is still worth clearing —
   # the restriction is redundant while the jump is live, and a guard alone
-  # (jump gone) would keep the port dead for the proxy too.
-  while read -r r; do
-    [ -n "$r" ] || continue
-    # shellcheck disable=SC2086  # rule spec must be separate argv words
-    ipt -D DOCKER-USER ${r#-A DOCKER-USER } || exit 1
-  done < <(ipt -S DOCKER-USER | grep -- "--comment ${GUARD_COMMENT} " || true)
-  if ipt -S DOCKER-USER | grep -q -- "--comment ${GUARD_COMMENT} "; then
+  # (jump gone) would keep the port dead for the proxy too. A surviving
+  # pre-publish lockdown is cleared on the same grounds (it DROPs the
+  # proxy path as well).
+  sweep_comment "$GUARD_COMMENT" || {
     # A guard that will not delete leaves the proxy path DROPped; a stale
     # restriction the role cannot clear is a failure, not "already converged".
     echo "stale guard removal did not take effect" >&2
     exit 1
-  fi
+  }
+  sweep_comment "$PRELOCK_COMMENT" || {
+    echo "stale pre-publish lockdown removal did not take effect" >&2
+    exit 1
+  }
   echo "DOCKER-USER-KANBAN already converged for ${ip}:${KANBAN_UI_PORT} (proxy ${KANBAN_UI_PROXY_IP})"
   exit 0
 fi
@@ -331,20 +481,21 @@ ipt -I DOCKER-USER 1 $(jump_spec) -j "${CHAIN}" || exit 1
 [ "${KANBAN_UI_TEST_FAIL_AFTER:-}" = "insert" ] && { echo "injected failure after insert" >&2; exit 1; }
 
 # Verified success is the ONLY path that may relax anything: re-check the
-# full managed set against the kernel, then remove the transient guard. If
-# verification or guard removal fails, exit non-zero WITH the guard in
-# place — fail-closed, the restriction stays on.
+# full managed set against the kernel, then remove the transient guard and
+# any pre-publish lockdown. If verification or removal fails, exit non-zero
+# WITH both still in place — fail-closed, the restriction stays on.
 managed_state_live || exit 1
-while read -r r; do
-  [ -n "$r" ] || continue
-  # shellcheck disable=SC2086  # rule spec must be separate argv words
-  ipt -D DOCKER-USER ${r#-A DOCKER-USER } || exit 1
-done < <(ipt -S DOCKER-USER | grep -- "--comment ${GUARD_COMMENT} " || true)
-if ipt -S DOCKER-USER | grep -q -- "--comment ${GUARD_COMMENT} "; then
+sweep_comment "$GUARD_COMMENT" || {
   # Should be unreachable; belt-and-braces so a silent delete failure can
   # never leave a "converged" verdict with an orphan guard.
   echo "guard removal did not take effect" >&2
   exit 1
-fi
+}
+sweep_comment "$PRELOCK_COMMENT" || {
+  # Same fail-closed rule for the pre-publish lockdown: an unrestorable
+  # DROP would outlive the "converged" verdict, so refuse to claim it.
+  echo "pre-publish lockdown removal did not take effect" >&2
+  exit 1
+}
 
 echo "converged DOCKER-USER-KANBAN for ${ip}:${KANBAN_UI_PORT} (proxy ${KANBAN_UI_PROXY_IP})"

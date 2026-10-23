@@ -282,6 +282,44 @@
   tags:
     - kanban_ui
 
+# PRE-PUBLISH LOCKDOWN FIRST (PR#13 round-8 finding 4354363865, High): the
+# compose tasks below publish the port; Docker's nat DNAT + filter DOCKER
+# ACCEPT then admit ANY LAN source on the FORWARD path (the UFW INPUT rule
+# above never sees that traffic - r4 live proof), and the readiness waits
+# (build wait:true, up wait_timeout 600) sit ahead of every DOCKER-USER
+# task. On a first deploy that left the fresh listener reachable from
+# non-proxy LAN hosts for the whole window, and a failed readiness wait
+# aborted the play BEFORE enforcement ever installed. Reproduced live for
+# this fix (jump+chain removed on the target host, a control-node curl ->
+# HTTP 200/401 while the UFW INPUT rule stayed loaded). The lockdown DROPs
+# the published tuple at DOCKER-USER position 1, matched on the ORIGINAL
+# host destination/port via conntrack (post-DNAT packets only expose the
+# container address), so it needs no container IP and installs before the
+# container exists. It survives every subsequent failure - including the
+# readiness-wait failure path - and is swept only by a successful converge
+# (after the managed jump+chain verify live) or teardown.
+# ansible.builtin.script (pushed from
+# files/, same mechanism as teardown per r5 finding 4323915133): on a
+# first deploy the installed copy at kanban_ui_fw_script_path does not
+# exist yet, and the lockdown must not depend on it.
+- name: Install the pre-publish DOCKER-USER lockdown
+  ansible.builtin.script:
+    cmd: docker_user_enforce.sh --pre-lock
+  environment:
+    KANBAN_UI_CONTAINER: kanban-ui
+    KANBAN_UI_PORT: "{{ kanban_ui_port }}"
+    KANBAN_UI_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
+    KANBAN_UI_HOST_IP: "{{ kanban_ui_bind_ip }}"
+  register: kanban_ui_fw_prelock
+  changed_when: "'lockdown installed' in kanban_ui_fw_prelock.stdout"
+  failed_when: kanban_ui_fw_prelock.rc != 0
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
 - name: Inspect local Kanban UI image
   community.docker.docker_image_info:
     name:
@@ -430,6 +468,7 @@
     KANBAN_UI_CONTAINER: kanban-ui
     KANBAN_UI_PORT: "{{ kanban_ui_port }}"
     KANBAN_UI_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
+    KANBAN_UI_HOST_IP: "{{ kanban_ui_bind_ip }}"
   register: kanban_ui_fw_converge
   changed_when: "'converged' in kanban_ui_fw_converge.stdout and 'already converged' not in kanban_ui_fw_converge.stdout"
   failed_when: kanban_ui_fw_converge.rc != 0
@@ -459,6 +498,7 @@
     KANBAN_UI_CONTAINER: kanban-ui
     KANBAN_UI_PORT: "{{ kanban_ui_port }}"
     KANBAN_UI_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
+    KANBAN_UI_HOST_IP: "{{ kanban_ui_bind_ip }}"
   register: kanban_ui_fw_verify
   changed_when: false
   failed_when: kanban_ui_fw_verify.rc != 0

@@ -21,6 +21,10 @@ RemainAfterExit=yes
 Environment=KANBAN_UI_CONTAINER=kanban-ui
 Environment=KANBAN_UI_PORT={{ kanban_ui_port }}
 Environment=KANBAN_UI_PROXY_IP={{ kanban_ui_proxy_ip }}
+# Needed by the converge path's pre-publish-lockdown verification (the
+# lockdown DROP matched on the original host tuple is swept once the
+# managed jump verifies; see files/docker_user_enforce.sh).
+Environment=KANBAN_UI_HOST_IP={{ kanban_ui_bind_ip | default(ansible_default_ipv4.address) }}
 ExecStart={{ kanban_ui_fw_script_path }}
 # The script waits for the container (up to 30s) and serialises against
 # Docker's concurrent rule writes (iptables -w 30); allow headroom.

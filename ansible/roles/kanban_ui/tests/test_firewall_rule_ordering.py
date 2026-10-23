@@ -66,6 +66,7 @@ CONTAINER = "kanban-ui"
 # RFC 5737 documentation space (TEST-NET-1/2), never routable -- same
 # fixture convention as the role's other tests. Synthetic values only.
 IP = "192.0.2.7"
+HOST_IP = "192.0.2.20"
 PORT = "9470"
 PROXY_IP = "198.51.100.5"
 PROBE_SRC = "203.0.113.66/32"
@@ -454,6 +455,7 @@ class Converger:
             KANBAN_UI_CONTAINER=CONTAINER,
             KANBAN_UI_PORT=PORT,
             KANBAN_UI_PROXY_IP=PROXY_IP,
+            KANBAN_UI_HOST_IP=HOST_IP,
         )
         self.env.pop("KANBAN_UI_TEST_FAIL_AFTER", None)
 

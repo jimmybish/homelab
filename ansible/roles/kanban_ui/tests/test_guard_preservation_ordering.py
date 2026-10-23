@@ -56,6 +56,7 @@ CONTAINER = "kanban-ui"
 # fixture convention as the role's other tests (e.g. test_log_redaction.py
 # PEER = "192.0.2.7"). Synthetic values only; the harness never routes them.
 IP = "192.0.2.7"
+HOST_IP = "192.0.2.20"
 PORT = "9470"
 PROXY_IP = "198.51.100.5"
 CHAIN = "DOCKER-USER-KANBAN"
@@ -271,6 +272,7 @@ class Converger:
             KANBAN_UI_CONTAINER=CONTAINER,
             KANBAN_UI_PORT=PORT,
             KANBAN_UI_PROXY_IP=PROXY_IP,
+            KANBAN_UI_HOST_IP=HOST_IP,
         )
         self.env.pop("KANBAN_UI_TEST_FAIL_AFTER", None)
 
