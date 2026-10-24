@@ -13,6 +13,19 @@ const COLS = ["triage", "todo", "scheduled", "ready", "running", "blocked", "rev
 // POST /tasks accepts only `triage: bool` (no general status field), so those two
 // columns are the only ones the create API can honor. Other columns get no "+" CTA.
 const CREATEABLE_COLS = new Set(["triage", "todo"]);
+// PR#13 review finding 4354363915: drop-target registration must match the
+// live Hermes bulk-status mutation surface. Per operator ruling 2026-10-24
+// the mounted checkout (e06df9c2, plugins/kanban plugin_api.py) is
+// authoritative over the stale review-citation pin: it accepts status
+// mutations for todo|triage|scheduled|ready|review|blocked|done (review via
+// request_review, reproduced live) plus archive:true (the rendered
+// `archived` column); it REFUSES `running` ("Cannot set status to 'running'
+// directly; use the dispatcher/claim path"). So Running stays display-only:
+// no dragover/drop listeners are registered for it (see renderInner) and
+// app.css suppresses the drop highlight. Shared list: any future
+// unsupported-status control (e.g. the Review dropdown option, finding
+// 4354363944) must build on DROP_COLS, not a competing list.
+const DROP_COLS = new Set(["triage", "todo", "scheduled", "ready", "review", "blocked", "done", "archived"]);
 const COL_LABEL = { triage: "Triage", todo: "Todo", scheduled: "Scheduled", ready: "Ready", running: "Running", blocked: "Blocked", review: "Review", done: "Done", archived: "Archived" };
 
 const S = {
@@ -279,20 +292,29 @@ function renderInner() {
     let rec = colEls.get(name);
     if (!rec) {
       const count = h("span", { class: "col-count" });
-      const el = h("div", { class: `column col-${name}`, "data-col": name });
+      const droppable = DROP_COLS.has(name); // PR#13 finding 4354363915
+      const el = h("div", { class: `column col-${name}${droppable ? "" : " col-display-only"}`, "data-col": name });
       el.append(h("div", { class: "col-head" },
         h("span", { class: "col-dot" }), COL_LABEL[name] || name, count,
         ...(CREATEABLE_COLS.has(name)
           ? [h("button", { class: "col-add", title: "Create task in this column", onclick: () => openCreateModal({ column: name }) }, "＋")]
           : [])));
       const body = h("div", { class: "col-body" }); el.append(body);
-      el.addEventListener("dragover", e => { e.preventDefault(); el.classList.add("drag-over"); });
-      el.addEventListener("dragleave", e => { if (!el.contains(e.relatedTarget)) el.classList.remove("drag-over"); });
-      el.addEventListener("drop", async e => {
-        e.preventDefault(); el.classList.remove("drag-over");
-        const ids = JSON.parse(e.dataTransfer.getData("text/plain") || "[]");
-        if (ids.length) await moveTasks(ids, name);
-      });
+      if (droppable) {
+        // Only API-mutation-accepted columns (DROP_COLS) become drop targets.
+        // `running` would submit a status the live API refuses (it requires
+        // the dispatcher/claim path), so it stays display-only and a drag
+        // over it is a clean no-op with no request at all. `review` IS
+        // API-accepted (request_review on the mounted checkout; operator
+        // ruling 2026-10-24) and remains a live drop target.
+        el.addEventListener("dragover", e => { e.preventDefault(); el.classList.add("drag-over"); });
+        el.addEventListener("dragleave", e => { if (!el.contains(e.relatedTarget)) el.classList.remove("drag-over"); });
+        el.addEventListener("drop", async e => {
+          e.preventDefault(); el.classList.remove("drag-over");
+          const ids = JSON.parse(e.dataTransfer.getData("text/plain") || "[]");
+          if (ids.length) await moveTasks(ids, name);
+        });
+      }
       rec = { el, count, body, cards: new Map(), lanes: new Map(), empty: h("div", { class: "col-empty" }, "Nothing here") };
       colEls.set(name, rec);
     }

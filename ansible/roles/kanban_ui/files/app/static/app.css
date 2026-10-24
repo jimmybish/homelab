@@ -144,6 +144,11 @@ input, select, textarea { font: inherit; color: var(--text); }
   border: 1px solid var(--line-soft); border-radius: var(--radius);
 }
 .column.drag-over { border-color: var(--accent); background: var(--accent-soft); }
+/* PR#13 review finding 4354363915: running is display-only (the live API
+   refuses bulk status mutations to it), so it never registers drop listeners
+   and can never gain .drag-over; this rule keeps the highlight unreachable
+   even if a stale listener shape ever returns. */
+.column.col-display-only.drag-over { border-color: var(--line-soft); background: linear-gradient(180deg, var(--bg-2), transparent 60%); }
 .col-head {
   display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px;
   font-weight: 700; font-size: .82rem; letter-spacing: .8px; text-transform: uppercase;
