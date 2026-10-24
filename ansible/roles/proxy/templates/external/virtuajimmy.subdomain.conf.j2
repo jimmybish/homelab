@@ -20,6 +20,15 @@ server {
         set $upstream_app hermes.{{ internal_domain }};
         set $upstream_port {{ hermes_virtuajimmy_webhook_port }};
         set $upstream_proto http;
+
+        # The Hermes gateway multiplexes profiles on one listener; the bare
+        # path resolves in the default home (404 Unknown route), so forward
+        # the virtuajimmy profile-prefixed URI. Must sit AFTER the set
+        # directives: rewrite...break halts rewrite-phase processing, so
+        # sets placed after it never run and proxy_pass sees empty
+        # variables ("invalid URL prefix in ://:").
+        rewrite ^/webhooks/github$ /p/virtuajimmy/webhooks/github break;
+
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
     }
 
