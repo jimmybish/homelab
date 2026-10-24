@@ -41,9 +41,15 @@
         - always
 
     - name: Silence Grafana alerts
+      # ROUND-8 FINDING 4354363883: tagged with the service tag so a
+      # `--tags kanban_ui` deployment still silences alerts around its
+      # (now complete) deployment path. Untagged, these includes were
+      # skipped by tag selection while app tasks mutated the live host.
       ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
       vars:
         grafana_silence_comment: "Deploying Kanban UI"
+      tags:
+        - kanban_ui
       when: >-
         not
         (hostvars['localhost']['grafana_master_silence_active']
@@ -52,7 +58,12 @@
     - kanban_ui
   post_tasks:
     - name: Remove Grafana alert silence
+      # ROUND-8 FINDING 4354363883: paired with the silence task above so
+      # a tagged run never strands a silence; firewall-only runs select
+      # neither (teardown alerts stay as before).
       ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+      tags:
+        - kanban_ui
       when: >-
         not
         (hostvars['localhost']['grafana_master_silence_active']

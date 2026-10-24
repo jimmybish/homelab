@@ -364,7 +364,13 @@
     - kanban_ui
 
 - name: Apply pending Kanban UI restart
+  # ROUND-8 FINDING 4354363883: the restart flush Copilot lists as part
+  # of the selected path was itself untagged, so a tagged run deferred
+  # notified restarts until after the verification tasks (flaky probes).
+  # Tagged so the flush lands in the tagged deployment path, in order.
   ansible.builtin.meta: flush_handlers
+  tags:
+    - kanban_ui
 
 # 4b. DOCKER-USER enforcement (PR#13 round-4 finding 4321368046). The UFW
 # rules above are INPUT-chain allows: they never see traffic to the PUBLISHED
@@ -676,7 +682,16 @@
 # the SWAG restart handler, which flush_handlers #2 lets settle before
 # any HTTPS probe).
 - name: Configure nginx proxy for Kanban UI
+  # ROUND-8 FINDING 4354363883: block-level service tag so a `--tags
+  # kanban_ui` run selects the COMPLETE deployment path (vhost template +
+  # private marker include included), not just the app side. Without it a
+  # first tagged deploy has no HTTPS endpoint and a tagged marker/secret
+  # rotation updates only the app-side copy, breaking subsequent logins.
+  # kanban_ui_firewall stays an independent selection: nothing here
+  # carries it, so a firewall-only run never touches proxy config.
   when: kanban_ui_configure_proxy | default(true)
+  tags:
+    - kanban_ui
   block:
     - name: Deploy Kanban UI nginx proxy config
       # ROUND-5: this tree is normalized 0664 (SWAG convention), so the
@@ -738,13 +753,20 @@
 # 6. DNS configuration (shared pfSense tasks) — also before verification:
 # kanban.<internal_domain> must resolve (via pfSense) for the HTTPS base.
 - name: Ensure deployment host DNS override exists
+  # ROUND-8 FINDING 4354363883: include-level service tag propagates to
+  # every task loaded from the dynamic include, so `--tags kanban_ui`
+  # converges the DNS override alongside the app and proxy path.
   ansible.builtin.include_tasks:
     file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
   vars:
     _dns_configure: "{{ kanban_ui_configure_dns | default(true) }}"
   when: kanban_ui_configure_dns | default(true)
+  tags:
+    - kanban_ui
 
 - name: Create Kanban UI DNS alias
+  # ROUND-8 FINDING 4354363883: same include-tag inheritance for the
+  # alias task file; keeps the HTTPS base resolvable on a tagged run.
   ansible.builtin.include_tasks:
     file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
   vars:
@@ -753,9 +775,16 @@
     _dns_alias_descr: Hermes Kanban UI
     _dns_is_proxied: "{{ kanban_ui_is_proxied | default(true) }}"
   when: kanban_ui_configure_dns | default(true)
+  tags:
+    - kanban_ui
 
 - name: Apply pending SWAG restart before HTTPS verification
+  # ROUND-8 FINDING 4354363883: tagged so the tagged path still flushes
+  # the proxy restart fired by the now-tagged proxy templates before the
+  # HTTPS probes run; untagged runs flush it as before.
   ansible.builtin.meta: flush_handlers
+  tags:
+    - kanban_ui
 
 # ROUND-5 FINDING 1 REGRESSION CHECK (relocated by ROUND-7 FINDING 1b):
 # this gate used to run BEFORE the flush_handlers above, so on any run that
