@@ -836,20 +836,32 @@ function boardsPage(closeCb) {
   const workdir = h("input", { type: "text", placeholder: "default project directory (absolute)" });
   const refresh = async () => {
     await loadBoards();
+    // PR#13 review finding 4369296886 (W3C ACT 307n5z, same pattern as
+    // .card-open): the selectable row is a NATIVE <button>, not a click
+    // listener on a div. Keyboard users could open the switcher via
+    // #boardBtn but could not focus or activate any board row. The
+    // archive control stays a separate sibling button so the two
+    // controls each own a tab stop and a focus ring (and no button is
+    // nested inside a button, which is invalid HTML).
+    //
+    // PR#13 review finding 4301554450 stays honoured: b.is_current is
+    // the GLOBAL Hermes board pointer, not this tab's view, so
+    // clickability and highlight both compare the slug with S.board.
     list.replaceChildren(...S.boards.map(b => h("div", {
       class: "board-list-item" + (b.slug === S.board ? " current" : ""),
-      // PR#13 review finding 4301554450: b.is_current is the GLOBAL Hermes
-      // board pointer (e.g. what the CLI last selected), not this tab's
-      // view. Keying clickability off it meant a board that was globally
-      // current but not shown here could not be clicked into. Compare the
-      // slug with S.board, exactly like the row highlight above.
-      onclick: async () => { if (b.slug !== S.board) { await switchBoard(b.slug); if (closeCb) closeCb(); } },
     },
-      h("span", { class: "board-icon" }, b.icon || "▦"),
-      h("span", { class: "bname" }, b.name || b.slug),
-      b.archived ? h("span", { class: "badge bad" }, "archived") : null,
-      h("span", { class: "bmeta" }, `${b.total ?? "?"} tasks`, h("br"), b.slug),
-      b.slug !== S.board && !b.archived ? h("button", { class: "btn btn-sm btn-quiet danger", onclick: async (e) => {
+      h("button", {
+        type: "button",
+        class: "board-select",
+        "aria-label": (b.slug === S.board ? "Current board: " : "Switch to board: ") + (b.name || b.slug),
+        onclick: async () => { if (b.slug !== S.board) { await switchBoard(b.slug); if (closeCb) closeCb(); } },
+      },
+        h("span", { class: "board-icon" }, b.icon || "▦"),
+        h("span", { class: "bname" }, b.name || b.slug),
+        b.archived ? h("span", { class: "badge bad" }, "archived") : null,
+        h("span", { class: "bmeta" }, `${b.total ?? "?"} tasks`, h("br"), b.slug),
+      ),
+      b.slug !== S.board && !b.archived ? h("button", { class: "btn btn-sm btn-quiet danger", "aria-label": "Archive board " + (b.name || b.slug), onclick: async (e) => {
         e.stopPropagation();
         if (!confirm(`Archive board ${b.slug}? Its DB stays on disk.`)) return;
         await act(api(`/boards/${b.slug}`, { method: "DELETE", board: false }), "Board archived");

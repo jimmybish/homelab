@@ -310,9 +310,20 @@ input, select, textarea { font: inherit; color: var(--text); }
 .modal textarea { min-height: 90px; resize: vertical; }
 .modal .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.board-list-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; cursor: pointer; background: var(--surface); }
+.board-list-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; background: var(--surface); }
 .board-list-item:hover { border-color: var(--accent); }
 .board-list-item.current { border-color: var(--accent-2); box-shadow: 0 0 0 2px var(--accent-soft); }
+/* PR#13 review finding 4369296886: the selectable row is a native button
+ * sibling of the archive button (same W3C ACT 307n5z pattern as .card-open).
+ * Strip UA chrome and inherit row typography; own tab stop and focus ring. */
+.board-select {
+  display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+  margin: 0; padding: 0; border: 0; background: none;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+}
+.board-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+.board-select:focus:not(:focus-visible) { outline: none; }
 .board-list-item .bname { font-weight: 700; }
 .board-list-item .bmeta { color: var(--text-3); font-size: .76rem; margin-left: auto; text-align: right; }
 .wrow { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: .86rem; }
