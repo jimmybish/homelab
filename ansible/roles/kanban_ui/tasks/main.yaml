@@ -114,6 +114,12 @@
   ansible.builtin.set_fact:
     kanban_ui_proxy_ip: >-
       {{ hostvars[groups['proxy_host'][0]]['ansible_default_ipv4']['address'] }}
+    # PR#13 review 4369296913: the bind address is also resolved here so a
+    # standalone --tags kanban_ui_firewall run defines it before the
+    # pre-lock task templates KANBAN_UI_HOST_IP and before the DOCKER-USER
+    # converge/check tasks consume it. The kanban_ui-only fact task keeps
+    # the same assignment; both tag paths stay self-sufficient.
+    kanban_ui_bind_ip: "{{ ansible_default_ipv4.address }}"
   # kanban_ui_firewall tag too: the standalone teardown run
   # (--tags kanban_ui_firewall -e kanban_ui_state=absent) renders the
   # enforcement script/unit references and must not depend on the UFW tasks.
