@@ -482,6 +482,18 @@ hermes_plexibot_api_server_key: !vault |
           3361346431643664303439623364633362323566643138396163623762353362
           6336
 
+# Per-profile Hermes API server key (Open WebUI /p/<profile> connection, t_d3d2e9f7)
+hermes_dexter_api_server_key: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          34646433376230363936373433646139356661303462343933336363323836356436386462343964
+          3662383564613539636437663435323239383234633936390a303234623661666532373966396665
+          31376533366635323536326135656330396536343936616664303438633433663163636136663965
+          3836353031306162360a313230313032633535373137376263663762343334306534633139383963
+          38623434613661386661333232356163663666613134303761333134613063323236326664636263
+          65376561643862633934626134633535653861646332326635643239376132393739666533383533
+          31396330663638376265353562383839326238346333646165343532393336343662333663363137
+          64366163383137383030
+
 # Sonarr API key
 sonarr_api_key: !vault |
           $ANSIBLE_VAULT;1.1;AES256
@@ -776,9 +788,11 @@ open_webui_hermes_profiles:
   - copilot
   - plexibot
   - hass
+  - dexter
 
 # All profiles provisioned with per-profile API_SERVER_KEY values
-# (t_70b642c9); gateway bounced 2026-10-19 15:07 to load them.
+# (t_70b642c9; dexter added in t_d3d2e9f7). The profile .env loader is
+# content-fingerprint cached, so new keys are picked up without a bounce.
 open_webui_hermes_disabled_profiles: []
 
 # Optional per-profile prefix overrides (defaults to the profile name).
@@ -791,6 +805,7 @@ open_webui_hermes_profile_keys:
   virtuajimmy: "{{ hermes_virtuajimmy_api_server_key }}"
   copilot: "{{ hermes_copilot_api_server_key }}"
   plexibot: "{{ hermes_plexibot_api_server_key }}"
+  dexter: "{{ hermes_dexter_api_server_key }}"
 
 # File Shares
 fs_backups: "/Backups"
