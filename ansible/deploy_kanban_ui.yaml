@@ -45,7 +45,20 @@
       # `--tags kanban_ui` deployment still silences alerts around its
       # (now complete) deployment path. Untagged, these includes were
       # skipped by tag selection while app tasks mutated the live host.
-      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      # ROUND-9 FINDING 4373043536: an include-level `tags:` only tags the
+      # include task itself; tasks loaded from the dynamic file stayed
+      # untagged, so `--tags kanban_ui` selected this include and then
+      # skipped every silence task inside it (tagged deploys ran with no
+      # maintenance silence). `apply.tags` propagates the service tag to
+      # every loaded task while the include-level `tags:` keeps the
+      # include itself selected. The shared silence files carry no tags
+      # of their own, so the union stays a single kanban_ui tag and
+      # firewall-only runs still select neither include.
+      ansible.builtin.include_tasks:
+        file: tasks/grafana_create_silence.yaml
+        apply:
+          tags:
+            - kanban_ui
       vars:
         grafana_silence_comment: "Deploying Kanban UI"
       tags:
@@ -72,7 +85,15 @@
           # a tagged run never strands a silence; firewall-only runs select
           # neither (teardown alerts stay as before). Role tasks carry their
           # own kanban_ui tags, so include_role keeps the tagged-run coverage.
-          ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+          # ROUND-9 FINDING 4373043536: apply.tags so the DELETE and status
+          # tasks loaded from the shared file inherit kanban_ui — the
+          # include-level tag alone left them untagged and skipped, which
+          # would strand the silence past the tagged run (until expiry).
+          ansible.builtin.include_tasks:
+            file: tasks/grafana_remove_silence.yaml
+            apply:
+              tags:
+                - kanban_ui
           tags:
             - kanban_ui
           when: >-
