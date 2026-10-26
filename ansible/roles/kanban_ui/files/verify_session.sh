@@ -43,7 +43,11 @@
 #      credential-free with no ?token= WS transport
 #   4. a bad login is rejected (401)
 #   5. the correct login mints an HttpOnly SameSite=strict Secure cookie
-#   6. the board renders with the session cookie
+#   6. the board renders with the session cookie AND the response is a
+#      JSON board envelope (200 + application/json + valid JSON with a
+#      non-empty `columns` array of {name,tasks} plus tenants/assignees/
+#      latest_event_id) - any-200 fallback pages fail (PR#13 review
+#      finding 4373043552)
 #   7. mutations without the session marker header are 403 (CSRF guard),
 #      and with it the request passes the gate (handler-level status)
 #   8. the WS upgrade is refused; the REAL token in the URL buys nothing
@@ -263,15 +267,76 @@ SESS=$(grep -io 'set-cookie: kanban_ui_session=[^;]*' <<<"$HDRS" | head -1 | cut
 # Cookie-bearing requests: the session value goes into a 0600 curl
 # --config file via printf (builtin); only the file path is argv.
 
-# 6. board renders with the cookie
+# 6. board renders with the cookie AND is the real board API envelope.
+# PR#13 review finding 4373043552: the old check threw the body away and
+# accepted any HTTP 200, so a SWAG/HTML fallback page or any
+# proxy-generated success page would have declared the board read
+# verified without the board API ever working. Capture status + content
+# type + body, then require: 200, a JSON content type, valid JSON, and
+# the pinned plugin's envelope - a `columns` array whose entries each
+# carry a string `name` and a `tasks` array, plus the sibling top-level
+# keys the pinned get_board returns (tenants, assignees,
+# latest_event_id). The body is written into the private 700 $WORK dir
+# and only its shape is ever reported; nothing token-shaped can appear
+# in the board presentation JSON, and the token-leak watcher stays live
+# across this step regardless.
 {
   printf 'header = "Cookie: kanban_ui_session=%s"\n' "$SESS"
   printf 'url = "%s/api/kanban/board?board=%s"\n' "$BASE" "$KANBAN_UI_VERIFY_BOARD"
 } > "$WORK/board.conf"
 chmod 600 "$WORK/board.conf"
-C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 \
-  --config "$WORK/board.conf" -H 'X-Kanban-UI: 1')
+# -D writes the response headers to a 0600 file (mode forced explicitly
+# so a pre-existing path can never widen); the body goes to its own file,
+# never stdout, per the script's stdout-carries-no-bodies rule.
+C=$(curl -s -o "$WORK/board.json" -D "$WORK/board.hdrs" -w '%{http_code}' \
+  --max-time 60 --config "$WORK/board.conf" -H 'X-Kanban-UI: 1')
 [ "$C" = "200" ] || fail "board read with session expected 200, got $C"
+# Content type must name JSON, with any parameters (charset) stripped.
+# curl -D writes CRLF-terminated headers, so \r must be stripped too
+# (caught by the harness: a real application/json response otherwise
+# compares as 'application/json\r' and false-fails).
+CTYPE=$(grep -i '^content-type:' "$WORK/board.hdrs" | tail -1 | cut -d: -f2- \
+  | cut -d';' -f1 | tr -d ' \t\r' | tr '[:upper:]' '[:lower:]')
+case "$CTYPE" in
+  application/json|text/json) : ;;
+  *) # The raw content type is RESPONSE data: never echo it into the
+     # fail message (a malicious endpoint could smuggle the session
+     # value or token material into a Content-Type header and have the
+     # verifier reprint it into the playbook log). Fixed text only.
+     fail "board read returned a non-JSON content type, expected application/json (fallback page?)" ;;
+esac
+# Envelope validation. The JSON is opened by path inside python (argv
+# only ever carries the static file path), and the script is
+# passed via a quoted heredoc, so no response content ever reaches a
+# process command line. python prints exactly one fixed verdict token
+# (OK/INVALID) captured into a variable; stderr is dropped so a python
+# traceback can never echo body content into the playbook log.
+BOARD_VERDICT=$(python3 - "$WORK/board.json" <<'BOARD_ENVELOPE_PY' 2>/dev/null
+import json, sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8", errors="strict") as fh:
+        data = json.load(fh)
+except Exception:
+    # One generic verdict line: the body itself must never be echoed.
+    print("INVALID")
+    sys.exit(0)
+
+ok = isinstance(data, dict)
+cols = data.get("columns") if ok else None
+ok = ok and isinstance(cols, list) and len(cols) > 0
+if ok:
+    for c in cols:
+        if (not isinstance(c, dict)) or not isinstance(c.get("name"), str) \
+                or not isinstance(c.get("tasks"), list):
+            ok = False
+            break
+ok = ok and all(k in data for k in ("tenants", "assignees", "latest_event_id"))
+print("OK" if ok else "INVALID")
+BOARD_ENVELOPE_PY
+)
+[ "$BOARD_VERDICT" = "OK" ] \
+  || fail "board read returned HTTP 200 but not the board/columns JSON envelope (fallback page?)"
 
 # 7. CSRF guard: cookie alone cannot mutate; cookie+header passes the gate
 {
