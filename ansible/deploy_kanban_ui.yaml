@@ -1,0 +1,135 @@
+---
+- name: Collect proxy host facts for the upstream firewall rule
+  # The published kanban-ui port is UFW-restricted to the SWAG proxy's
+  # address, resolved in the role via hostvars[groups['proxy_host'][0]].
+  # Those facts only exist if gathered; the master playbook's earlier proxy
+  # play covers that, but a STANDALONE run of this playbook must gather them
+  # too or the set_fact blows up undefined (same pattern as
+  # deploy_tronbyt_vllm_thinking.yaml's Grafana-facts play).
+  hosts: proxy_host
+  gather_facts: true
+  become: false
+
+- name: Install Kanban UI
+  hosts: hermes_host
+  become: true
+  pre_tasks:
+    - name: Ensure proxy host facts are available for the upstream firewall rule
+      # ROUND-5 FINDING 4323914956: the facts play above is `hosts:
+      # proxy_host`, so a HOST-LIMITED run (--limit hermes) or a TAGGED run
+      # (--tags kanban_ui_firewall) never executes it, and the role's
+      # `hostvars[groups['proxy_host'][0]]['ansible_default_ipv4']` resolution
+      # (tasks/main.yaml, UFW source pin + DOCKER-USER enforcement) explodes
+      # undefined (reproduced: "'HostVarsVars object' has no attribute
+      # 'ansible_default_ipv4'"). Gather them HERE instead via a delegated
+      # setup; delegate_facts attaches them to the DELEGATED host (proxy),
+      # which is exactly where the role reads them. become:false since fact
+      # gathering needs no privilege and the proxy play above runs
+      # unprivileged too. The when-guard keeps this free on the unbounded
+      # path: the facts play (or the master playbook's earlier proxy play)
+      # already populated hostvars['proxy'], so the delegated setup only
+      # costs ~1-2s on the limited/tagged paths Copilot flagged. Tagged
+      # `always` so it survives any --tags selection, including the
+      # firewall-only teardown run.
+      ansible.builtin.setup:
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      delegate_facts: true
+      become: false
+      when: >-
+        hostvars[groups['proxy_host'][0]]['ansible_default_ipv4'] is not defined
+      tags:
+        - always
+
+    - name: Silence Grafana alerts
+      # ROUND-8 FINDING 4354363883: tagged with the service tag so a
+      # `--tags kanban_ui` deployment still silences alerts around its
+      # (now complete) deployment path. Untagged, these includes were
+      # skipped by tag selection while app tasks mutated the live host.
+      # ROUND-9 FINDING 4373043536: an include-level `tags:` only tags the
+      # include task itself; tasks loaded from the dynamic file stayed
+      # untagged, so `--tags kanban_ui` selected this include and then
+      # skipped every silence task inside it (tagged deploys ran with no
+      # maintenance silence). `apply.tags` propagates the service tag to
+      # every loaded task while the include-level `tags:` keeps the
+      # include itself selected. The shared silence files carry no tags
+      # of their own, so the union stays a single kanban_ui tag and
+      # firewall-only runs still select neither include.
+      ansible.builtin.include_tasks:
+        file: tasks/grafana_create_silence.yaml
+        apply:
+          tags:
+            - kanban_ui
+      vars:
+        grafana_silence_comment: "Deploying Kanban UI"
+      tags:
+        - kanban_ui
+      when: >-
+        not
+        (hostvars['localhost']['grafana_master_silence_active']
+         | default(false))
+  tasks:
+    - name: Deploy Kanban UI with alert cleanup
+      # ROUND-9 FINDING 4373043519: post_tasks are skipped for a host once
+      # a role task fails, so a failed build, readiness wait, or session
+      # verification left the all-alert-names silence active until its
+      # 30-minute expiry, suppressing unrelated alerts. The role now runs
+      # inside a block and the teardown runs in always, mirroring
+      # deploy_hermes.yaml, so a failed rollout never strands the silence.
+      block:
+        - name: Apply Kanban WebUI role
+          # ROUND-9 FINDING 4373043568 (verification gap): the block above
+          # is untagged, so a `--tags kanban_ui` run skipped this
+          # include_role task itself and never loaded the role — the
+          # role-internal apply.tags fixes (DNS override/alias includes)
+          # were unreachable, and the tagged deploy ran only the silence
+          # pair (proved: 8 ok tasks vs 66 untagged). Tagging the include
+          # selects the role on tagged runs; its tasks carry their own
+          # kanban_ui tags and the DNS includes now apply.tags the
+          # service tag to their loaded tasks, so a tagged run converges
+          # DNS too.
+          # PR#13 REVIEW (comment 4374320177): the include itself was gated
+          # ONLY on kanban_ui, so the documented standalone runs never
+          # loaded the role at all and silently skipped their tagged work:
+          # `--tags kanban_ui_firewall` (including the
+          # -e kanban_ui_state=absent teardown) left the DOCKER-USER rules,
+          # convergence unit and docker.service drop-in installed, and
+          # `--tags homepage`/`homepage_config` could never refresh the
+          # Homepage entry. Fix per the reviewer's instruction: ALL FOUR
+          # path tags on the include itself, deliberately WITHOUT apply.tags
+          # (applying them to every role task would make each tagged run
+          # execute the whole role). The role's tasks carry their own
+          # kanban_ui / kanban_ui_firewall / homepage / homepage_config
+          # assignments, so each tag-selected run loads the role and then
+          # converges ONLY its intended path (a firewall-only run deploys no
+          # app/proxy/DNS/homepage tasks; a homepage-only run touches only
+          # the Homepage blockinfile + restart notify; the silence pair
+          # stays kanban_ui-only). kanban_ui-only and untagged runs are
+          # byte-for-byte unchanged.
+          ansible.builtin.include_role:
+            name: kanban_ui
+          tags:
+            - kanban_ui
+            - kanban_ui_firewall
+            - homepage
+            - homepage_config
+      always:
+        - name: Remove Grafana alert silence
+          # ROUND-8 FINDING 4354363883: paired with the silence task above so
+          # a tagged run never strands a silence; firewall-only runs select
+          # neither (teardown alerts stay as before). Role tasks carry their
+          # own kanban_ui tags, so include_role keeps the tagged-run coverage.
+          # ROUND-9 FINDING 4373043536: apply.tags so the DELETE and status
+          # tasks loaded from the shared file inherit kanban_ui — the
+          # include-level tag alone left them untagged and skipped, which
+          # would strand the silence past the tagged run (until expiry).
+          ansible.builtin.include_tasks:
+            file: tasks/grafana_remove_silence.yaml
+            apply:
+              tags:
+                - kanban_ui
+          tags:
+            - kanban_ui
+          when: >-
+            not
+            (hostvars['localhost']['grafana_master_silence_active']
+             | default(false))

@@ -1,0 +1,32 @@
+# Kanban UI application image.
+# Built from the vendored source in {{ kanban_ui_folder }}/app (compose build
+# context). The app itself is tiny; its heavy lifting is the REAL hermes-agent
+# plugin router, bind-mounted read-only at runtime. Deps are exact-pinned to
+# the versions resolved in the host hermes-agent venv (Python 3.11) so the UI
+# and the CLI share identical serialization behavior.
+FROM {{ kanban_ui_base_image }}
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=0
+
+# git is required: kanban_db resolves task worktrees/branches via `git -C`
+# subprocesses on board-render paths. tmux is deliberately NOT installed -
+# the container has no host tmux server socket, so those code paths would
+# only manage host sessions if it ran on the host.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+{% for pkg in kanban_ui_pip_packages %}
+    "{{ pkg }}" \
+{% endfor %}
+    && pip check
+
+WORKDIR /app
+COPY server.py healthcheck.py /app/
+COPY static/ /app/static/
+
+EXPOSE {{ kanban_ui_port }}
+
+CMD ["python", "server.py", "--lan", "--port", "{{ kanban_ui_port }}"]

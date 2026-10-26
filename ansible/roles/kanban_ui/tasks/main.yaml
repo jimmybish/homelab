@@ -1,0 +1,1105 @@
+---
+# 1. Docker prerequisites
+- name: Install Kanban UI prerequisites
+  ansible.builtin.package:
+    name:
+      - ca-certificates
+      - docker-compose
+    state: present
+  tags:
+    - kanban_ui
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+  tags:
+    - kanban_ui
+
+# 2. Integration facts + assertions (board state anchor, no full-home mount)
+- name: Resolve numeric uid/gid of the Hermes-home owner
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ kanban_ui_run_user }}"
+  no_log: true
+  tags:
+    - kanban_ui
+
+- name: Record numeric ids and the primary bind address
+  ansible.builtin.set_fact:
+    kanban_ui_run_uid: "{{ getent_passwd[kanban_ui_run_user][1] }}"
+    kanban_ui_run_gid: "{{ getent_passwd[kanban_ui_run_user][2] }}"
+    kanban_ui_bind_ip: "{{ ansible_default_ipv4.address }}"
+    # Round-2 finding 2: the ONLY verification URL is the HTTPS SWAG
+    # endpoint. The bootstrap token and the session it mints never
+    # traverse plaintext HTTP; verify_session.sh additionally refuses
+    # any non-https base. The direct host port (http, below) is used
+    # solely for the credential-free anonymous gate probe.
+    kanban_ui_url_base: "https://kanban.{{ internal_domain }}"
+  no_log: true
+  tags:
+    - kanban_ui
+
+- name: Assert Hermes integration paths exist for the bind mounts
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ kanban_ui_hermes_repo }}/plugins/kanban/dashboard/plugin_api.py"
+    - "{{ kanban_ui_hermes_home }}/kanban/boards/{{ kanban_ui_default_board }}"
+    - "{{ kanban_ui_hermes_home }}/kanban"
+  register: kanban_ui_host_paths
+  changed_when: false
+  no_log: true
+  tags:
+    - kanban_ui
+
+- name: Fail when Hermes integration paths are missing
+  ansible.builtin.assert:
+    that:
+      - kanban_ui_host_paths.results
+        | map(attribute='stat.exists') | select | length == 3
+    fail_msg: >-
+      Kanban UI must mount the real hermes-agent checkout and the Hermes
+      kanban state directory on the deployment host. Neither may be
+      forked or relocated.
+    success_msg: "Hermes checkout and kanban state directories are present."
+  tags:
+    - kanban_ui
+
+- name: Read revision of the mounted Hermes checkout
+  # PR#13 review finding (comment 4244239739, stale-import class): server.py
+  # imports plugin_api.py ONCE at startup, so a Hermes upgrade landing in the
+  # read-only bind mount leaves a running WebUI serving the old router even
+  # though state: present sees no config change. The revision is embedded as
+  # a Compose label (see docker_compose.yaml.j2), which turns any checkout
+  # revision change into a compose-file change -> template task re-fires ->
+  # Restart Kanban UI handler re-imports the mounted modules. HEAD is the
+  # authoritative identity: the hermes role pins and asserts an exact commit,
+  # so uncommitted drift inside the checkout is explicitly out of scope.
+  # Run as the checkout owner: the play's become:root would trip Git's
+  # dubious-ownership protection (same pattern as the hermes/firecrawl
+  # rev-parse tasks and the directory-setup pitfall note).
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ kanban_ui_hermes_repo }}"
+      - rev-parse
+      - HEAD
+  become: true
+  become_user: "{{ kanban_ui_run_user }}"
+  environment:
+    HOME: "/home/{{ owning_user }}"
+  register: kanban_ui_checkout_revision
+  changed_when: false
+  # Read-only inspection: run even under --check so a dry run renders the
+  # compose file with the REAL revision instead of the 'unknown' fallback.
+  check_mode: false
+  tags:
+    - kanban_ui
+
+# 3. Firewall (UFW) — the ONLY legitimate consumer of the published port is
+# the SWAG proxy (verified: with UFW active and no rule, a LAN client gets
+# Connection refused on 9470 while proxy-sourced traffic passes). The rule
+# is therefore source-restricted to the proxy host's address, and the old
+# Anywhere rule is deleted declaratively. NOTE: the UFW module cannot
+# distinguish rule comments, so the delete match is comment-free and pinned
+# to from_ip=0.0.0.0/0 — the exact tuple the module generated for the
+# original Anywhere rule (proved against /etc/ufw/user*.rules tuples).
+# If that tuple ever matches a rule we did not add, the delete stays
+# idempotent and the restricted allow below keeps the proxy path open; the
+# verifier's live HTTPS+WS checks catch any reachability regression.
+- name: Resolve the SWAG proxy source address for the port rule
+  ansible.builtin.set_fact:
+    kanban_ui_proxy_ip: >-
+      {{ hostvars[groups['proxy_host'][0]]['ansible_default_ipv4']['address'] }}
+    # PR#13 review 4369296913: the bind address is also resolved here so a
+    # standalone --tags kanban_ui_firewall run defines it before the
+    # pre-lock task templates KANBAN_UI_HOST_IP and before the DOCKER-USER
+    # converge/check tasks consume it. The kanban_ui-only fact task keeps
+    # the same assignment; both tag paths stay self-sufficient.
+    kanban_ui_bind_ip: "{{ ansible_default_ipv4.address }}"
+  # kanban_ui_firewall tag too: the standalone teardown run
+  # (--tags kanban_ui_firewall -e kanban_ui_state=absent) renders the
+  # enforcement script/unit references and must not depend on the UFW tasks.
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Delete the legacy Anywhere UFW rule for the Kanban UI port
+  # PR#13 REVIEW (comment 4374320177): kanban_ui_firewall added so the
+  # documented standalone teardown (--tags kanban_ui_firewall
+  # -e kanban_ui_state=absent) actually selects the UFW rule deletions;
+  # previously these tasks carried only kanban_ui and the firewall-only
+  # path silently left them behind. kanban_ui-only and untagged runs are
+  # unchanged (tag union, never subtractive).
+  community.general.ufw:
+    rule: allow
+    from_ip: 0.0.0.0/0
+    port: "{{ kanban_ui_port }}"
+    proto: tcp
+    delete: true
+  when:
+    - ansible_os_family == "Debian"
+    - not ansible_check_mode
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Delete the legacy Anywhere IPv6 UFW rule for the Kanban UI port
+  # The original module run created an IPv6 twin (user6.rules tuple with
+  # ::/0 source). Nothing listens on v6 (the compose DNAT pins the IPv4
+  # address), so this is hygiene: no stale Anywhere rule may linger.
+  # kanban_ui_firewall added per PR#13 comment 4374320177 (teardown
+  # reachability, same rationale as the IPv4 delete above).
+  community.general.ufw:
+    rule: allow
+    from_ip: "::/0"
+    port: "{{ kanban_ui_port }}"
+    proto: tcp
+    delete: true
+  when:
+    - ansible_os_family == "Debian"
+    - not ansible_check_mode
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Allow the Kanban UI port through UFW from the proxy only
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ kanban_ui_proxy_ip }}"
+    port: "{{ kanban_ui_port }}"
+    proto: tcp
+    comment: "Hermes Kanban UI (proxy upstream, session-gated)"
+  when: ansible_os_family == "Debian"
+  tags:
+    - kanban_ui
+
+# 4. Deploy files + build + run
+- name: Create Kanban UI deployment directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0755'
+  loop:
+    - "{{ kanban_ui_folder }}"
+    - "{{ kanban_ui_folder }}/app"
+  tags:
+    - kanban_ui
+
+- name: Deploy vendored Kanban UI application source
+  ansible.builtin.copy:
+    src: app/
+    dest: "{{ kanban_ui_folder }}/app/"
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0644'
+    directory_mode: '0755'
+  register: kanban_ui_app_source
+  tags:
+    - kanban_ui
+
+- name: Deploy Kanban UI Dockerfile
+  ansible.builtin.template:
+    src: Dockerfile.j2
+    dest: "{{ kanban_ui_folder }}/app/Dockerfile"
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0644'
+  register: kanban_ui_dockerfile
+  tags:
+    - kanban_ui
+
+- name: Deploy Kanban UI bootstrap token file
+  ansible.builtin.copy:
+    content: "{{ kanban_ui_access_token }}{{ '\n' }}"
+    dest: "{{ kanban_ui_token_file }}"
+    owner: "{{ kanban_ui_run_uid }}"
+    group: "{{ kanban_ui_run_gid }}"
+    mode: '0400'
+    # force: false keeps a token that was manually rotated inside the
+    # file; redeploys must never clobber it.
+    force: false
+  no_log: true
+  diff: false
+  register: kanban_ui_token_deploy
+  tags:
+    - kanban_ui
+
+- name: Deploy Kanban UI proxy trust marker file
+  # Round-4 finding 1: the app-side half of the shared marker. Unlike the
+  # bootstrap token this is force-deployed (no force:false): both halves
+  # (this file and the SWAG vhost stamp) render from the SAME vault
+  # variable, so every run keeps them in lockstep and a rotation is just
+  # a vault edit + rerun. A stale file here would reject legitimate
+  # proxied logins, which the verifier catches loudly.
+  ansible.builtin.copy:
+    content: "{{ kanban_ui_proxy_secret }}{{ '\n' }}"
+    dest: "{{ kanban_ui_proxy_marker_file }}"
+    owner: "{{ kanban_ui_run_uid }}"
+    group: "{{ kanban_ui_run_gid }}"
+    mode: '0400'
+  no_log: true
+  diff: false
+  register: kanban_ui_marker_deploy
+  notify: Restart Kanban UI
+  tags:
+    - kanban_ui
+
+- name: Assert the deployed token file is present and private
+  ansible.builtin.stat:
+    path: "{{ kanban_ui_token_file }}"
+  register: kanban_ui_token_stat
+  changed_when: false
+  failed_when:
+    - not kanban_ui_token_stat.stat.exists
+    - not ansible_check_mode
+  no_log: true
+  tags:
+    - kanban_ui
+
+- name: Deploy Kanban UI Docker Compose definition
+  ansible.builtin.template:
+    src: docker_compose.yaml.j2
+    dest: "{{ kanban_ui_compose_file }}"
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0600'
+  register: kanban_ui_compose_template
+  no_log: true
+  diff: false
+  notify: Restart Kanban UI
+  tags:
+    - kanban_ui
+
+# The proof-of-concept binds :9470 manually; the container cannot start
+# while it lives. The helper script receives every variable strictly via
+# environment (no Jinja interpolation into shell syntax) and pins both
+# the port (exact /proc cmdline match) and the POC cwd before killing.
+# Round-2 finding 3: the when-guard (same pattern as the build and
+# lifecycle tasks) keeps this OUT of check mode entirely -- a dry run
+# must never be able to kill a live process. check_mode: false only means
+# "run normally, do not simulate" once the when-guard has allowed it.
+- name: Stop the manually-launched Kanban UI proof-of-concept process
+  ansible.builtin.script:
+    cmd: stop_poc.sh
+  environment:
+    KANBAN_UI_PORT: "{{ kanban_ui_port }}"
+    KANBAN_UI_POC_DIR: "{{ kanban_ui_poc_dir }}"
+  register: kanban_ui_poc_stop
+  changed_when: "'killed' in kanban_ui_poc_stop.stdout"
+  failed_when: kanban_ui_poc_stop.rc != 0
+  check_mode: false
+  when: not ansible_check_mode
+  tags:
+    - kanban_ui
+
+# PRE-PUBLISH LOCKDOWN FIRST (PR#13 round-8 finding 4354363865, High): the
+# compose tasks below publish the port; Docker's nat DNAT + filter DOCKER
+# ACCEPT then admit ANY LAN source on the FORWARD path (the UFW INPUT rule
+# above never sees that traffic - r4 live proof), and the readiness waits
+# (build wait:true, up wait_timeout 600) sit ahead of every DOCKER-USER
+# task. On a first deploy that left the fresh listener reachable from
+# non-proxy LAN hosts for the whole window, and a failed readiness wait
+# aborted the play BEFORE enforcement ever installed. Reproduced live for
+# this fix (jump+chain removed on the target host, a control-node curl ->
+# HTTP 200/401 while the UFW INPUT rule stayed loaded). The lockdown DROPs
+# the published tuple at DOCKER-USER position 1, matched on the ORIGINAL
+# host destination/port via conntrack (post-DNAT packets only expose the
+# container address), so it needs no container IP and installs before the
+# container exists. It survives every subsequent failure - including the
+# readiness-wait failure path - and is swept only by a successful converge
+# (after the managed jump+chain verify live) or teardown.
+# ansible.builtin.script (pushed from
+# files/, same mechanism as teardown per r5 finding 4323915133): on a
+# first deploy the installed copy at kanban_ui_fw_script_path does not
+# exist yet, and the lockdown must not depend on it.
+- name: Install the pre-publish DOCKER-USER lockdown
+  ansible.builtin.script:
+    cmd: docker_user_enforce.sh --pre-lock
+  environment:
+    KANBAN_UI_CONTAINER: kanban-ui
+    KANBAN_UI_PORT: "{{ kanban_ui_port }}"
+    KANBAN_UI_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
+    KANBAN_UI_HOST_IP: "{{ kanban_ui_bind_ip }}"
+  register: kanban_ui_fw_prelock
+  changed_when: "'lockdown installed' in kanban_ui_fw_prelock.stdout"
+  failed_when: kanban_ui_fw_prelock.rc != 0
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Inspect local Kanban UI image
+  community.docker.docker_image_info:
+    name:
+      - "local/kanban-ui:{{ kanban_ui_version }}"
+  register: kanban_ui_image_info
+  tags:
+    - kanban_ui
+
+- name: Build Kanban UI image when source or Dockerfile changed
+  community.docker.docker_compose_v2:
+    project_src: "{{ kanban_ui_folder }}"
+    build: always
+    state: present
+    remove_orphans: true
+    wait: true
+    wait_timeout: "{{ kanban_ui_build_timeout }}"
+  register: kanban_ui_build
+  # In check mode the deploy dir does not exist yet, so compose cannot
+  # even parse the project - skip the actual build.
+  check_mode: false
+  when: >-
+    not ansible_check_mode
+    and (
+      kanban_ui_app_source is changed
+      or kanban_ui_dockerfile is changed
+      or kanban_ui_compose_template is changed
+      or kanban_ui_image_info.images | default([]) | length == 0
+    )
+  tags:
+    - kanban_ui
+
+- name: Ensure Kanban UI stack is running
+  community.docker.docker_compose_v2:
+    project_src: "{{ kanban_ui_folder }}"
+    build: never
+    state: present
+    remove_orphans: true
+    wait: true
+    wait_timeout: 600
+  when: not ansible_check_mode
+  tags:
+    - kanban_ui
+
+- name: Apply pending Kanban UI restart
+  # ROUND-8 FINDING 4354363883: the restart flush Copilot lists as part
+  # of the selected path was itself untagged, so a tagged run deferred
+  # notified restarts until after the verification tasks (flaky probes).
+  # Tagged so the flush lands in the tagged deployment path, in order.
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - kanban_ui
+
+# 4b. DOCKER-USER enforcement (PR#13 round-4 finding 4321368046). The UFW
+# rules above are INPUT-chain allows: they never see traffic to the PUBLISHED
+# port, which takes Docker's bridge/DNAT path (FORWARD -> nat DOCKER DNAT ->
+# filter DOCKER ACCEPT) and reached the app from any LAN source pre-fix (live
+# proof: mgmt got HTTP 401/200 on the published port with only the proxy-
+# restricted UFW rule loaded - app auth, not network isolation). Docker's
+# documented hook is a jump into a dedicated service-scoped chain at DOCKER-
+# USER (https://docs.docker.com/engine/network/packet-filtering-firewalls/).
+# Blast radius is exactly one service tuple: the jump matches the ORIGINAL
+# published host address + destination port via conntrack (--ctorigdst/
+# --ctorigdstport; PR#13 round-18 finding 4373043501 replaced the old
+# container-IP matcher so the restriction survives a Compose recreate that
+# reassigns the container address, with no unprotected window between
+# --pre-lock and the post-readiness converge); transit traffic
+# for any other container, network, or host service never matches and the
+# jump is invisible to it. The chain holds exactly three rules: ACCEPT in
+# 'lo' (hairpin/userland-proxy path, kept so a future userland-proxy=false
+# flip cannot lock the host out of its own published port), ACCEPT the SWAG
+# proxy source, then a terminal DROP. Verified live with an atomic
+# counter-only DOCKER-USER probe on this host: host-originated curls to the
+# published port traverse NO FORWARD hook (docker-proxy userland, 0 packets
+# counted) while LAN curls all land in the chain - so the role's own
+# host-side probes and the container healthcheck (in-container loopback) are
+# unaffected by the DROP, and non-proxy LAN sources get network-level
+# silence. INPUT rules stay: they still gate the container's direct IP on the
+# host's own INPUT chain (not dead weight) and backstop any future
+# non-published bind. IPv6 needs no rule: the compose pins the IPv4 bind
+# only and the container has no v6 address. Convergence lives in one
+# idempotent script (files/docker_user_enforce.sh) run from this play AND
+# from a systemd oneshot ordered After=docker.service PartOf=docker.service,
+# pulled into every docker.service start by the docker.service.d drop-in
+# installed below (PR#13 r8: Requires/PartOf alone are forward-only for
+# deactivation; the daemon side must Wants= us for activation), Docker's
+# guidance: whenever docker.service restarts (upgrade, maintenance) the unit
+# re-fires and re-converges DOCKER-USER (drift recovery proved live: jump
+# manually removed, oneshot re-run restored the exact managed ruleset).
+# Reconvergence is fail-closed (PR#13 round-5 finding 4323915092): the
+# script inserts a temporary service-scoped DROP (same container tuple,
+# comment kanban-ui-guard) at DOCKER-USER position 1 BEFORE deleting the
+# stale jump, so no step of the delete/flush/append/insert sequence can
+# leave the published tuple falling through to Docker's ACCEPT rules -
+# a mid-script failure exits non-zero with the guard still DROPping, and
+# the guard is removed only after the full managed set verifies live.
+# Round-6 finding 4331497704: a retry KEEPS any guard surviving from the
+# failed run while inserting its replacement (stacked DROPs are harmless;
+# the verified-success cleanup removes all copies by comment match), so no
+# retry path can ever open a neither-guard-nor-jump window.
+# Teardown
+# (ansible-playbook ... -e kanban_ui_state=absent --tags kanban_ui_firewall)
+# removes jump+guard+chain+unit+script declaratively so no orphaned ACCEPT
+# can fail open (and no orphaned guard can fail stuck) if the port is ever
+# reused.
+- name: Deploy the DOCKER-USER kanban-ui enforcement script
+  ansible.builtin.copy:
+    src: docker_user_enforce.sh
+    dest: "{{ kanban_ui_fw_script_path }}"
+    owner: root
+    group: root
+    mode: '0750'
+  register: kanban_ui_fw_script
+  when: kanban_ui_state | default('present') == 'present'
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Install the boot-time DOCKER-USER convergence unit
+  # Type=oneshot + RemainAfterExit: runs once after docker.service at boot.
+  # PR#13 round-8 finding 4354363965: activation of docker.service also
+  # pulls this unit in via the reverse-dependency drop-in installed below
+  # (Requires=/PartOf= alone only propagate stop DOWN to us, so a plain
+  # stop/start of the daemon left the oneshot inactive; reproduced live).
+  # The verify task below additionally heals drift on every play.
+  ansible.builtin.template:
+    src: kanban_ui_docker_user.service.j2
+    dest: /etc/systemd/system/kanban-ui-docker-user.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: kanban_ui_fw_unit
+  when: kanban_ui_state | default('present') == 'present'
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Ensure the docker.service.d drop-in directory exists
+  # The template module refuses to create parent directories, and a stock
+  # docker install has no docker.service.d (verified on the live host: this
+  # is the first drop-in this role ever installs).
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: kanban_ui_state | default('present') == 'present'
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Install the docker.service reverse-dependency drop-in
+  # PR#13 round-8 finding 4354363965: systemd dependency edges are
+  # forward-only for activation — Requires=/PartOf= on the oneshot stop it
+  # when Docker stops but never bring it back when Docker STARTS (no
+  # reverse activation; BindsTo= behaves the same). The pull-in must be
+  # declared on the Docker side: Wants=kanban-ui-docker-user.service makes
+  # every docker.service start/restart queue the oneshot, and the oneshot's
+  # own After=docker.service orders it behind the daemon, i.e. it re-fires
+  # exactly when DOCKER-USER has just been rebuilt. Proven on synthetic
+  # units on the live host (systemd 249): without the drop-in the oneshot
+  # never re-fires across a daemon stop/start; with it, every time.
+  # template: content-diffs the installed file, so EXISTING installations
+  # (installed before this drop-in existed) gain the dependency on the next
+  # role run with no manual systemctl; the reload task below applies it.
+  ansible.builtin.template:
+    src: docker_service_kanban_ui_pullin.conf.j2
+    dest: /etc/systemd/system/docker.service.d/60-kanban-ui-docker-user.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: kanban_ui_fw_dropin
+  when: kanban_ui_state | default('present') == 'present'
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Reload systemd after (re)installing the convergence unit or drop-in
+  # Deterministic daemon-reload whenever either unit-side artifact changed
+  # (upgrades of existing installs land here). Runs before the enable task
+  # so its state assertion sees the new dependency graph.
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
+    - kanban_ui_fw_unit is changed or kanban_ui_fw_dropin is changed
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Verify Docker activation pulls the convergence unit in
+  # Behavior check for the drop-in (runs every play): the LOADED systemd
+  # graph must show docker.service Wants the oneshot. A stale install
+  # (drop-in file present but never reloaded) or a deleted drop-in fails
+  # here instead of silently leaving the daemon without the pull-in.
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - docker.service
+      - -p
+      - Wants
+      - --value
+  register: kanban_ui_fw_wants
+  changed_when: false
+  failed_when: "'kanban-ui-docker-user.service' not in kanban_ui_fw_wants.stdout"
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Enable the DOCKER-USER kanban-ui convergence unit
+  ansible.builtin.systemd:
+    name: kanban-ui-docker-user.service
+    enabled: true
+    daemon_reload: true
+    state: started
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Converge the DOCKER-USER kanban-ui ruleset now
+  # Immediate convergence in this play (the unit covers boot). The script
+  # exits 0 without touching the kernel when the exact managed state is
+  # already live, so re-runs report changed=false (idempotence evidence).
+  # Values here are credential-free (container name, port, proxy IP) and
+  # arrive via environment, never interpolated into shell syntax.
+  ansible.builtin.command:
+    argv:
+      - "{{ kanban_ui_fw_script_path }}"
+  environment:
+    KANBAN_UI_CONTAINER: kanban-ui
+    KANBAN_UI_PORT: "{{ kanban_ui_port }}"
+    KANBAN_UI_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
+    KANBAN_UI_HOST_IP: "{{ kanban_ui_bind_ip }}"
+  register: kanban_ui_fw_converge
+  changed_when: "'converged' in kanban_ui_fw_converge.stdout and 'already converged' not in kanban_ui_fw_converge.stdout"
+  failed_when: kanban_ui_fw_converge.rc != 0
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Verify the DOCKER-USER kanban-ui ruleset is live
+  # Behavior check per the post-deployment standard: --check exits 0 only
+  # when the managed ruleset matches the live kernel state IN THE EXPECTED
+  # POSITION/ORDER for the published host tuple (jump FIRST in DOCKER-USER
+  # once transient guard copies are excluded, private chain exactly the
+  # three ordered rules - PR#13 round-8 finding 4354363842: existence-only
+  # `iptables -C` checks passed even with a RETURN/ACCEPT ahead of the
+  # jump). Runs every play, so drift from a docker daemon restart is
+  # detected here and healed by the converge task
+  # on the next pass; within this play, failure is fatal (fail-closed: a
+  # deployment must not report success without enforcement).
+  ansible.builtin.command:
+    argv:
+      - "{{ kanban_ui_fw_script_path }}"
+      - "--check"
+  environment:
+    KANBAN_UI_CONTAINER: kanban-ui
+    KANBAN_UI_PORT: "{{ kanban_ui_port }}"
+    KANBAN_UI_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
+    KANBAN_UI_HOST_IP: "{{ kanban_ui_bind_ip }}"
+  register: kanban_ui_fw_verify
+  changed_when: false
+  failed_when: kanban_ui_fw_verify.rc != 0
+  when:
+    - kanban_ui_state | default('present') == 'present'
+    - not ansible_check_mode
+  tags:
+    - kanban_ui
+    - kanban_ui_firewall
+
+- name: Tear down the DOCKER-USER kanban-ui enforcement
+  # Declarative uninstall path (kanban_ui_state: absent): remove every jump
+  # (including stale container-IP variants) then flush + unregister the
+  # chain. The script resolves no container state here, so teardown works
+  # even after the container is already gone.
+  # ROUND-5 FINDING 4323915133: this used ansible.builtin.command against
+  # kanban_ui_fw_script_path, which the FIRST teardown deletes while the
+  # deploy task is skipped under state=absent -- a second absent run died
+  # with rc=2 (No such file or directory) and a never-installed host died
+  # with rc=127 (reproduced on hermes and proxy). The helper now runs via
+  # ansible.builtin.script, pushed from the role's files/ at run time
+  # (same mechanism as the systemd unit does NOT get: teardown never
+  # depends on a previously-installed copy). Idempotent on a clean host:
+  # the helper reports "no ... rules present" and exits 0 when the chain
+  # and jumps are already gone (missing DOCKER-USER entirely included).
+  ansible.builtin.script:
+    cmd: docker_user_enforce.sh --teardown
+  environment:
+    KANBAN_UI_CONTAINER: kanban-ui
+    KANBAN_UI_PORT: "{{ kanban_ui_port }}"
+    KANBAN_UI_PROXY_IP: "{{ kanban_ui_proxy_ip }}"
+  register: kanban_ui_fw_teardown
+  changed_when: "'torn down' in kanban_ui_fw_teardown.stdout"
+  failed_when: kanban_ui_fw_teardown.rc != 0
+  when:
+    - kanban_ui_state | default('present') == 'absent'
+    - not ansible_check_mode
+  tags:
+    - kanban_ui_firewall
+
+- name: Disable and stop the DOCKER-USER kanban-ui convergence unit
+  # Runs BEFORE the unit file is deleted (systemctl disable needs the file).
+  # Type=oneshot means "stopped" simply marks the last run finished; enabled:
+  # false is what keeps it from re-firing at boot. Tolerates the never-
+  # installed case (teardown on a host that never got the role) by the
+  # registered-message allowance below; any other failure is fatal.
+  ansible.builtin.systemd:
+    name: kanban-ui-docker-user.service
+    state: stopped
+    enabled: false
+    daemon_reload: true
+  register: kanban_ui_fw_unit_teardown
+  failed_when:
+    - kanban_ui_fw_unit_teardown is failed
+    - "'Could not find the requested service' not in kanban_ui_fw_unit_teardown.msg | default('')"
+  when: kanban_ui_state | default('present') == 'absent'
+  tags:
+    - kanban_ui_firewall
+
+- name: Remove the DOCKER-USER kanban-ui enforcement unit and script
+  # Completes the absent path: unit file (disabled + daemon-reloaded above,
+  # so it can never re-fire), the Docker-side pull-in drop-in (PR#13
+  # round-8 finding 4354363965 — without this the daemon would keep Wants=
+  # on a unit that no longer exists), and the script itself. No orphaned
+  # rules, unit, drop-in, or helper survives teardown.
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/kanban-ui-docker-user.service
+    - /etc/systemd/system/docker.service.d/60-kanban-ui-docker-user.conf
+    - "{{ kanban_ui_fw_script_path }}"
+  when: kanban_ui_state | default('present') == 'absent'
+  tags:
+    - kanban_ui_firewall
+
+- name: Reload systemd after unit removal
+  # Forget the deleted unit so a later boot cannot resurrect it from the
+  # systemd in-memory cache. name is a required module parameter; with only
+  # daemon_reload set the task touches no unit state.
+  ansible.builtin.systemd:
+    name: kanban-ui-docker-user.service
+    daemon_reload: true
+  when: kanban_ui_state | default('present') == 'absent'
+  tags:
+    - kanban_ui_firewall
+
+# 5. Proxy configuration (SWAG Internal) — DEPLOYED BEFORE VERIFICATION.
+# The session verification below speaks only HTTPS through this vhost, so
+# the proxy config and its DNS alias must already be live when the
+# lifecycle checks run (first deploy: the template deploy below notifies
+# the SWAG restart handler, which flush_handlers #2 lets settle before
+# any HTTPS probe).
+- name: Configure nginx proxy for Kanban UI
+  # ROUND-8 FINDING 4354363883: block-level service tag so a `--tags
+  # kanban_ui` run selects the COMPLETE deployment path (vhost template +
+  # private marker include included), not just the app side. Without it a
+  # first tagged deploy has no HTTPS endpoint and a tagged marker/secret
+  # rotation updates only the app-side copy, breaking subsequent logins.
+  # kanban_ui_firewall stays an independent selection: nothing here
+  # carries it, so a firewall-only run never touches proxy config.
+  when: kanban_ui_configure_proxy | default(true)
+  tags:
+    - kanban_ui
+  block:
+    - name: Deploy Kanban UI nginx proxy config
+      # ROUND-5: this tree is normalized 0664 (SWAG convention), so the
+      # vhost template is deliberately CREDENTIAL-FREE; the marker lives
+      # in the 0600 include deployed by the next task. no_log/diff:false
+      # are retained only to keep resolver/bind facts out of output.
+      ansible.builtin.template:
+        src: kanban_ui.subdomain.conf.j2
+        dest: >-
+          {{ proxy_folder
+          }}/internal/nginx/proxy-confs/kanban_ui.subdomain.conf
+        mode: '0664'
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      notify: Restart Swag Internal
+      no_log: true
+      diff: false
+
+    - name: Deploy Kanban UI private proxy marker include
+      # ROUND-5 FINDING 1 (proxy-side half): the bearer value lives ONLY in
+      # this dedicated include, installed 0600 (docker_user-owned, matching
+      # the container's abc uid so SWAG's lsiown init never churns it; the
+      # nginx MASTER runs as root and is the only reader at config parse).
+      # ROUND-7 FINDING 1 PLACEMENT: the include sits at the TOP of the
+      # mounted /config volume, NOT under /config/nginx. The linuxserver
+      # swag init-permissions s6 service runs `chmod -R g+w /config/nginx`
+      # on EVERY container start, so a 0600 file under that subtree drifts
+      # to 0620 at every boot; the template task then re-reports changed,
+      # re-fires the SWAG restart, and re-triggers the drift forever. The
+      # chmod sweep covers only /config/nginx and the lsiown chowns cover
+      # only keys/log/nginx/php/www (verified live inside swag_internal),
+      # so /config/kanban_ui_marker.conf never drifts; the absolute-path
+      # include works identically from the vhost. Force-deployed: both
+      # halves (this include and the app's 0400 file) render from the SAME
+      # vault variable, so a rotation is a vault edit + rerun.
+      ansible.builtin.template:
+        src: kanban_ui_marker.conf.j2
+        dest: "{{ proxy_folder }}/internal/kanban_ui_marker.conf"
+        owner: "{{ docker_user }}"
+        group: "{{ docker_user }}"
+        mode: '0600'
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      notify: Restart Swag Internal
+      no_log: true
+      diff: false
+
+    - name: Remove the drifted marker from the chmod-swept nginx tree
+      # ROUND-7 FINDING 1 leftover: the pre-fix deploys installed this
+      # include under /config/nginx, where init-permissions already
+      # widened it to 0620. Nothing includes it any more; delete it
+      # declaratively so a stale group-writable secret copy cannot
+      # linger. Absent state is idempotent (never reports changed).
+      ansible.builtin.file:
+        path: "{{ proxy_folder }}/internal/nginx/kanban_ui_marker.conf"
+        state: absent
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      tags:
+        - kanban_ui
+
+# 6. DNS configuration (shared pfSense tasks) — also before verification:
+# kanban.<internal_domain> must resolve (via pfSense) for the HTTPS base.
+- name: Ensure deployment host DNS override exists
+  # ROUND-9 FINDING 4373043568: an include-level `tags:` only tags the
+  # include task itself; tasks loaded from the dynamic file stay untagged,
+  # so `--tags kanban_ui` selected this include and then skipped every DNS
+  # task inside it (first deploys shipped without the DNS alias and later
+  # tagged runs could never repair DNS drift). `apply.tags` propagates the
+  # service tag to every loaded task while the include-level `tags:` keeps
+  # the include itself selected. The shared DNS files carry no tags of
+  # their own, so the union stays a single kanban_ui tag with no
+  # double-counting.
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
+    apply:
+      tags:
+        - kanban_ui
+  vars:
+    _dns_configure: "{{ kanban_ui_configure_dns | default(true) }}"
+  when: kanban_ui_configure_dns | default(true)
+  tags:
+    - kanban_ui
+
+- name: Create Kanban UI DNS alias
+  # ROUND-9 FINDING 4373043568: same apply.tags propagation as the host
+  # override include above — the alias tasks were untagged and therefore
+  # skipped by `--tags kanban_ui`, so the HTTPS base could never be
+  # (re)created on a tagged run. Include-level tags retained for the
+  # include itself; the shared file has no tags, so no double-counting.
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+    apply:
+      tags:
+        - kanban_ui
+  vars:
+    _dns_configure: "{{ kanban_ui_configure_dns | default(true) }}"
+    _dns_alias_host: kanban
+    _dns_alias_descr: Hermes Kanban UI
+    _dns_is_proxied: "{{ kanban_ui_is_proxied | default(true) }}"
+  when: kanban_ui_configure_dns | default(true)
+  tags:
+    - kanban_ui
+
+- name: Apply pending SWAG restart before HTTPS verification
+  # ROUND-8 FINDING 4354363883: tagged so the tagged path still flushes
+  # the proxy restart fired by the now-tagged proxy templates before the
+  # HTTPS probes run; untagged runs flush it as before.
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - kanban_ui
+
+# ROUND-5 FINDING 1 REGRESSION CHECK (relocated by ROUND-7 FINDING 1b):
+# this gate used to run BEFORE the flush_handlers above, so on any run that
+# restarted SWAG it read the just-written 0600 and passed while the file
+# was actually 0620 after the container's init-permissions pass. It now
+# runs AFTER the flush, asserting the EFFECTIVE post-restart modes.
+- name: Read effective modes of secret-bearing files (trust-path regression)
+  # Assert the EFFECTIVE on-disk modes after deployment + any SWAG restart,
+  # on BOTH hosts. The finding was a secret-bearing file installed 0664;
+  # this gate fails the play if any of them is group/world readable (or
+  # the vhost ever regains the marker directive while staying 0664).
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop:
+    - path: "{{ proxy_folder }}/internal/kanban_ui_marker.conf"
+      private: true
+      host: "{{ groups['proxy_host'][0] }}"
+    - path: >-
+        {{ proxy_folder
+        }}/internal/nginx/proxy-confs/kanban_ui.subdomain.conf
+      private: false
+      host: "{{ groups['proxy_host'][0] }}"
+    - path: "{{ kanban_ui_proxy_marker_file }}"
+      private: true
+      host: "{{ inventory_hostname }}"
+    - path: "{{ kanban_ui_token_file }}"
+      private: true
+      host: "{{ inventory_hostname }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: kanban_ui_secret_stats
+  changed_when: false
+  delegate_to: "{{ item.host }}"
+  when: not ansible_check_mode
+  tags:
+    - kanban_ui
+
+- name: Fail if any secret-bearing file is group/world readable
+  # stat.mode renders the permission octal (e.g. '0600', '0400');
+  # the last two octal digits are the group/world bits. Owner-only
+  # means those two digits are '0' and '0'. Total, no regex games.
+  ansible.builtin.assert:
+    that:
+      - >-
+        (kanban_ui_secret_stats.results
+        | selectattr('item.private') | map(attribute='stat.exists')
+        | select | list | count)
+        ==
+        (kanban_ui_secret_stats.results
+        | selectattr('item.private') | list | count)
+      - >-
+        kanban_ui_secret_stats.results
+        | selectattr('item.private')
+        | map(attribute='stat.mode') | reject('match', '0[0-7]00$')
+        | list | count == 0
+      # PR#13 REVIEW (comment 4244239718): the previous predicate first
+      # selected only modes with nonzero world bits, so drift such as
+      # 0600/0620/0640 slipped through. Exact equality, no prefilter:
+      # the credential-free vhost MUST be exactly 0664 (template task
+      # installs mode '0664'; SWAG tree normalizes to exactly that).
+      - >-
+        kanban_ui_secret_stats.results
+        | rejectattr('item.private') | map(attribute='stat.mode')
+        | reject('equalto', '0664')
+        | list | count == 0
+    fail_msg: >-
+      A kanban-ui secret-bearing file has group/world-readable bits
+      at its effective post-restart mode (owner-only 0600/0400 required),
+      or the credential-free vhost left its expected 0664. This is the
+      round-5 finding 1 regression gate.
+    success_msg: >-
+      Secret-bearing files are owner-only after any SWAG restart; the
+      credential-free vhost is at its expected mode.
+  when: not ansible_check_mode
+  tags:
+    - kanban_ui
+
+# 7. Health checks
+- name: Wait for Kanban UI listener
+  ansible.builtin.wait_for:
+    host: "{{ kanban_ui_bind_ip }}"
+    port: "{{ kanban_ui_port }}"
+    state: started
+    timeout: 300
+  when: not ansible_check_mode
+  tags:
+    - kanban_ui
+
+- name: Verify anonymous API requests are rejected with 401
+  ansible.builtin.uri:
+    url: "http://{{ kanban_ui_bind_ip }}:{{ kanban_ui_port }}/api/health"
+    method: GET
+    status_code: 401
+  register: kanban_ui_auth_gate
+  until: kanban_ui_auth_gate.status == 401
+  retries: "{{ kanban_ui_readiness_retries }}"
+  delay: "{{ kanban_ui_readiness_delay }}"
+  changed_when: false
+  when: not ansible_check_mode
+  tags:
+    - kanban_ui
+
+# Index credential-hygiene check (anonymous index must render the app
+# shell and must NOT contain the bootstrap token) runs inside
+# verify_session.sh below, together with the login/board/CSRF/WS/log
+# assertions, instead of uri-task Jinja asserts (which raise on the
+# AnsibleVaultEncryptedUnicode operand type).
+- name: Verify a bad login cannot mint a session
+  ansible.builtin.uri:
+    url: "{{ kanban_ui_url_base }}/login"
+    method: POST
+    body_format: json
+    body:
+      token: "deliberately-wrong-probe-value"
+    status_code: [401, 429]
+  register: kanban_ui_login_negative
+  # ROUND-7 FINDING 2: this probe runs right after the SWAG restart
+  # flush above; 443 is briefly down while swag_internal boots and the
+  # first attempts die with ECONNREFUSED (failed both round-7 deploys).
+  # Same retry pattern as the sibling 401 gate and verify_session.sh.
+  until: kanban_ui_login_negative.status in [401, 429]
+  retries: "{{ kanban_ui_readiness_retries }}"
+  delay: "{{ kanban_ui_readiness_delay }}"
+  changed_when: false
+  when: not ansible_check_mode
+  tags:
+    - kanban_ui
+
+# Session end-to-end (index hygiene -> login -> cookie attributes -> board
+# read -> CSRF gate -> WS gate -> log hygiene) as a script task. The uri
+# equivalents raised on `token in content`: kanban_ui_access_token is an
+# AnsibleVaultEncryptedUnicode and Jinja `in` refuses that operand type,
+# and a failing credential assert under no_log is undiagnosable. The
+# script receives the token via environment (never interpolated into
+# shell syntax), asserts every step internally, and the gate is its exit
+# code; stdout carries booleans/statuses only.
+- name: Verify the full session lifecycle (login, cookie, board, CSRF, logs)
+  ansible.builtin.script:
+    cmd: verify_session.sh
+  environment:
+    KANBAN_UI_VERIFY_URL: "{{ kanban_ui_url_base }}"
+    # ROUND-7 finding 3: Ansible delivers task `environment:` via
+    # `/bin/sh -c KEY=value ...`, so a token-shaped VALUE here lands in
+    # that wrapper's argv and the script's own /proc watchdog (rightly)
+    # fails the run. Pass the PATH to the 0400 token file instead (the
+    # play runs become:root); the script loads it with the forkless
+    # builtin read. URL/board/direct-base below are credential-free.
+    KANBAN_UI_VERIFY_TOKEN_FILE: "{{ kanban_ui_token_file }}"
+    KANBAN_UI_VERIFY_BOARD: "{{ kanban_ui_default_board }}"
+    # Round-3 finding 1: the direct plaintext base, probed with a STATIC
+    # wrong-token body only (never the real credential) to prove the
+    # transport gate rejects direct-HTTP logins with 403.
+    KANBAN_UI_DIRECT_URL: "http://{{ kanban_ui_bind_ip }}:{{ kanban_ui_port }}"
+    # PR#13 review finding 4331497811 (step 10b): the non-mutation gate
+    # reads the persisted SQLite state of a DISPOSABLE gate board instead
+    # of hashing the live /board render. These are the credential-free
+    # anchors the script needs to create/seed/fingerprint/tore-down that
+    # board: the kanban state root (same value the container receives as
+    # HERMES_KANBAN_HOME), the pinned checkout + venv python (used ONLY
+    # by the task-gated fault-injection tick), and the numeric ids that
+    # own board state (the dispatch-lock file must stay group-writable to
+    # the dispatcher uid so real flock contention is preserved).
+    KANBAN_UI_KANBAN_HOME: "{{ kanban_ui_hermes_home }}"
+    KANBAN_UI_HERMES_REPO: "{{ kanban_ui_hermes_repo }}"
+    KANBAN_UI_HERMES_PY: "{{ kanban_ui_hermes_repo }}/venv/bin/python"
+    KANBAN_UI_BOARD_UID: "{{ kanban_ui_run_uid }}"
+    KANBAN_UI_BOARD_GID: "{{ kanban_ui_run_gid }}"
+  register: kanban_ui_session_verify
+  until: kanban_ui_session_verify.rc == 0
+  retries: "{{ kanban_ui_readiness_retries }}"
+  delay: "{{ kanban_ui_readiness_delay }}"
+  no_log: true
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+  tags:
+    - kanban_ui
+
+# PR#13 review finding 4331497811 (positive control for the persisted-
+# state non-mutation gate): when kanban_ui_verify_fault_inject is set
+# (set_fact at play level or -e at the CLI; default false in vars), run
+# the SAME verifier once more with KANBAN_UI_VERIFY_TEST_INJECT=dispatch-
+# once. Between the before/after fingerprints the script executes the
+# REAL pinned _dispatch_once_locked against the disposable gate board
+# (bypassing only the advisory tick lock the verifier itself holds), so
+# the fingerprint MUST have changed or the script fails with the
+# detection marker. A pass here proves the gate catches genuine
+# mutations instead of trivially passing; a production run (flag false)
+# never reaches the injection branch. rc==0 under injection is the
+# expected, gated outcome; there is no secret in either outcome.
+- name: Verify the non-mutation gate detects a real dispatch tick (fault injection)
+  ansible.builtin.script:
+    cmd: verify_session.sh
+  environment:
+    KANBAN_UI_VERIFY_URL: "{{ kanban_ui_url_base }}"
+    KANBAN_UI_VERIFY_TOKEN_FILE: "{{ kanban_ui_token_file }}"
+    KANBAN_UI_VERIFY_BOARD: "{{ kanban_ui_default_board }}"
+    KANBAN_UI_DIRECT_URL: "http://{{ kanban_ui_bind_ip }}:{{ kanban_ui_port }}"
+    KANBAN_UI_KANBAN_HOME: "{{ kanban_ui_hermes_home }}"
+    KANBAN_UI_HERMES_REPO: "{{ kanban_ui_hermes_repo }}"
+    KANBAN_UI_HERMES_PY: "{{ kanban_ui_hermes_repo }}/venv/bin/python"
+    KANBAN_UI_BOARD_UID: "{{ kanban_ui_run_uid }}"
+    KANBAN_UI_BOARD_GID: "{{ kanban_ui_run_gid }}"
+    KANBAN_UI_VERIFY_TEST_INJECT: "dispatch-once"
+  register: kanban_ui_session_verify_inject
+  until: kanban_ui_session_verify_inject.rc == 0
+  retries: "{{ kanban_ui_readiness_retries }}"
+  delay: "{{ kanban_ui_readiness_delay }}"
+  no_log: true
+  changed_when: false
+  check_mode: false
+  when:
+    - not ansible_check_mode
+    - kanban_ui_verify_fault_inject | bool
+  tags:
+    - kanban_ui
+
+- name: Read Kanban UI container health state
+  community.docker.docker_container_info:
+    name: kanban-ui
+  register: kanban_ui_container
+  until: >-
+    kanban_ui_container.container.State.Running
+    and kanban_ui_container.container.State.Health.Status | default("starting")
+        == "healthy"
+  retries: "{{ kanban_ui_readiness_retries }}"
+  delay: "{{ kanban_ui_readiness_delay }}"
+  changed_when: false
+  when: not ansible_check_mode
+  tags:
+    - kanban_ui
+
+- name: Assert Kanban UI container is healthy with a restart policy
+  ansible.builtin.assert:
+    that:
+      - kanban_ui_container.container.State.Running
+      - kanban_ui_container.container.State.Health.Status == "healthy"
+      - >-
+        kanban_ui_container.container.HostConfig.RestartPolicy.Name
+        == "unless-stopped"
+    fail_msg: >-
+      kanban-ui is not running/healthy with the expected restart policy
+      (state: {{ kanban_ui_container.container.State.Status }}).
+    success_msg: "kanban-ui is running, healthy, and set to unless-stopped."
+  when: not ansible_check_mode
+  tags:
+    - kanban_ui
+
+# 8. Homepage integration (runs after verification; UI + proxy are live)
+- name: Add Kanban UI service to Homepage Infra section
+  # PR#13 REVIEW (comment 4374320177): include-level `tags:` alone only
+  # gate the include itself; loaded tasks are selected solely by their own
+  # tags. Applied the established round-9 pattern (apply.tags alongside the
+  # include-level tags) so the loaded blockinfile/set_fact tasks inherit
+  # the homepage tags and can never be silently skipped if the shared
+  # file's own tags ever drift. The union stays [homepage,
+  # homepage_config] (the shared file carries exactly these tags), so
+  # homepage, kanban_ui, kanban_ui_firewall and untagged runs behave
+  # exactly as before - kanban_ui runs still do not touch Homepage.
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+    apply:
+      tags:
+        - homepage
+        - homepage_config
+  vars:
+    _homepage_service_name: Kanban UI
+    _homepage_marker: kanban_ui service
+    _homepage_template: kanban_ui_service.yaml.j2
+    _homepage_insertafter: "^- Infra:"
+  when: kanban_ui_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for Kanban UI
+  ansible.builtin.debug:
+    msg: "kanban_ui homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify: Restart Homepage
+  when: kanban_ui_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config

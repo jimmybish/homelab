@@ -14,6 +14,7 @@ exclude_paths:
   - roles/homepage/tasks/tasks/
   - roles/jellyfin/tasks/tasks/
   - roles/jellyseerr/tasks/tasks/
+  - roles/kanban_ui/tasks/tasks/
   - roles/maintainerr/tasks/tasks/
   - roles/n8n/tasks/tasks/
   - roles/paperless_ngx/tasks/tasks/
