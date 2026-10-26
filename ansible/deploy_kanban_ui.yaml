@@ -77,8 +77,21 @@
       # deploy_hermes.yaml, so a failed rollout never strands the silence.
       block:
         - name: Apply Kanban WebUI role
+          # ROUND-9 FINDING 4373043568 (verification gap): the block above
+          # is untagged, so a `--tags kanban_ui` run skipped this
+          # include_role task itself and never loaded the role — the
+          # role-internal apply.tags fixes (DNS override/alias includes)
+          # were unreachable, and the tagged deploy ran only the silence
+          # pair (proved: 8 ok tasks vs 66 untagged). Tagging the include
+          # selects the role on tagged runs; its tasks carry their own
+          # kanban_ui tags and the DNS includes now apply.tags the
+          # service tag to their loaded tasks, so a tagged run converges
+          # DNS too. kanban_ui_firewall-only runs still skip the role,
+          # exactly as before.
           ansible.builtin.include_role:
             name: kanban_ui
+          tags:
+            - kanban_ui
       always:
         - name: Remove Grafana alert silence
           # ROUND-8 FINDING 4354363883: paired with the silence task above so
