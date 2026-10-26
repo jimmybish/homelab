@@ -5,6 +5,8 @@ description: 'Use when: creating NGINX reverse proxy configurations for SWAG, de
 
 # NGINX / SWAG Reverse Proxy Configuration
 
+**Profile ownership:** the canonical copy of this skill is maintained on the Hermes `dexter` profile (network administration). Profile syncs should place it on `dexter`, not `virtuajimmy`.
+
 Patterns for creating and deploying NGINX reverse proxy configurations via SWAG (Secure Web Application Gateway) for Docker services.
 
 ## Environment Overview

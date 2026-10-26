@@ -10,64 +10,34 @@ Read-only pfSense investigation via its REST API v2. Use this when troubleshooti
 ## Access & Guardrails
 
 - **Only GET requests are permitted in this inspection workflow.** Do not assume the API key itself is read-only; other repository automation uses it for mutating DNS operations.
-- Do **not** attempt POST/PUT/PATCH/DELETE. If a mutating change is genuinely required, ask the user to make it in the pfSense UI or delegate it to the appropriate managed automation.
-- Never log the API key. Never commit it. Use `pfsense_api_key` from Ansible Vault only.
-- **Base URL:** `https://{{ groups['pfsense_host'][0] }}` — resolves to `router` in inventory.
-- **Auth header:** `X-API-Key: {{ pfsense_api_key }}`
-- The LAN interface uses a self-signed certificate, so the request task sets `validate_certs: false`.
+- Do **not** attempt POST/PUT/PATCH/DELETE. If a mutating change is genuinely required, do not make it — file a kanban card for `virtuajimmy` on the `homelab` board instead (see When to Escalate).
+- **API key:** read from the file `/run/secrets/pfsense_api_key` (mounted read-only into the sandbox). Never log it, echo it, `cat` the secret file to stdout, export it to the shell environment, place it on a command line, or commit it.
+- **Base URL:** read from the environment variable `PFSENSE_API_BASE` at run time (provisioned by the operator from the approved config source: the Ansible vault variable `internal_pfsense_url` in `ansible/group_vars/all/vars.yaml`). Never hard-code or print the hostname; never commit it into this skill or any repo file. If the variable is unset, stop and report rather than guessing the endpoint.
+- **Auth header:** `X-API-Key: <contents of /run/secrets/pfsense_api_key>`
+- The LAN interface uses a self-signed certificate, so always pass `-k` to curl.
 
 ## Secure Request Workflow
 
-Keep the decrypted key inside Ansible and suppress the authenticated request task's output. Create this temporary one-shot playbook:
-
-```yaml
----
-- hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: Validate that the requested operation is read-only
-      ansible.builtin.assert:
-        that:
-          - pfsense_endpoint is defined
-          - pfsense_endpoint | length > 0
-          - pfsense_method | default('GET') == 'GET'
-        fail_msg: "Only GET requests are allowed by this inspection workflow"
-
-    - name: Query the pfSense API without exposing credentials
-      ansible.builtin.uri:
-        url: "https://{{ groups['pfsense_host'][0] }}/api/v2/{{ pfsense_endpoint }}"
-        method: GET
-        headers:
-          X-API-Key: "{{ pfsense_api_key }}"
-        return_content: true
-        validate_certs: false
-      register: pfsense_response
-      no_log: true
-
-    - name: Display the API response
-      ansible.builtin.debug:
-        var: pfsense_response.json
-```
-
-Save it as `/tmp/pfsense_get.yaml`, then pass only the relative endpoint:
+Pass the header via a curl `--config -` heredoc so the key never appears on the command line or in shell history. Examples use `${PFSENSE_API_BASE:?}` so an unset base URL fails loudly instead of hitting a guessed endpoint. Never substitute the literal hostname into commands, cards, or logs:
 
 ```bash
-cd ansible
-ansible-playbook -i inventory.yaml /tmp/pfsense_get.yaml \
-  --vault-password-file ~/ansible_key \
-  -e 'pfsense_endpoint=firewall/rules'
+curl -sk --config - "${PFSENSE_API_BASE:?PFSENSE_API_BASE unset}/api/v2/firewall/rules" <<EOF
+header = "X-API-Key: $(cat /run/secrets/pfsense_api_key)"
+EOF
 ```
 
-Delete `/tmp/pfsense_get.yaml` after the investigation. Never use Ansible `debug` to print `pfsense_api_key`, export it to the shell, place it on a command line, or write it to a temporary file.
+Responses use the envelope `{"code":..., "status":..., "response_id":..., "message":..., "data":...}` — check `status` first; `data` holds the payload. Pipe through `python3 -m json.tool` (with `head`) for readability. On 401/403, stop and report — do not retry with other keys or endpoints.
 
 ## Useful GET Endpoints
 
-All paths are relative to `https://router/api/v2/`.
+All paths are relative to `${PFSENSE_API_BASE}/api/v2/`.
 
 ### Firewall Rules
 
 ```bash
-ansible-playbook -i inventory.yaml /tmp/pfsense_get.yaml --vault-password-file ~/ansible_key -e 'pfsense_endpoint=firewall/rules'
+curl -sk --config - "${PFSENSE_API_BASE:?PFSENSE_API_BASE unset}/api/v2/firewall/rules" <<EOF
+header = "X-API-Key: $(cat /run/secrets/pfsense_api_key)"
+EOF
 ```
 
 Returns every rule across all interfaces. Fields worth inspecting per rule:
@@ -80,7 +50,9 @@ Returns every rule across all interfaces. Fields worth inspecting per rule:
 ### NAT Port Forwards
 
 ```bash
-ansible-playbook -i inventory.yaml /tmp/pfsense_get.yaml --vault-password-file ~/ansible_key -e 'pfsense_endpoint=firewall/nat/port_forwards'
+curl -sk --config - "${PFSENSE_API_BASE:?PFSENSE_API_BASE unset}/api/v2/firewall/nat/port_forwards" <<EOF
+header = "X-API-Key: $(cat /run/secrets/pfsense_api_key)"
+EOF
 ```
 
 Key fields per entry:
@@ -92,7 +64,9 @@ Key fields per entry:
 ### Active State Table
 
 ```bash
-ansible-playbook -i inventory.yaml /tmp/pfsense_get.yaml --vault-password-file ~/ansible_key -e 'pfsense_endpoint=firewall/states?limit=5000'
+curl -sk --config - "${PFSENSE_API_BASE:?PFSENSE_API_BASE unset}/api/v2/firewall/states?limit=5000" <<EOF
+header = "X-API-Key: $(cat /run/secrets/pfsense_api_key)"
+EOF
 ```
 
 Each entry represents a live flow through pfSense. Fields:
@@ -106,7 +80,9 @@ The state table is gold for confirming whether traffic is reaching pfSense at al
 ### Firewall Logs
 
 ```bash
-ansible-playbook -i inventory.yaml /tmp/pfsense_get.yaml --vault-password-file ~/ansible_key -e 'pfsense_endpoint=status/logs/firewall?limit=2000'
+curl -sk --config - "${PFSENSE_API_BASE:?PFSENSE_API_BASE unset}/api/v2/status/logs/firewall?limit=2000" <<EOF
+header = "X-API-Key: $(cat /run/secrets/pfsense_api_key)"
+EOF
 ```
 
 Returns raw pf log lines. Only **default-deny** and **rules with logging enabled** appear here. A missing log entry doesn't necessarily mean no drop — but combined with an absent state entry it does.
@@ -166,11 +142,10 @@ If nothing prints, no v6 traffic will get through the WAN.
 
 If read-only inspection reveals a rule needs to be added or changed:
 
-1. Report the finding clearly to the user (which rule/NAT, which fields, why)
-2. Ask them to make the change in the pfSense UI, or elevate the API key (which is a separate manual step)
-3. Do not attempt to bypass the read-only restriction
+1. Report the finding clearly (which rule/NAT, which fields, why)
+2. File a kanban card for `virtuajimmy` on the `homelab` board using the board's structured `kanban_create` tool, passing title, body, and assignee as structured tool arguments. Never build a shell command from the finding text: model- or user-derived strings embedded in shell syntax are a command-injection vector even when quoted, and the CLI form bypasses the structured board interface. pfSense config is Ansible-managed and out of Dexter's scope
+3. Do not attempt mutations through the API yourself, and do not elevate the key
 
 ## Related
 
-- `known-issues.md` covers concrete scenarios where this skill has been used (e.g. wg-easy handshake failure over carrier NAT64).
-- The Ansible role tasks `tasks/pfsense_dns_*.yaml` are the only place where write access to the API is (currently) exercised — those use a different code path and don't count as ad-hoc troubleshooting.
+- Write access to the pfSense API lives only in the Ansible repo (`tasks/pfsense_dns_*.yaml`) owned by `virtuajimmy` — that code path is not part of this workflow.

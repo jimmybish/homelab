@@ -5,6 +5,8 @@ description: 'Use when: opening ports via UFW in Ansible tasks, configuring fire
 
 # UFW Firewall Configuration
 
+**Profile ownership:** the canonical copy of this skill is maintained on the Hermes `dexter` profile (network administration). Profile syncs should place it on `dexter`, not `virtuajimmy`.
+
 Ansible task pattern for opening ports via UFW on Debian-based hosts.
 
 ## When to Use
