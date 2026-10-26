@@ -22,16 +22,14 @@
 open_webui_version: v0.11.0
 open_webui_port: 3000
 open_webui_container_port: 8080
-open_webui_openai_api_base_urls:
-  - "http://sparky.{{ internal_domain }}:8000/v1"
-  - "{{ internal_hermes_api_url }}"
-open_webui_openai_api_configs:
-  "0":
-    enable: true
-    prefix_id: sparky
-  "1":
-    enable: true
-    prefix_id: hermes
+# One OpenAI-compatible connection per Hermes profile plus Sparky. The
+# multiplexed Hermes API server routes named profiles under /p/<profile>/v1
+# on a single port; 'default' keeps the unprefixed endpoint. Profile list,
+# disabled set, prefixes and key overrides live in group_vars/all/vars.yaml
+# (open_webui_hermes_profiles and friends). The derived connection lists are
+# built by the "Derive Open WebUI Hermes provider connections" tasks at the
+# top of tasks/main.yaml.
+open_webui_sparky_base_url: "http://sparky.{{ internal_domain }}:8000/v1"
 open_webui_enable_ollama_api: false
 open_webui_enable_persistent_config: true
 open_webui_reset_config_on_start: false
@@ -48,7 +46,7 @@ open_webui_managed_config_fingerprint: >-
        'enable_signup': open_webui_enable_signup,
        'openai_api_base_urls': open_webui_openai_api_base_urls,
        'openai_api_configs': open_webui_openai_api_configs,
-       'openai_api_keys': ['', hermes_api_server_key]
+       'openai_api_keys': open_webui_openai_api_keys
      } | to_json | hash('sha256') }}
 open_webui_config_migration_marker: >-
   {{ open_webui_data_folder }}/.ansible-managed-config-{{ open_webui_managed_config_fingerprint }}

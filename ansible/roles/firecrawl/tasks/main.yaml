@@ -158,7 +158,10 @@
   until: >-
     firecrawl_scrape_test.status == 200 and
     firecrawl_scrape_test.json.success | default(false) | bool and
-    'Example Domain' in (firecrawl_scrape_test.json.data.markdown | default(''))
+    firecrawl_scrape_test.json.data.metadata.statusCode | default(0) == 200 and
+    'example.com' in (firecrawl_scrape_test.json.data.metadata.url |
+    default('') | lower) and
+    firecrawl_scrape_test.json.data.markdown | default('') | length > 0
   retries: "{{ firecrawl_scrape_retries }}"
   delay: "{{ firecrawl_scrape_delay }}"
   changed_when: false
@@ -168,7 +171,12 @@
   ansible.builtin.assert:
     that:
       - firecrawl_scrape_test.json.success | bool
-      - "'Example Domain' in firecrawl_scrape_test.json.data.markdown"
+      - firecrawl_scrape_test.json.data.metadata.statusCode | int == 200
+      - >-
+        'example.com' in
+        (firecrawl_scrape_test.json.data.metadata.url
+        | default('') | lower)
+      - firecrawl_scrape_test.json.data.markdown | default('') | length > 0
     fail_msg: "Firecrawl could not scrape example.com through the complete local pipeline."
     success_msg: "Firecrawl successfully scraped example.com."
   when: not ansible_check_mode

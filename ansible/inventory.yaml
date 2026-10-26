@@ -168,11 +168,6 @@ bambuddy_host:
   hosts:
     docker-1:
 
-# Hermes Agent
-hermes_host:
-  hosts:
-    hermes:
-
 # Firecrawl
 firecrawl_host:
   hosts:
