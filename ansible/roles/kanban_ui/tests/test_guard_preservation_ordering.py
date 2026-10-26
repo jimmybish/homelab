@@ -63,11 +63,15 @@ CHAIN = "DOCKER-USER-KANBAN"
 JUMP_COMMENT = "kanban-ui-jump"
 GUARD_COMMENT = "kanban-ui-guard"
 
+# PR#13 round-18 finding 4373043501: the jump/guard matcher is pinned to
+# the ORIGINAL host tuple via conntrack, independent of the container IP.
 GUARD_RULE = (
-    f"-d {IP}/32 -p tcp -m tcp --dport {PORT} -m comment --comment {GUARD_COMMENT} -j DROP"
+    f"-p tcp -m tcp --dport {PORT} -m conntrack --ctdir ORIGINAL --ctorigdst {HOST_IP} --ctorigdstport {PORT}"
+    f" -m comment --comment {GUARD_COMMENT} -j DROP"
 )
 JUMP_RULE = (
-    f"-d {IP}/32 -p tcp -m tcp --dport {PORT} -m comment --comment {JUMP_COMMENT} -j {CHAIN}"
+    f"-p tcp -m tcp --dport {PORT} -m conntrack --ctdir ORIGINAL --ctorigdst {HOST_IP} --ctorigdstport {PORT}"
+    f" -m comment --comment {JUMP_COMMENT} -j {CHAIN}"
 )
 CHAIN_RULES = [
     "-i lo -j ACCEPT -m comment --comment kanban-ui-hostpath",
@@ -98,6 +102,9 @@ LOG = os.environ["FAKE_IPT_LOG"]
 FAIL = [p for p in os.environ.get("FAKE_IPT_FAIL", "").split("&&") if p]
 TUPLE_D = "-d " + os.environ["FAKE_IPT_IP"] + "/32"
 TUPLE_P = "--dport " + os.environ["FAKE_IPT_PORT"]
+# PR#13 round-18 finding 4373043501: managed jump/guard now pin the
+# ORIGINAL host tuple via conntrack instead of the post-DNAT container -d.
+CT_D = "--ctorigdst " + os.environ["FAKE_IPT_HOST"]
 CHAIN = os.environ["FAKE_IPT_CHAIN"]
 GUARD = os.environ["FAKE_IPT_GUARD"]
 JUMP = os.environ["FAKE_IPT_JUMP"]
@@ -109,14 +116,14 @@ def load():
 
 
 def is_guard(rule):
-    return GUARD in rule and "-j DROP" in rule and TUPLE_D in rule and TUPLE_P in rule
+    return GUARD in rule and "-j DROP" in rule and CT_D in rule and TUPLE_P in rule
 
 
 def is_jump(rule):
     return (
         rule.endswith("-j " + CHAIN)
         and JUMP in rule
-        and TUPLE_D in rule
+        and CT_D in rule
         and TUPLE_P in rule
     )
 
@@ -268,6 +275,7 @@ class Converger:
             FAKE_IPT_CHAIN=CHAIN,
             FAKE_IPT_GUARD=GUARD_COMMENT,
             FAKE_IPT_JUMP=JUMP_COMMENT,
+            FAKE_IPT_HOST=HOST_IP,
             FAKE_DOCKER_IP=IP,
             KANBAN_UI_CONTAINER=CONTAINER,
             KANBAN_UI_PORT=PORT,

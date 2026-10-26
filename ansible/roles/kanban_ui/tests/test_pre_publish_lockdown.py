@@ -76,7 +76,14 @@ JUMP_COMMENT = "kanban-ui-jump"
 GUARD_COMMENT = "kanban-ui-guard"
 PRELOCK_COMMENT = "kanban-ui-prelock"
 
-TUPLE = f"-d {IP}/32 -p tcp -m tcp --dport {PORT}"
+# PR#13 round-18 finding 4373043501: the permanent jump/guard matcher is
+# pinned to the ORIGINAL host tuple via conntrack (independent of the
+# container IP), same invariant as the lockdown below. --ctdir ORIGINAL
+# keeps reply packets out of the chain (conntrack matches the original
+# tuple in both directions otherwise; the chain's terminal DROP would kill
+# established sessions whose source is the container, not the proxy).
+TUPLE = (f"-p tcp -m tcp --dport {PORT} -m conntrack --ctdir ORIGINAL "
+         f"--ctorigdst {HOST_IP} --ctorigdstport {PORT}")
 GUARD_RULE = f"{TUPLE} -m comment --comment {GUARD_COMMENT} -j DROP"
 JUMP_RULE = f"{TUPLE} -m comment --comment {JUMP_COMMENT} -j {CHAIN}"
 PRELOCK_RULE = (
@@ -117,7 +124,11 @@ def matches(rule, probe):
     """Kernel subset semantics on the given probe's POST-DNAT packet plus
     its conntrack original tuple: every qualifier present in the rule must
     match. -i lo never matches a LAN-forwarded packet; foreign -s, -d or
-    --dport never match; conntrack matches pin the ORIGINAL tuple."""
+    --dport never match; conntrack matches pin the ORIGINAL tuple. A rule
+    whose -d pins a container address OTHER than the probe's post-DNAT
+    address (a stale jump from before a recreate reassigned the IP) is
+    inert -- that is the round-18 4373043501 exposure the managed matcher
+    must no longer have."""
     toks = rule.split()
 
     def after(flag):
@@ -127,7 +138,7 @@ def matches(rule, probe):
         return False
     if "-s" in toks and after("-s") != probe["src"]:
         return False
-    if "-d" in toks and after("-d") != f"{IP}/32":
+    if "-d" in toks and after("-d") != f"{probe.get('postdnat', IP)}/32":
         return False
     if "--dport" in toks and after("--dport") != PORT:
         return False
@@ -152,8 +163,9 @@ def chain_verdict(state, probe):
 
 
 def reaches(state, probe_name):
-    """True iff the probe reaches Docker's post-DOCKER-USER ACCEPT path."""
-    probe = PROBES[probe_name]
+    """True iff the probe reaches Docker's post-DOCKER-USER ACCEPT path.
+    probe_name may be a PROBES key or a probe dict (custom post-DNAT)."""
+    probe = PROBES[probe_name] if isinstance(probe_name, str) else probe_name
     for rule in state["chains"].get("DOCKER-USER", []):
         if not matches(rule, probe):
             continue
@@ -363,8 +375,14 @@ class Converger:
     def prelocks(self):
         return [r for r in self.du() if PRELOCK_COMMENT in r]
 
-    def reaches(self, probe):
-        return reaches(self.state(), probe)
+    def reaches(self, probe, postdnat=None):
+        # postdnat overrides the probe's post-DNAT container address: used
+        # to model a Compose recreate that reassigned the IP (round-18
+        # finding 4373043501). Rules pinning the OLD address go inert.
+        p = dict(PROBES[probe])
+        if postdnat:
+            p["postdnat"] = postdnat
+        return reaches(self.state(), p)
 
 
 def converged_state():
@@ -435,6 +453,73 @@ class TestPreLockInstall(unittest.TestCase):
         self.assertIn("not needed", r.stdout)
         self.assertEqual(c.prelocks(), [], "steady-state must stay byte-stable")
 
+    def test_pre_lock_skipped_when_managed_set_live_and_container_absent(self):
+        # PR#13 round-18 finding 4373043501: during a Compose recreation the
+        # container may be briefly absent while the (host-tuple) managed
+        # ruleset still protects. The steady-state check must NOT be gated
+        # on resolving a container IP: an unresolvable IP previously skipped
+        # the check entirely and re-armed a redundant lockdown every play.
+        c = Converger(rules=converged_state(), container_ip="")
+        r = c.run("--pre-lock")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("not needed", r.stdout)
+        self.assertEqual(c.prelocks(), [], "no lockdown when jump is live")
+
+    def test_pre_lock_arms_lockdown_when_jump_pins_old_container_ip(self):
+        # The finding's exact scenario: a surviving ruleset whose jump pins
+        # the PREVIOUS container address (installed by a pre-fix script
+        # version). Compose recreates the container at a different IP, so
+        # the old jump is inert (non-vacuity asserted) and --pre-lock must
+        # arm the host-tuple lockdown BEFORE Compose republishes, rather
+        # than skipping because "a ruleset exists". A later converge
+        # replaces the stale jump with the IP-independent managed set.
+        stale = (
+            f"-d {IP}/32 -p tcp -m tcp --dport {PORT}"
+            f" -m comment --comment {JUMP_COMMENT} -j {CHAIN}"
+        )
+        c = Converger(rules={"DOCKER-USER": [canon(stale.split())], CHAIN: list(CHAIN_RULES)},
+                      container_ip="")
+        new_ip = "192.0.2.8"  # what Docker assigns after the recreation
+        # Non-vacuity: with the container now at new_ip, the stale jump
+        # cannot match -- both probes reach the listener.
+        self.assertTrue(c.reaches("nonproxy", postdnat=new_ip))
+        self.assertTrue(c.reaches("proxy", postdnat=new_ip))
+        r = c.run("--pre-lock")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("lockdown installed", r.stdout)
+        self.assertEqual(c.du()[0], canon(PRELOCK_RULE.split()))
+        self.assertFalse(c.reaches("nonproxy", postdnat=new_ip),
+                         "finding: recreation left the port unrestricted")
+        self.assertFalse(c.reaches("proxy", postdnat=new_ip))
+        # Converge after the readiness wait replaces the stale jump.
+        c.container_up(new_ip)
+        r = c.run()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("converged", r.stdout)
+        self.assertEqual(c.du(), [canon(JUMP_RULE.split())],
+                         "managed jump must be IP-independent after repair")
+        self.assertEqual(c.prelocks(), [])
+        self.assertFalse(c.reaches("nonproxy", postdnat=new_ip))
+        self.assertTrue(c.reaches("proxy", postdnat=new_ip))
+
+    def test_managed_matcher_survives_container_ip_reassignment(self):
+        # The permanent matcher is independent of the container IP: with
+        # the exact managed set live and Docker having reassigned the
+        # container address, --check stays green (no drift churn), the
+        # probes are unaffected, and a converge rerun is byte-identical.
+        c = Converger(rules=converged_state())
+        new_ip = "192.0.2.8"
+        c.container_up(new_ip)
+        self.assertEqual(c.run("--check").returncode, 0,
+                         "host-tuple jump must not read as drift on recreate")
+        self.assertFalse(c.reaches("nonproxy", postdnat=new_ip))
+        self.assertTrue(c.reaches("proxy", postdnat=new_ip))
+        before = json.dumps(c.state(), sort_keys=True)
+        r = c.run()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("already converged", r.stdout)
+        self.assertEqual(before, json.dumps(c.state(), sort_keys=True))
+
     def test_pre_lock_requires_host_ip(self):
         c = Converger(rules={}, container_ip="")
         r = c.run("--pre-lock", drop_host_ip=True)
@@ -488,11 +573,10 @@ class TestPreLockInstall(unittest.TestCase):
                 self.assertTrue(c.reaches("proxy"))
 
     def test_pre_lock_guard_ahead_rearms_positional_drop(self):
-        # A container-IP guard ahead of a surviving copy is not the
-        # lockdown shape: it matches the post-DNAT container tuple (which
-        # a recreate can change) rather than the original host tuple, and
-        # the positional invariant accepts ONLY the exact pre-lock at the
-        # head -- --pre-lock re-arms a fresh position-1 DROP regardless.
+        # A container-tuple guard ahead of a surviving copy is not the
+        # lockdown shape (different comment/target), and the positional
+        # invariant accepts ONLY the exact pre-lock at the head --
+        # --pre-lock re-arms a fresh position-1 DROP regardless.
         du = [canon(GUARD_RULE.split()), canon(PRELOCK_RULE.split())]
         c = Converger(rules={"DOCKER-USER": du, CHAIN: list(CHAIN_RULES)})
         r = c.run("--pre-lock")
@@ -519,9 +603,14 @@ class TestConvergeSweepsLockdown(unittest.TestCase):
         self.assertTrue(c.reaches("proxy"), "proxy path opens once chain is live")
 
     def test_converge_from_pre_locked_stale_jump_reconverges(self):
-        # Stale jump (old container IP) plus an armed lockdown: the r5/r6
-        # guard sequence must replace the jump and sweep the lockdown.
-        stale = TUPLE.replace(IP, "192.0.2.1") + f" -m comment --comment {JUMP_COMMENT} -j {CHAIN}"
+        # Stale jump (old container-IP shape from a pre-4373043501 script
+        # version, which no longer matches anything after a recreate) plus
+        # an armed lockdown: the r5/r6 guard sequence must replace the jump
+        # and sweep the lockdown.
+        stale = (
+            f"-d 192.0.2.1/32 -p tcp -m tcp --dport {PORT}"
+            f" -m comment --comment {JUMP_COMMENT} -j {CHAIN}"
+        )
         c = Converger(rules={"DOCKER-USER": [canon(stale.split())], CHAIN: list(CHAIN_RULES)})
         c.run("--pre-lock")
         r = c.run()

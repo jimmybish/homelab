@@ -3,8 +3,11 @@
 # Converges the service-scoped pre-Docker forwarding filter for the published
 # kanban-ui port: a dedicated DOCKER-USER-KANBAN chain (ACCEPT in-lo, ACCEPT
 # the SWAG proxy source, terminal DROP) plus a jump at the head of
-# DOCKER-USER matching ONLY the kanban container's post-DNAT tuple, so no
-# other container, network, or host service is affected.
+# DOCKER-USER matching ONLY the published host tuple via conntrack
+# (--ctorigdst/--ctorigdstport, PR#13 round-18 finding 4373043501: no
+# container-IP dependency, so the restriction survives a Compose recreate
+# that reassigns the container address), so no other container, network, or
+# host service is affected.
 #
 # Invoked by:
 #   1. the kanban_ui Ansible role (deploy convergence + drift check), and
@@ -21,8 +24,10 @@
 # syntax by the caller): KANBAN_UI_CONTAINER, KANBAN_UI_PORT,
 # KANBAN_UI_PROXY_IP, KANBAN_UI_HOST_IP (the published host address;
 # required by every mode except --teardown). The container address is
-# resolved from the live Docker API on every run, so a recreate that
-# reassigns the IP self-heals.
+# resolved from the live Docker API only to decide whether a container
+# exists at all (nothing published -> nothing to enforce); the permanent
+# matchers never embed it (PR#13 round-18 finding 4373043501), so the
+# restriction holds even mid-recreate while Docker reassigns the IP.
 #
 # Modes:
 #   --pre-lock: install the fail-closed PRE-PUBLISH lockdown BEFORE the
@@ -48,7 +53,7 @@
 #     nothing is published, nothing to enforce). Reconvergence is
 #     FAIL-CLOSED (PR#13 round-5 finding 4323915092): before the stale jump
 #     is removed, a temporary service-scoped DROP matching the same
-#     container tuple (-m comment kanban-ui-guard) is inserted at
+#     original host tuple (-m comment kanban-ui-guard) is inserted at
 #     DOCKER-USER position 1, so the published port stays DROP'd for every
 #     source THROUGHOUT the delete/flush/append/insert sequence. The guard
 #     is deleted ONLY after the jump+chain set verifies live; any mid-script
@@ -197,10 +202,33 @@ if [ -z "$ip" ] && [ "$PRELOCK_MODE" = 0 ]; then
   exit 0
 fi
 
-# Shared matcher for the jump and the transient guard: the exact post-DNAT
-# container tuple, so nothing but kanban-ui's published port is affected.
+# Shared matcher for the jump and the transient guard. PR#13 round-18
+# finding 4373043501: this used to pin the post-DNAT container address
+# (-d ${ip}/32). When the existing ruleset validated, --pre-lock skipped
+# its lockdown before Compose could RECREATE the container; if recreation
+# reassigned the IP, the old container-IP jump stopped restricting the
+# published port until convergence after the readiness waits (a failed
+# wait left the restriction missing entirely). The matcher is therefore
+# pinned to the ORIGINAL host destination/port via conntrack -- the exact
+# token set the pre-publish lockdown already proved live on this host:
+# DOCKER-USER evaluates after nat PREROUTING, so only conntrack exposes
+# the pre-DNAT tuple, and the host address + published port are fixed by
+# the Compose ports mapping regardless of which container address Docker
+# assigns. --ctdir ORIGINAL is load-bearing, not cosmetic: conntrack
+# matches the original tuple in BOTH directions, and a container->client
+# REPLY packet carries the client's ephemeral port as its destination --
+# when that port happens to equal the published port, a direction-blind
+# --dport match would drag replies into the chain, where the source-based
+# ACCEPTs never match (source is the container) and the terminal DROP
+# kills the established session (the old -d container/32 matcher could
+# not catch a reply at all). ORIGINAL-only keeps the old direction
+# semantics: forward packets are gated by the chain, replies pass.
+# Blast radius is unchanged: traffic to any other published address/port,
+# or any transit flow that never DNATs to this host tuple, never matches.
+# Bare --ctorigdst address (no /32) so the rendered spec round-trips
+# byte-identically through `iptables -S` on iptables-nft 1.8.7.
 tuple_spec() {
-  echo "-d ${ip}/32 -p tcp -m tcp --dport ${KANBAN_UI_PORT}"
+  echo "-p tcp -m tcp --dport ${KANBAN_UI_PORT} -m conntrack --ctdir ORIGINAL --ctorigdst ${KANBAN_UI_HOST_IP} --ctorigdstport ${KANBAN_UI_PORT}"
 }
 
 jump_spec() {
@@ -259,7 +287,7 @@ norm_rule() {
     out=()
     while [ "$#" -gt 0 ]; do
       case $1 in
-        (-j | -m | -p | -s | -d | -i | -o | --comment | --dport | --sport | --ctorigdst | --ctorigdstport)
+        (-j | -m | -p | -s | -d | -i | -o | --comment | --dport | --sport | --ctdir | --ctorigdst | --ctorigdstport)
           # Bundle the option with its operand; a trailing option with no
           # operand encodes as "opt=" (a value no real rule can carry).
           # --ctorigdst/--ctorigdstport are bundled for the same reason as
@@ -374,11 +402,17 @@ sweep_comment() {
 # successful converge (managed jump+chain verified live) or --teardown
 # removes it.
 if [ "$PRELOCK_MODE" = 1 ]; then
-  if [ -n "$ip" ] && managed_state_live; then
+  if managed_state_live; then
     # Steady state: the managed jump (whose chain ends in the terminal
-    # DROP) already restricts the tuple; installing a lockdown here would
-    # make every converge play permanently non-idempotent (install ->
-    # sweep -> install...). Report unchanged and touch nothing.
+    # DROP, and whose matcher pins the ORIGINAL host tuple, not a
+    # container address) already restricts the tuple across a Compose
+    # recreate that reassigns the container IP (PR#13 round-18 finding
+    # 4373043501); installing a lockdown here would make every converge
+    # play permanently non-idempotent (install -> sweep -> install...).
+    # Report unchanged and touch nothing. Deliberately NOT gated on the
+    # resolved container IP any more: during a recreation the container
+    # may be briefly absent while the old ruleset still (correctly)
+    # protects, and an unresolvable IP must never blind this check.
     echo "pre-publish lockdown not needed; managed DOCKER-USER ruleset live"
     exit 0
   fi

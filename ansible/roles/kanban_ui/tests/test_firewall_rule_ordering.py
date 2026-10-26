@@ -74,7 +74,7 @@ CHAIN = "DOCKER-USER-KANBAN"
 JUMP_COMMENT = "kanban-ui-jump"
 GUARD_COMMENT = "kanban-ui-guard"
 
-TUPLE = f"-d {IP}/32 -p tcp -m tcp --dport {PORT}"
+TUPLE = f"-p tcp -m tcp --dport {PORT} -m conntrack --ctdir ORIGINAL --ctorigdst {HOST_IP} --ctorigdstport {PORT}"
 GUARD_RULE = f"{TUPLE} -m comment --comment {GUARD_COMMENT} -j DROP"
 JUMP_RULE = f"{TUPLE} -m comment --comment {JUMP_COMMENT} -j {CHAIN}"
 CHAIN_RULES = [
@@ -181,9 +181,14 @@ JUMP = os.environ["FAKE_IPT_JUMP"]
 PROXY = os.environ["FAKE_IPT_PROXY"]
 PROBE_SRC = os.environ["FAKE_IPT_PROBE"]
 IP = os.environ["FAKE_IPT_IP"]
+HOST = os.environ["FAKE_IPT_HOST"]
 PORT = os.environ["FAKE_IPT_PORT"]
 TUPLE_D = "-d " + IP + "/32"
 TUPLE_P = "--dport " + PORT
+# PR#13 round-18 finding 4373043501: managed jump/guard now pin the
+# ORIGINAL host tuple via conntrack instead of the post-DNAT container -d.
+CT_HOST = "--ctorigdst " + HOST
+CT_PORT = "--ctorigdstport " + PORT
 
 
 def canon(spec_tokens):
@@ -204,8 +209,10 @@ def matches(rule):
     """Could this (canonical) rule match the non-proxy probe tuple? The
     probe satisfies a rule iff EVERY qualifier present in the rule matches
     the probe (kernel subset semantics): -i lo never matches a LAN probe,
-    a foreign -s never matches, a foreign -d/--dport never matches, and an
-    unqualified rule always matches."""
+    a foreign -s never matches, a foreign -d/--dport never matches, the
+    probe's conntrack ORIGINAL tuple is HOST:PORT (so a --ctorigdst for a
+    different address makes the rule inert), and an unqualified rule always
+    matches."""
     toks = rule.split()
 
     def after(flag):
@@ -219,18 +226,25 @@ def matches(rule):
         return False
     if "--dport" in toks and after("--dport") != TUPLE_P.split()[1]:
         return False
+    if "conntrack" in toks:
+        if after("--ctorigdst") != HOST:
+            return False
+        if after("--ctorigdstport") != PORT:
+            return False
     return True
 
 
 def is_guard(rule):
     toks = rule.split()
     return (GUARD in toks and toks[-2:] == ["-j", "DROP"]
-            and (IP + "/32") in toks and "--dport" in toks and PORT in toks)
+            and "conntrack" in toks and "--ctorigdst" in toks
+            and HOST in toks and "--dport" in toks and PORT in toks)
 
 
 def is_jump(rule):
     toks = rule.split()
-    return toks[-2:] == ["-j", CHAIN] and JUMP in toks and (IP + "/32") in toks and PORT in toks
+    return (toks[-2:] == ["-j", CHAIN] and JUMP in toks and "conntrack" in toks
+            and "--ctorigdst" in toks and HOST in toks and "--dport" in toks and PORT in toks)
 
 
 def chain_verdict(state):
@@ -393,6 +407,11 @@ def restricted(state: dict) -> bool:
             return False
         if "--dport" in toks and after("--dport") != PORT:
             return False
+        if "conntrack" in toks:
+            if after("--ctorigdst") != HOST_IP:
+                return False
+            if after("--ctorigdstport") != PORT:
+                return False
         return True
 
     for rule in state["chains"].get("DOCKER-USER", []):
@@ -451,6 +470,7 @@ class Converger:
             FAKE_IPT_CHAIN=CHAIN,
             FAKE_IPT_GUARD=GUARD_COMMENT,
             FAKE_IPT_JUMP=JUMP_COMMENT,
+            FAKE_IPT_HOST=HOST_IP,
             FAKE_DOCKER_IP=IP,
             KANBAN_UI_CONTAINER=CONTAINER,
             KANBAN_UI_PORT=PORT,

@@ -386,9 +386,12 @@
 # restricted UFW rule loaded - app auth, not network isolation). Docker's
 # documented hook is a jump into a dedicated service-scoped chain at DOCKER-
 # USER (https://docs.docker.com/engine/network/packet-filtering-firewalls/).
-# Blast radius is exactly one service tuple: the jump matches the kanban
-# container's live post-DNAT address (resolved from the Docker API on every
-# run, self-healing across recreate) + destination port only; transit traffic
+# Blast radius is exactly one service tuple: the jump matches the ORIGINAL
+# published host address + destination port via conntrack (--ctorigdst/
+# --ctorigdstport; PR#13 round-18 finding 4373043501 replaced the old
+# container-IP matcher so the restriction survives a Compose recreate that
+# reassigns the container address, with no unprotected window between
+# --pre-lock and the post-readiness converge); transit traffic
 # for any other container, network, or host service never matches and the
 # jump is invisible to it. The chain holds exactly three rules: ACCEPT in
 # 'lo' (hairpin/userland-proxy path, kept so a future userland-proxy=false
@@ -577,7 +580,7 @@
 - name: Verify the DOCKER-USER kanban-ui ruleset is live
   # Behavior check per the post-deployment standard: --check exits 0 only
   # when the managed ruleset matches the live kernel state IN THE EXPECTED
-  # POSITION/ORDER for the CURRENT container IP (jump FIRST in DOCKER-USER
+  # POSITION/ORDER for the published host tuple (jump FIRST in DOCKER-USER
   # once transient guard copies are excluded, private chain exactly the
   # three ordered rules - PR#13 round-8 finding 4354363842: existence-only
   # `iptables -C` checks passed even with a RETURN/ACCEPT ahead of the
