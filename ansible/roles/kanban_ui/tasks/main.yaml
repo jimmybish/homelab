@@ -1059,8 +1059,21 @@
 
 # 8. Homepage integration (runs after verification; UI + proxy are live)
 - name: Add Kanban UI service to Homepage Infra section
+  # PR#13 REVIEW (comment 4374320177): include-level `tags:` alone only
+  # gate the include itself; loaded tasks are selected solely by their own
+  # tags. Applied the established round-9 pattern (apply.tags alongside the
+  # include-level tags) so the loaded blockinfile/set_fact tasks inherit
+  # the homepage tags and can never be silently skipped if the shared
+  # file's own tags ever drift. The union stays [homepage,
+  # homepage_config] (the shared file carries exactly these tags), so
+  # homepage, kanban_ui, kanban_ui_firewall and untagged runs behave
+  # exactly as before - kanban_ui runs still do not touch Homepage.
   ansible.builtin.include_tasks:
     file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+    apply:
+      tags:
+        - homepage
+        - homepage_config
   vars:
     _homepage_service_name: Kanban UI
     _homepage_marker: kanban_ui service
