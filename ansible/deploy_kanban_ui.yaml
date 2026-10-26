@@ -54,17 +54,28 @@
         not
         (hostvars['localhost']['grafana_master_silence_active']
          | default(false))
-  roles:
-    - kanban_ui
-  post_tasks:
-    - name: Remove Grafana alert silence
-      # ROUND-8 FINDING 4354363883: paired with the silence task above so
-      # a tagged run never strands a silence; firewall-only runs select
-      # neither (teardown alerts stay as before).
-      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
-      tags:
-        - kanban_ui
-      when: >-
-        not
-        (hostvars['localhost']['grafana_master_silence_active']
-         | default(false))
+  tasks:
+    - name: Deploy Kanban UI with alert cleanup
+      # ROUND-9 FINDING 4373043519: post_tasks are skipped for a host once
+      # a role task fails, so a failed build, readiness wait, or session
+      # verification left the all-alert-names silence active until its
+      # 30-minute expiry, suppressing unrelated alerts. The role now runs
+      # inside a block and the teardown runs in always, mirroring
+      # deploy_hermes.yaml, so a failed rollout never strands the silence.
+      block:
+        - name: Apply Kanban WebUI role
+          ansible.builtin.include_role:
+            name: kanban_ui
+      always:
+        - name: Remove Grafana alert silence
+          # ROUND-8 FINDING 4354363883: paired with the silence task above so
+          # a tagged run never strands a silence; firewall-only runs select
+          # neither (teardown alerts stay as before). Role tasks carry their
+          # own kanban_ui tags, so include_role keeps the tagged-run coverage.
+          ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+          tags:
+            - kanban_ui
+          when: >-
+            not
+            (hostvars['localhost']['grafana_master_silence_active']
+             | default(false))
