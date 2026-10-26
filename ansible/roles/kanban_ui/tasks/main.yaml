@@ -128,6 +128,12 @@
     - kanban_ui_firewall
 
 - name: Delete the legacy Anywhere UFW rule for the Kanban UI port
+  # PR#13 REVIEW (comment 4374320177): kanban_ui_firewall added so the
+  # documented standalone teardown (--tags kanban_ui_firewall
+  # -e kanban_ui_state=absent) actually selects the UFW rule deletions;
+  # previously these tasks carried only kanban_ui and the firewall-only
+  # path silently left them behind. kanban_ui-only and untagged runs are
+  # unchanged (tag union, never subtractive).
   community.general.ufw:
     rule: allow
     from_ip: 0.0.0.0/0
@@ -139,11 +145,14 @@
     - not ansible_check_mode
   tags:
     - kanban_ui
+    - kanban_ui_firewall
 
 - name: Delete the legacy Anywhere IPv6 UFW rule for the Kanban UI port
   # The original module run created an IPv6 twin (user6.rules tuple with
   # ::/0 source). Nothing listens on v6 (the compose DNAT pins the IPv4
   # address), so this is hygiene: no stale Anywhere rule may linger.
+  # kanban_ui_firewall added per PR#13 comment 4374320177 (teardown
+  # reachability, same rationale as the IPv4 delete above).
   community.general.ufw:
     rule: allow
     from_ip: "::/0"
@@ -155,6 +164,7 @@
     - not ansible_check_mode
   tags:
     - kanban_ui
+    - kanban_ui_firewall
 
 - name: Allow the Kanban UI port through UFW from the proxy only
   community.general.ufw:
