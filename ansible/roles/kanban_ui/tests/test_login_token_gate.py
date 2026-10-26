@@ -271,7 +271,24 @@ class TestLoginEndpoint(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    # PR#13 review finding (comment 4373043593): the endpoint tests need
+    # fastapi AND the mounted Hermes plugin router -- build_app() opens
+    # plugins/kanban/dashboard/plugin_api.py from REPO. A control node with
+    # fastapi installed but no KANBAN_UI_HERMES_REPO checkout gets the
+    # empty tempfile.mkdtemp() fallback above, so the fastapi-only guard
+    # let every endpoint test ERROR instead of skip. Require the router
+    # file itself (the exact path build_app imports), under whatever value
+    # KANBAN_UI_HERMES_REPO holds at import time.
+    _plugin_router = Path(
+        os.environ["KANBAN_UI_HERMES_REPO"], "plugins", "kanban", "dashboard", "plugin_api.py"
+    )
     if not _fastapi_available():
         TestLoginEndpoint.__unittest_skip__ = True
         TestLoginEndpoint.__unittest_skip_why__ = "fastapi absent on control node; runs inside the container"
+    elif not _plugin_router.is_file():
+        TestLoginEndpoint.__unittest_skip__ = True
+        TestLoginEndpoint.__unittest_skip_why__ = (
+            "mounted Hermes plugin router absent under KANBAN_UI_HERMES_REPO "
+            f"({_plugin_router}); runs inside the container"
+        )
     unittest.main(verbosity=2)
