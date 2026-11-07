@@ -1,0 +1,29 @@
+---
+# Research Notes - Hermes Agent gateway web UI
+# The Hermes gateway serves its web UI on the 'hermes' host, port 9119
+# (verified listening on 0.0.0.0:9119 via `ss -tlnp` on 2026-11-07). It
+# uses websockets for live updates, so the vhost must carry Upgrade/
+# Connection support — SWAG's shared /config/nginx/proxy.conf already
+# provides proxy_http_version 1.1, the Upgrade/Connection headers (via
+# the $connection_upgrade map) and 3600s read/send timeouts, so the
+# vhost only adds proxy_buffering off.
+# Distinct from internal_hermes_api_url (api_server on port 8642) and
+# from the kanban_ui role (board dashboard on port 9470) — do not conflate.
+# This role manages ONLY the exposure layer (DNS alias, SWAG vhost,
+# Homepage entry, and the UFW source-pin for the gateway UI port so only
+# the SWAG proxy can reach it). It never touches the gateway process
+# itself: a gateway restart reaps the dispatcher and workers running in
+# the same cgroup.
+
+# Host port of the Hermes gateway web UI on the hermes host
+hermes_gateway_port: 9119
+
+# Feature flags (all mandatory runbook phases enabled)
+hermes_configure_dns: true
+hermes_configure_proxy: true
+hermes_configure_homepage: true
+hermes_is_proxied: true            # alias parents to the proxy host override
+
+# Upstream reachability validation on the gateway host (listen_ports_facts
+# + assert). Set false only for runs that must not gather listen facts.
+hermes_gateway_validate_upstream: true

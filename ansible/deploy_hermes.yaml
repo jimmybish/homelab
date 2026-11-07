@@ -1,0 +1,69 @@
+---
+# Hermes gateway exposure layer (DNS alias + internal SWAG vhost + Homepage
+# + UFW source-pin for the gateway UI port).
+#
+# SCOPE GUARD: this playbook must never restart or otherwise touch the
+# hermes-gateway process on the hermes host — a gateway restart reaps the
+# dispatcher and workers in the same cgroup. The role delegates to the proxy
+# host, the homepage host, and localhost/pfSense. The on-host work is the
+# read-only listen-port validation plus the UFW converge for THIS role's
+# port only (proxy-source allow, legacy Anywhere tuple deletes). It does
+# not restart any hermes-host service and does not touch unrelated rules.
+- name: Collect proxy host facts for the upstream firewall rule
+  # The gateway UI port is UFW-restricted to the SWAG proxy's address,
+  # resolved in the role via hostvars[groups['proxy_host'][0]]. Those facts
+  # only exist if gathered; the master playbook's earlier deploy_proxy play
+  # covers that, but a STANDALONE run of this playbook must gather them too
+  # or the role's set_fact blows up undefined (same pattern as
+  # deploy_kanban_ui.yaml).
+  hosts: proxy_host
+  gather_facts: true
+  become: false
+
+- name: Install Hermes gateway exposure
+  hosts: hermes_host
+  become: true
+  pre_tasks:
+    - name: Ensure proxy host facts are available for the upstream firewall rule
+      # A HOST-LIMITED run (--limit hermes) never executes the facts play
+      # above, so the role's hostvars[groups['proxy_host'][0]] resolution
+      # would explode undefined. Gather them here instead via a delegated
+      # setup; delegate_facts attaches them to the DELEGATED host (proxy),
+      # which is exactly where the role reads them. become:false since fact
+      # gathering needs no privilege. The when-guard keeps this free on the
+      # unbounded path where the facts play already populated hostvars.
+      ansible.builtin.setup:
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      delegate_facts: true
+      become: false
+      when: >-
+        hostvars[groups['proxy_host'][0]]['ansible_default_ipv4'] is not defined
+
+    - name: Silence Grafana alerts
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Deploying Hermes gateway exposure"
+      when: >-
+        not
+        (hostvars['localhost']['grafana_master_silence_active']
+         | default(false))
+  tasks:
+    - name: Deploy Hermes gateway exposure with alert cleanup
+      # post_tasks are skipped for a host once a role task fails, so a
+      # failed vhost deploy, DNS call, or listen-port assertion would leave
+      # the all-alert-names silence active until its 30-minute expiry,
+      # suppressing unrelated alerts. The role therefore runs inside a
+      # block and the teardown runs in always (same pattern and rationale
+      # as deploy_kanban_ui.yaml).
+      block:
+        - name: Apply Hermes gateway exposure role
+          ansible.builtin.include_role:
+            name: hermes
+      always:
+        - name: Remove Grafana alert silence
+          ansible.builtin.include_tasks:
+            file: tasks/grafana_remove_silence.yaml
+          when: >-
+            not
+            (hostvars['localhost']['grafana_master_silence_active']
+             | default(false))

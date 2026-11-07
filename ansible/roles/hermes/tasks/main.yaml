@@ -1,0 +1,137 @@
+---
+# Hermes gateway exposure layer: DNS alias + internal SWAG vhost + Homepage.
+#
+# SCOPE GUARD (hard rule): no task in this role may touch the hermes-gateway
+# process, its systemd unit, or run docker_compose against the gateway stack
+# on the hermes host. A gateway restart reaps the dispatcher and workers
+# running in the same cgroup. Everything here either delegates to the proxy
+# host, the homepage host, or localhost/pfSense; the on-host tasks are the
+# read-only listen-port validation below and the UFW converge for THIS
+# role's port only (source-pinned proxy allow plus deletion of the legacy
+# Anywhere tuple for that port, mirroring roles/kanban_ui). Nothing here
+# restarts services or mutates unrelated firewall rules on the hermes host.
+
+- name: Resolve gateway host IP for proxy configuration
+  ansible.builtin.set_fact:
+    hermes_gateway_proxy_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+  when: hermes_configure_proxy | default(true)
+
+# Firewall (UFW) — the ONLY legitimate consumer of the gateway UI port is
+# the SWAG proxy (the vhost below is the sole intended upstream). An
+# Anywhere rule lets every source that can reach this host bypass the
+# internal SWAG name/TLS boundary and talk to 9119 directly, so the rule
+# is source-restricted to the proxy host's address and the legacy Anywhere
+# tuples are deleted declaratively. Proven 2026-11-07: /etc/ufw/user.rules
+# line 29 and /etc/ufw/user6.rules line 29 carried the comment-free
+# `### tuple ### allow tcp 9119 0.0.0.0/0 any 0.0.0.0/0 in` and `::/0`
+# IPv6 twin (manual state, ufw status numbered entries [4]/[15]). NOTE:
+# the UFW module cannot distinguish rule comments, so the delete match is
+# comment-free and pinned to those exact tuples — if a tuple ever matches
+# a rule we did not add, the delete stays idempotent and the restricted
+# allow below keeps the proxy path open; the deploy verifier's live
+# reachability checks catch any regression (same pattern as the kanban_ui
+# firewall block).
+- name: Resolve the SWAG proxy source address for the port rule
+  ansible.builtin.set_fact:
+    hermes_proxy_ip: >-
+      {{ hostvars[groups['proxy_host'][0]]['ansible_default_ipv4']['address'] }}
+
+- name: Delete the legacy Anywhere UFW rule for the Hermes gateway port
+  community.general.ufw:
+    rule: allow
+    from_ip: 0.0.0.0/0
+    port: "{{ hermes_gateway_port }}"
+    proto: tcp
+    delete: true
+  when:
+    - ansible_os_family == "Debian"
+    - not ansible_check_mode
+
+- name: Delete the legacy Anywhere IPv6 UFW rule for the Hermes gateway port
+  # The original manual rule has an IPv6 twin (user6.rules ::/0 tuple).
+  # Nothing serves the gateway UI over v6, so this is hygiene: no stale
+  # Anywhere rule may linger.
+  community.general.ufw:
+    rule: allow
+    from_ip: "::/0"
+    port: "{{ hermes_gateway_port }}"
+    proto: tcp
+    delete: true
+  when:
+    - ansible_os_family == "Debian"
+    - not ansible_check_mode
+
+- name: Allow the Hermes gateway port through UFW from the proxy only
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ hermes_proxy_ip }}"
+    port: "{{ hermes_gateway_port }}"
+    proto: tcp
+    comment: "Hermes gateway web UI (proxy upstream)"
+  when: ansible_os_family == "Debian"
+
+- name: Check if gateway ports are open and listening
+  community.general.listen_ports_facts:
+  when: hermes_gateway_validate_upstream | default(true)
+
+- name: Assert Hermes gateway web UI port is listening
+  ansible.builtin.assert:
+    that:
+      - hermes_gateway_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Hermes gateway port {{ hermes_gateway_port }} is not open and listening!"
+    success_msg: "Hermes gateway port {{ hermes_gateway_port }} is open and listening."
+  when: hermes_gateway_validate_upstream | default(true)
+
+# Configure SWAG Internal Proxy (websockets: see template)
+- name: Deploy Hermes gateway nginx config to SWAG Internal
+  ansible.builtin.template:
+    src: hermes_gateway.subdomain.conf.j2
+    dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/hermes_gateway.subdomain.conf"
+    mode: '0664'
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  notify:
+    - Restart Swag Internal
+  when: hermes_configure_proxy | default(true)
+
+# DNS Configuration (alias parents to the proxy host override)
+- name: Ensure deployment host DNS override exists
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
+  vars:
+    _dns_configure: "{{ hermes_configure_dns | default(true) }}"
+  when: hermes_configure_dns | default(true)
+
+- name: Create hermes-gateway DNS alias
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+  vars:
+    _dns_configure: "{{ hermes_configure_dns | default(true) }}"
+    _dns_alias_host: hermes-gateway
+    _dns_alias_descr: Hermes gateway web UI
+    _dns_is_proxied: "{{ hermes_is_proxied | default(true) }}"
+  when: hermes_configure_dns | default(true)
+
+# Configure Homepage Services
+- name: Add Hermes to Homepage Slop section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: Hermes
+    _homepage_marker: hermes gateway service
+    _homepage_template: hermes_gateway_service.yaml.j2
+    _homepage_insertafter: "^- Slop:"
+  when: hermes_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for hermes gateway
+  ansible.builtin.debug:
+    msg: "hermes gateway homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify:
+    - Restart Homepage
+  when: hermes_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
