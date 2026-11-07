@@ -59,6 +59,16 @@
         - name: Apply Hermes gateway exposure role
           ansible.builtin.include_role:
             name: hermes
+
+        - name: Flush restart handlers inside the silence window
+          # Ansible's implicit handler flush runs after tasks/post_tasks,
+          # i.e. AFTER the always/teardown below removes the Grafana
+          # silence. A vhost or Homepage change would then queue
+          # `Restart Swag Internal` / `Restart Homepage` and fire them
+          # outside the maintenance window. Flushing here keeps the
+          # service restarts inside the silence; the teardown in always
+          # still guarantees cleanup on failure.
+          ansible.builtin.meta: flush_handlers
       always:
         - name: Remove Grafana alert silence
           ansible.builtin.include_tasks:
