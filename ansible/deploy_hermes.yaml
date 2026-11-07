@@ -36,6 +36,19 @@
   # signal is unchanged.
   hosts: hermes_host, localhost
   become: true
+  force_handlers: true
+  # force_handlers COMPLEMENTS (does not replace) the explicit
+  # flush_handlers below. The meta flush covers the success path: handlers
+  # run at the include_role boundary, inside the silence window. On an
+  # ordinary task failure the strategy skips the remaining tasks for the
+  # failed host — including that flush — so without force_handlers a
+  # queued `Restart Swag Internal` (e.g. the SWAG vhost template was
+  # already written, then a later pfSense task fails) would never fire
+  # until a future successful run, which no longer notifies for the
+  # unchanged template, leaving NGINX serving stale config. With
+  # force_handlers the queued handlers still run at end of play for the
+  # failed host — still inside the silence window, because handlers flush
+  # at end of play and the dedicated teardown play runs later.
   pre_tasks:
     - name: Ensure proxy host facts are available for the upstream firewall rule
       # A HOST-LIMITED run (--limit hermes) never executes the facts play
