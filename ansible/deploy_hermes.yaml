@@ -21,7 +21,20 @@
   become: false
 
 - name: Install Hermes gateway exposure
-  hosts: hermes_host
+  # `localhost` is co-hosted deliberately (and all real work is guarded to
+  # the hermes_host group below): the executor ABORTS the remaining plays
+  # of the run as soon as every host in a play has failed or gone
+  # unreachable. With hermes as the only target, one unreachable delegated
+  # task (the Homepage or proxy host) removes hermes from the play — the
+  # block/always teardown is skipped for removed hosts AND the play-loop
+  # break below it skips any follow-up teardown play, stranding the
+  # all-alert-names Grafana silence until its 30-minute expiry. With the
+  # controller riding along (every task skipped, so never failed), the
+  # batch is never all-failed, the play loop survives, and the dedicated
+  # teardown play always executes. hermes is still marked
+  # unreachable/failed, so the run still exits non-zero — the failure
+  # signal is unchanged.
+  hosts: hermes_host, localhost
   become: true
   pre_tasks:
     - name: Ensure proxy host facts are available for the upstream firewall rule
@@ -36,44 +49,68 @@
       delegate_to: "{{ groups['proxy_host'][0] }}"
       delegate_facts: true
       become: false
-      when: >-
-        hostvars[groups['proxy_host'][0]]['ansible_default_ipv4'] is not defined
+      when:
+        - inventory_hostname in groups['hermes_host']
+        - hostvars[groups['proxy_host'][0]]['ansible_default_ipv4'] is not defined
 
     - name: Silence Grafana alerts
       ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
       vars:
         grafana_silence_comment: "Deploying Hermes gateway exposure"
-      when: >-
-        not
-        (hostvars['localhost']['grafana_master_silence_active']
-         | default(false))
+      when:
+        - inventory_hostname in groups['hermes_host']
+        - not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
   tasks:
-    - name: Deploy Hermes gateway exposure with alert cleanup
-      # post_tasks are skipped for a host once a role task fails, so a
-      # failed vhost deploy, DNS call, or listen-port assertion would leave
-      # the all-alert-names silence active until its 30-minute expiry,
-      # suppressing unrelated alerts. The role therefore runs inside a
-      # block and the teardown runs in always (same pattern and rationale
-      # as deploy_kanban_ui.yaml).
-      block:
-        - name: Apply Hermes gateway exposure role
-          ansible.builtin.include_role:
-            name: hermes
+    - name: Apply Hermes gateway exposure role
+      # Plain tasks, no block/always: always is useless here because an
+      # unreachable delegated task removes hermes from the play before the
+      # always section is reached (strategy/__init__.py appends the host to
+      # _removed_hosts on unreachable), and the co-hosted localhost above
+      # already guarantees the dedicated teardown play below runs for
+      # every outcome (unreachable abort, task failure, or success).
+      ansible.builtin.include_role:
+        name: hermes
+      when: inventory_hostname in groups['hermes_host']
 
-        - name: Flush restart handlers inside the silence window
-          # Ansible's implicit handler flush runs after tasks/post_tasks,
-          # i.e. AFTER the always/teardown below removes the Grafana
-          # silence. A vhost or Homepage change would then queue
-          # `Restart Swag Internal` / `Restart Homepage` and fire them
-          # outside the maintenance window. Flushing here keeps the
-          # service restarts inside the silence; the teardown in always
-          # still guarantees cleanup on failure.
-          ansible.builtin.meta: flush_handlers
-      always:
-        - name: Remove Grafana alert silence
-          ansible.builtin.include_tasks:
-            file: tasks/grafana_remove_silence.yaml
-          when: >-
-            not
-            (hostvars['localhost']['grafana_master_silence_active']
-             | default(false))
+    - name: Flush restart handlers inside the silence window
+      # Ansible's implicit handler flush runs at end of play, i.e. after
+      # the teardown play below would have run. A vhost or Homepage change
+      # would then queue `Restart Swag Internal` / `Restart Homepage` and
+      # fire them outside the maintenance window. Flushing here keeps the
+      # service restarts inside the silence.
+      ansible.builtin.meta: flush_handlers
+
+- name: Remove Grafana alert silence on the controller
+  # Teardown lives in its own controller-side play instead of an `always`
+  # in the work play: on an unreachable delegated task the strategy marks
+  # the hermes host unreachable and removes it from the play, which skips
+  # its `always` section (stranding the all-alert-names silence until its
+  # 30-minute expiry and suppressing unrelated alerts), and when every
+  # host in a play has failed/unreachable the executor breaks out of the
+  # play loop entirely (playbook_executor.py break_play), skipping any
+  # follow-up play of the same play too. The co-hosted localhost in the
+  # work play above keeps that play from ever being all-failed, so this
+  # play runs regardless of how the work play ended, while the work play
+  # still reports unreachable/failed hosts — the deployment still fails.
+  # `hosts: localhost, all` mirrors the master_playbook silence convention
+  # so any --limit value still matches the play. The include is guarded to
+  # the first live host so exactly one teardown runs regardless of matched
+  # hosts — on --limit hermes success that host is hermes itself (TQM
+  # drops the unreachable host from later plays, matching the old always'
+  # limitation), and every inner task delegates to localhost anyway, so
+  # the executor host is irrelevant. It is a no-op when no silence was
+  # created (grafana_silence_id undefined on localhost); the
+  # master-silence guard keeps master_playbook-managed silences untouched.
+  # Residual corner (same as the old always): a --limit run narrowed to
+  # ONLY the host that goes unreachable has no live host left to run the
+  # teardown, and the silence falls back to its 30-minute auto-expiry.
+  hosts: localhost, all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Remove Grafana alert silence
+      ansible.builtin.include_tasks:
+        file: tasks/grafana_remove_silence.yaml
+      when:
+        - inventory_hostname == (ansible_play_hosts | first)
+        - not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
