@@ -40,6 +40,21 @@
     fail_msg: "immich_trusted_proxies did not resolve to a valid IPv4/CIDR (value withheld)."
     success_msg: "immich_trusted_proxies resolved to a valid IPv4/CIDR."
 
+# The host-side NFS mount below needs /sbin/mount.nfs, which ships in
+# Ubuntu's nfs-common package. No shared OS/Docker role in this host's
+# deploy path installs it (verified: zero nfs references in roles/docker
+# and roles/os_configure), so the immich role owns the dependency. Without
+# it the ansible.posix.mount task dies with "mount.nfs: not found" even
+# when the NAS export permits access, and the mount task's ignore_errors
+# would let the deploy finish with a silently empty external library.
+# Installed unconditionally before any mount-point/mount work so a freshly
+# provisioned target converges the same as the current one (idempotent:
+# apt reports ok when the package is already present).
+- name: Ensure nfs-common is installed for the NFS external library mount
+  ansible.builtin.package:
+    name: nfs-common
+    state: present
+
 # 2. Directory Setup
 # UPLOAD_LOCATION (/data), DB data and model-cache are all LOCAL bind mounts
 # under the parent folder: NFS-backed Postgres is unsupported by Immich, and
