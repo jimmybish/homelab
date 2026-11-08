@@ -93,6 +93,37 @@
     - Restart Swag Internal
   when: hermes_configure_proxy | default(true)
 
+# ROUND-8 FINDING (PR#26 Copilot): the queued `Restart Swag Internal` above
+# is only guaranteed while hermes is still IN the play. Every task after it
+# in this role is a delegation that can go unreachable (pfSense API includes
+# on the controller, Homepage blockinfile delegated to homepage_host), and
+# an unreachable result removes hermes from the play outright — proven
+# against installed ansible-core 2.17.14 (paths under site-packages/ansible):
+#   plugins/strategy/__init__.py:624-627  unreachable sets _unreachable_hosts
+#     and appends the host to iterator._play._removed_hosts WITHOUT
+#     mark_host_failed;
+#   plugins/strategy/__init__.py:1104 get_hosts_left() filters
+#     _unreachable_hosts and linear.py:109 feeds only those hosts, so a
+#     removed host is queued no further tasks;
+#   plugins/strategy/__init__.py:311-317  the base run() end-of-play advance
+#     that drives hosts into the HANDLERS state skips unreachable hosts, so
+#     the queued restart is silently dropped;
+#   playbook/play.py:320  force_handlers wires the flush into a block
+#     `always`, reachable only via mark_host_failed/_set_failed_state — the
+#     unreachable path never calls it, so round 7's force_handlers does NOT
+#     cover this case.
+# A later successful rerun renders the identical vhost (not changed, no
+# notify), so NGINX would keep serving stale config until a manual restart.
+# Flushing HERE drains the SWAG restart before any later delegation can
+# remove the host. This meta task is inside the role, hence inside the work
+# play, hence after the silence pre_task and before the teardown play: the
+# restart still lands inside the Grafana silence window. Only
+# `Restart Swag Internal` can be queued at this point (no earlier task in
+# the role notifies), and the handler itself only restarts swag_internal on
+# the proxy host — the gateway-process scope guard above stays intact.
+- name: Flush the SWAG restart before delegations that can strand it
+  ansible.builtin.meta: flush_handlers
+
 # DNS Configuration (alias parents to the proxy host override)
 - name: Ensure deployment host DNS override exists
   ansible.builtin.include_tasks:
