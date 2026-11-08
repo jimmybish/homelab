@@ -13,6 +13,7 @@ exclude_paths:
   - roles/grafana/tasks/tasks/
   - roles/hermes/tasks/tasks/
   - roles/homepage/tasks/tasks/
+  - roles/immich/tasks/tasks/
   - roles/jellyfin/tasks/tasks/
   - roles/jellyseerr/tasks/tasks/
   - roles/kanban_ui/tasks/tasks/

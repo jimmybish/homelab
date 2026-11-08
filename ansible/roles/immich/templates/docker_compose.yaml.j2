@@ -1,0 +1,95 @@
+# Immich photo and video management stack
+# Managed by Ansible - roles/immich/templates/docker_compose.yaml.j2
+# Image pins and service shape mirror the official release compose:
+#   https://github.com/immich-app/immich/releases/latest/download/docker-compose.yml
+# DB data, model-cache and the writable library (/data, UPLOAD_LOCATION) are
+# LOCAL bind mounts: NFS-backed Postgres is unsupported by Immich, and the
+# QNAP /Photos export currently rejects all writes (run-761 evidence), so
+# UPLOAD_LOCATION lives on the photo host's local disk. The NAS photo share is
+# exposed read-only at /photos-external for Immich's EXTERNAL LIBRARY feature
+# only.
+# The external mount is a host-side NFS mount bind-mounted in (mounted by the
+# role with ignore_errors: true) rather than a docker nfs volume: a docker nfs
+# volume that the export rejects fails container creation and blocks startup,
+# whereas a bind of a not-yet-mounted host dir just presents an empty folder.
+# Docker bind propagation is rprivate, so once the NAS export is added the
+# role's mount task goes changed and the Restart Immich handler (notified by
+# the mount task, flushed mid-play) re-establishes the bind over the live
+# share.
+
+name: immich
+
+services:
+  immich-server:
+    container_name: immich_server
+    image: {{ immich_server_image }}
+    volumes:
+      - {{ immich_library_folder }}:/data
+      - {{ immich_external_library_folder }}:/photos-external:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      TZ: {{ timezone }}
+      IMMICH_ENV: production
+      DB_HOSTNAME: database
+      DB_PORT: "5432"
+      DB_USERNAME: immich
+      DB_PASSWORD: "{{ immich_db_password }}"
+      DB_DATABASE_NAME: immich
+      DB_VECTOR_EXTENSION: vectorchord
+      REDIS_HOSTNAME: redis
+      REDIS_PORT: "6379"
+      IMMICH_TRUSTED_PROXIES: "{{ immich_trusted_proxies }}"
+    ports:
+      - "{{ immich_port }}:2283"
+    depends_on:
+      - redis
+      - database
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+    networks:
+      - immich_net
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: {{ immich_ml_image }}
+    volumes:
+      - {{ immich_model_cache_folder }}:/cache
+    environment:
+      TZ: {{ timezone }}
+      IMMICH_ENV: production
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+    networks:
+      - immich_net
+
+  redis:
+    container_name: immich_redis
+    image: {{ immich_redis_image }}
+    healthcheck:
+      test: redis-cli ping | grep -q PONG || exit 1
+    restart: unless-stopped
+    networks:
+      - immich_net
+
+  database:
+    container_name: immich_postgres
+    image: {{ immich_db_image }}
+    environment:
+      POSTGRES_USER: immich
+      POSTGRES_PASSWORD: "{{ immich_db_password }}"
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    volumes:
+      - {{ immich_database_folder }}:/var/lib/postgresql/data
+    shm_size: 128mb
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+    networks:
+      - immich_net
+
+networks:
+  immich_net:
+    driver: bridge

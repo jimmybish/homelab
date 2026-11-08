@@ -1,0 +1,20 @@
+---
+- name: Install Immich
+  # Co-located service: the dedicated immich_host inventory group is a
+  # parent of sonarr_host in inventory.yaml, so it resolves to the same
+  # single Docker host as the media stack without coupling this playbook
+  # to the *arr group or repeating the hostname in committed content.
+  hosts: immich_host
+  become: true
+  pre_tasks:
+    - name: Silence Grafana alerts
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Deploying Immich"
+      when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
+  roles:
+    - immich
+  post_tasks:
+    - name: Remove Grafana alert silence
+      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+      when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))

@@ -87,6 +87,9 @@
 - name: Deploy Paperless
   ansible.builtin.import_playbook: deploy_paperless.yaml
 
+- name: Deploy Immich
+  ansible.builtin.import_playbook: deploy_immich.yaml
+
 - name: Deploy Tronbyt
   ansible.builtin.import_playbook: deploy_tronbyt.yaml
 

@@ -1,0 +1,349 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Get fileserver IP
+  ansible.builtin.set_fact:
+    immich_fileserver_ip: "{{ (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0] }}"
+
+# Immich's env-var reference defines IMMICH_TRUSTED_PROXIES as a
+# comma-separated list of IP addresses, so resolve the reverse-proxy host to
+# its runtime address at deploy time instead of passing the inventory alias.
+- name: Gather reverse proxy host facts
+  ansible.builtin.setup:
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  delegate_facts: true
+
+- name: Derive trusted proxy IP from proxy host facts
+  ansible.builtin.set_fact:
+    immich_trusted_proxies: "{{ hostvars[groups['proxy_host'][0]]['ansible_default_ipv4']['address'] }}"
+
+# Offline/render guard: prove the derived value is an IPv4 address or
+# IPv4 CIDR, never an inventory alias. Dependency-free regex match (netaddr
+# is not installed on the control node, so ansible.utils.ipaddr is unusable
+# here). The value itself is not echoed on success.
+- name: Assert trusted proxies is an IP/CIDR
+  ansible.builtin.assert:
+    that:
+      - immich_trusted_proxies is match(
+          '^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}(/(3[0-2]|[12][0-9]|[1-9]))?$'
+        )
+      - immich_trusted_proxies != (groups['proxy_host'][0] | default(''))
+    fail_msg: "immich_trusted_proxies did not resolve to a valid IPv4/CIDR (value withheld)."
+    success_msg: "immich_trusted_proxies resolved to a valid IPv4/CIDR."
+
+# 2. Directory Setup
+# UPLOAD_LOCATION (/data), DB data and model-cache are all LOCAL bind mounts
+# under the parent folder: NFS-backed Postgres is unsupported by Immich, and
+# the QNAP /Photos export rejects writes from this host (run-761 evidence),
+# so the writable library must live on local disk. The NAS photo share is
+# only ever mounted read-only host-side for the external library feature.
+# The rendered docker-compose.yaml embeds the vaulted DB password, so neither
+# the parent directory nor the file may be world-readable. House pattern (per
+# the firecrawl/tronbyt_vllm_thinking precedent): parent 0750 root:<docker
+# group> and compose 0640 root:<docker group>. The deploy ssh account on the
+# target host is a member of that group and docker compose runs without
+# become, so group-readable is the required reader model.
+- name: Setup Immich parent directory
+  ansible.builtin.file:
+    path: "{{ immich_parent_folder }}"
+    state: directory
+    mode: '0750'
+    owner: root
+    group: "{{ docker_user }}"
+
+# PGDATA is enforced to the steady state of the pinned immich Postgres image,
+# verified by inspecting the image at this commit (sha256-pinned
+# ghcr.io/immich-app/postgres:14-vectorchord0.4.3): /etc/passwd defines
+# postgres as uid/gid 999 and the official docker-entrypoint.sh chowns PGDATA
+# to postgres and chmods it 00700. PostgreSQL refuses to run on a group- or
+# world-readable data directory, so the previous 1000:1000/0755 enforcement
+# fought the entrypoint on every container start. Managing the exact runtime
+# ownership/mode keeps this task converged (no later run flips PGDATA).
+- name: Setup Immich database directory
+  ansible.builtin.file:
+    path: "{{ immich_database_folder }}"
+    state: directory
+    mode: '0700'
+    owner: "999"
+    group: "999"
+
+- name: Setup Immich model-cache directory
+  ansible.builtin.file:
+    path: "{{ immich_model_cache_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup Immich library directory
+  # Local UPLOAD_LOCATION (uploads, thumbs, encoded-video, profile). The
+  # server container runs as root (no user: mapping in compose), so this
+  # matches the parent-dir house pattern and root creates the subdirs.
+  ansible.builtin.file:
+    path: "{{ immich_library_folder }}"
+    state: directory
+    mode: '0750'
+    owner: root
+    group: "{{ docker_user }}"
+
+# Detect whether the mount point is an active mount before enforcing
+# ownership/mode on it (run-788 evidence: once the NAS adds this host to
+# the ro /Photos export, the fstab-persisted mount from a prior deploy is
+# live at this path, so it is the read-only NFS root and the file module's
+# chgrp/chmod dies with EROFS before the mount task below ever runs).
+# `stat -c %m` was tried and rejected: on the live NFS root it dies with
+# EACCES under root_squash (round-12 live probe on the target host: "cannot
+# change to directory ... Permission denied"). findmnt -T resolves the
+# deepest mount containing the path purely from mountinfo (verified live:
+# rc=0 and TARGET = the folder path for the live ro nfs export mount)
+# without touching the directory, so it works on the ro export itself.
+# Existence is checked first so a fresh deploy (path absent) skips the probe
+# and falls through to the file task exactly as before. Truthful detection,
+# no ignore_errors, no failed_when.
+- name: Check whether external library path exists
+  ansible.builtin.stat:
+    path: "{{ immich_external_library_folder }}"
+  register: immich_external_path_stat
+
+- name: Check whether external library path is an active mountpoint
+  ansible.builtin.command:
+    cmd: findmnt -rn -o TARGET -T {{ immich_external_library_folder | quote }}
+  register: immich_external_mountpoint_stat
+  changed_when: false
+  check_mode: false
+  when: immich_external_path_stat.stat.exists
+
+- name: Derive external library mountpoint status
+  # Single source of truth for the skip decision and the report below.
+  # findmnt -T returns the deepest mount containing the path; equality with
+  # the (absolute, templated) folder path means the folder itself is the
+  # mount point. When the path is absent the probe is skipped, stdout is
+  # undefined, default('') never equals the absolute folder path, and the
+  # result is false => the file task enforces as today. If some unrelated
+  # mount merely contains the folder, TARGET differs from it and the file
+  # task still enforces on the plain directory.
+  ansible.builtin.set_fact:
+    immich_external_path_is_mountpoint: >-
+      {{ (immich_external_mountpoint_stat.stdout | default('') | trim)
+         == (immich_external_library_folder | trim) }}
+
+- name: Report external library path mount status
+  ansible.builtin.debug:
+    msg: >-
+      External library path {{ immich_external_library_folder }} is
+      {{ 'not present; it will be created and owned root:docker group.'
+      if not immich_external_path_stat.stat.exists
+      else ('an active mountpoint (live read-only NFS export); ownership
+      and mode are properties of the exported filesystem, so local
+      enforcement is skipped.'
+      if immich_external_path_is_mountpoint | bool
+      else 'a plain directory; local ownership/mode will be enforced.') }}
+
+- name: Setup Immich external library mount point
+  # Host-side mount point for the read-only NAS photo share, bind-mounted
+  # into the server container at /photos-external:ro. Skipped when the path
+  # is already an active mount (see the probe tasks above): the ro NFS root
+  # cannot be chowned/chmodded (EROFS) and its ownership is a property of
+  # the export, not something this play may manage.
+  ansible.builtin.file:
+    path: "{{ immich_external_library_folder }}"
+    state: directory
+    mode: '0750'
+    owner: root
+    group: "{{ docker_user }}"
+  when: not (immich_external_path_is_mountpoint | default(false) | bool)
+
+- name: Mount NAS photo share read-only for the external library
+  # Host-side NFS mount + bind instead of a docker nfs volume: docker mounts
+  # nfs volumes at container-create time, so a rejected export (the NAS
+  # /Photos export currently whitelists only the media-stack host) would
+  # fail immich_server startup. With a bind mount, a failed NFS mount leaves
+  # an empty read-only directory and the server still comes up healthy on
+  # local /data alone. soft (not hard) matches the fleet's read-only share
+  # precedent and keeps external-library scans from hanging if the NAS goes
+  # down; no writes ever traverse this mount, so soft-mode EIO cannot
+  # corrupt data. _netdev/nofail keep boot clean while the export is
+  # missing. ignore_errors (NOT failed_when: false) is deliberate: the
+  # export is expected to be rejected until the NAS owner adds this host
+  # to the read-only /Photos export, and failed_when: false would overwrite
+  # result['failed'] (task_executor _evaluate_failed_when_result sets
+  # result['failed'] = result['failed_when_result']), making every
+  # downstream status test lie. ignore_errors keeps the real failed status
+  # while letting the play continue. notify is provably safe here: the
+  # linear strategy queues notifications only on the non-failed branch and
+  # only when the result is changed (plugins/strategy/__init__.py: the
+  # '_ansible_notify' handling sits in the else of `if task_result
+  # .is_failed():` and is gated by `task_result.is_changed()`), so a
+  # rejected export never queues the restart and an idempotent already-
+  # mounted run never queues it either. Only a genuine absent->mounted
+  # transition does, which the rprivate /photos-external bind requires
+  # (see the compose template header).
+  ansible.posix.mount:
+    src: "{{ immich_fileserver_ip }}:{{ fs_photos }}"
+    path: "{{ immich_external_library_folder }}"
+    fstype: nfs
+    opts: "ro,soft,nolock,vers=3,_netdev,nofail"
+    state: mounted
+    boot: true
+  register: immich_external_mount
+  ignore_errors: true
+  notify:
+    - Restart Immich
+
+- name: Report external library mount outcome
+  ansible.builtin.debug:
+    msg: >-
+      External library mount at {{ immich_external_library_folder }}:
+      {{ 'mounted read-only.' if (immich_external_mount is succeeded
+         and not immich_external_mount is changed)
+         else ('newly mounted read-only; the server will be recreated so the
+         rprivate /photos-external bind sees the share.'
+         if (immich_external_mount is succeeded and immich_external_mount is changed)
+         else ('FAILED: ' ~ (immich_external_mount.msg | default('no message'))
+         ~ ' (expected until the NAS owner adds this host to the read-only
+         /Photos export). Immich external-library scanning is deferred; the
+         server runs healthy on local /data alone.')) }}
+
+- name: Record genuine external mount transition
+  # Explicit fact for the flush below (reviewer finding 1): the handler must
+  # fire only on a genuinely successful AND changed mount. Both halves are
+  # enforced twice over - by strategy notification gating (see mount task
+  # comment) and by this fact, which is what actually enables the flush.
+  ansible.builtin.set_fact:
+    immich_external_mount_ready: >-
+      {{ immich_external_mount is not failed
+         and immich_external_mount is changed }}
+
+- name: Allow Immich port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ immich_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+# 3. Deploy Configuration Files & Run Compose
+- name: Deploy Immich using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ immich_parent_folder }}/docker-compose.yaml"
+    mode: '0640'
+    owner: root
+    group: "{{ docker_user }}"
+    force: true
+  no_log: true
+  # diff is a TASK-level keyword, not a template module argument
+  # (ansible.builtin.template has no diff param; nesting it inside the
+  # module args fails the live run with "Unsupported parameters"). Matches
+  # the kanban_ui compose-template task pattern.
+  diff: false
+  notify:
+    - Restart Immich
+
+- name: Run Immich docker-compose up
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ immich_parent_folder }}"
+    state: present
+    remove_orphans: true
+
+- name: Flush handlers after external mount transition
+  # rprivate bind propagation means a container created while the mount was
+  # absent keeps an empty /photos-external forever; only recreating the
+  # container re-establishes the bind over the live share. This flush is
+  # deliberately placed AFTER the compose template render and the compose-up
+  # task above: the queued Restart Immich handler runs docker_compose_v2
+  # state:restarted, which requires docker-compose.yaml to exist and the
+  # project to be up, so draining the queue any earlier (before the template
+  # task) would abort a fresh deployment whose NAS export was already
+  # reachable. Semantics: fresh deploy with a reachable export -> compose-up
+  # starts the containers, this flush recreates the server so the
+  # /photos-external bind sees the share (one extra recreate on first run,
+  # acceptable); mount failed (export missing, current live state) -> the
+  # strategy queued nothing and the fact is false, so the flush is skipped;
+  # idempotent rerun -> no changes, flush skipped, and any compose-template
+  # notification drains at normal play end as before.
+  ansible.builtin.meta: flush_handlers
+  when: immich_external_mount_ready | default(false) | bool
+
+# Check if Immich port is open and listening
+- name: Check if Immich port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Immich port is listening
+  ansible.builtin.assert:
+    that:
+      - immich_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Immich port {{ immich_port }} is not open and listening!"
+    success_msg: "Immich port {{ immich_port }} is open and listening."
+
+# Proxy Configuration
+- name: Configure nginx proxy for immich
+  when: immich_configure_proxy | default(true)
+  block:
+    - name: Get immich host IP for proxy
+      ansible.builtin.set_fact:
+        immich_proxy_ip: "{{ ansible_default_ipv4.address }}"
+
+    - name: Deploy immich nginx proxy config
+      ansible.builtin.template:
+        src: "templates/immich.subdomain.conf.j2"
+        dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/immich.subdomain.conf"
+        # SWAG normalizes proxy-confs to 0664 at startup (verified live on the
+        # proxy host: every non-sample file in proxy-confs is -rw-rw-r--);
+        # deploying anything else guarantees a mode-only change + restart.
+        mode: '0664'
+        owner: "{{ docker_user }}"
+        group: "{{ docker_user }}"
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      notify: Restart Swag Internal
+
+# DNS Configuration
+- name: Ensure deployment host DNS override exists
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
+  vars:
+    _dns_configure: "{{ immich_configure_dns | default(true) }}"
+  when: immich_configure_dns | default(true)
+
+- name: Create immich DNS alias
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+  vars:
+    _dns_configure: "{{ immich_configure_dns | default(true) }}"
+    _dns_alias_host: immich
+    _dns_alias_descr: Immich photo library
+    _dns_is_proxied: true
+  when: immich_configure_dns | default(true)
+
+# Homepage Configuration
+- name: Add immich service to Homepage Media section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: Immich
+    _homepage_marker: immich service
+    _homepage_template: immich_service.yaml.j2
+    _homepage_insertafter: "^- Media:"
+  when: immich_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for immich
+  ansible.builtin.debug:
+    msg: "immich homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify: Restart Homepage
+  when: immich_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
