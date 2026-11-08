@@ -1,0 +1,129 @@
+---
+# Hermes gateway exposure layer (DNS alias + internal SWAG vhost + Homepage
+# + UFW source-pin for the gateway UI port).
+#
+# SCOPE GUARD: this playbook must never restart or otherwise touch the
+# hermes-gateway process on the hermes host — a gateway restart reaps the
+# dispatcher and workers in the same cgroup. The role delegates to the proxy
+# host, the homepage host, and localhost/pfSense. The on-host work is the
+# read-only listen-port validation plus the UFW converge for THIS role's
+# port only (proxy-source allow, legacy Anywhere tuple deletes). It does
+# not restart any hermes-host service and does not touch unrelated rules.
+- name: Collect proxy host facts for the upstream firewall rule
+  # The gateway UI port is UFW-restricted to the SWAG proxy's address,
+  # resolved in the role via hostvars[groups['proxy_host'][0]]. Those facts
+  # only exist if gathered; the master playbook's earlier deploy_proxy play
+  # covers that, but a STANDALONE run of this playbook must gather them too
+  # or the role's set_fact blows up undefined (same pattern as
+  # deploy_kanban_ui.yaml).
+  hosts: proxy_host
+  gather_facts: true
+  become: false
+
+- name: Install Hermes gateway exposure
+  # `localhost` is co-hosted deliberately (and all real work is guarded to
+  # the hermes_host group below): the executor ABORTS the remaining plays
+  # of the run as soon as every host in a play has failed or gone
+  # unreachable. With hermes as the only target, one unreachable delegated
+  # task (the Homepage or proxy host) removes hermes from the play — the
+  # block/always teardown is skipped for removed hosts AND the play-loop
+  # break below it skips any follow-up teardown play, stranding the
+  # all-alert-names Grafana silence until its 30-minute expiry. With the
+  # controller riding along (every task skipped, so never failed), the
+  # batch is never all-failed, the play loop survives, and the dedicated
+  # teardown play always executes. hermes is still marked
+  # unreachable/failed, so the run still exits non-zero — the failure
+  # signal is unchanged.
+  hosts: hermes_host, localhost
+  become: true
+  force_handlers: true
+  # force_handlers COMPLEMENTS (does not replace) the explicit
+  # flush_handlers below. The meta flush covers the success path: handlers
+  # run at the include_role boundary, inside the silence window. On an
+  # ordinary task failure the strategy skips the remaining tasks for the
+  # failed host — including that flush — so without force_handlers a
+  # queued `Restart Swag Internal` (e.g. the SWAG vhost template was
+  # already written, then a later pfSense task fails) would never fire
+  # until a future successful run, which no longer notifies for the
+  # unchanged template, leaving NGINX serving stale config. With
+  # force_handlers the queued handlers still run at end of play for the
+  # failed host — still inside the silence window, because handlers flush
+  # at end of play and the dedicated teardown play runs later.
+  pre_tasks:
+    - name: Ensure proxy host facts are available for the upstream firewall rule
+      # A HOST-LIMITED run (--limit hermes) never executes the facts play
+      # above, so the role's hostvars[groups['proxy_host'][0]] resolution
+      # would explode undefined. Gather them here instead via a delegated
+      # setup; delegate_facts attaches them to the DELEGATED host (proxy),
+      # which is exactly where the role reads them. become:false since fact
+      # gathering needs no privilege. The when-guard keeps this free on the
+      # unbounded path where the facts play already populated hostvars.
+      ansible.builtin.setup:
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      delegate_facts: true
+      become: false
+      when:
+        - inventory_hostname in groups['hermes_host']
+        - hostvars[groups['proxy_host'][0]]['ansible_default_ipv4'] is not defined
+
+    - name: Silence Grafana alerts
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Deploying Hermes gateway exposure"
+      when:
+        - inventory_hostname in groups['hermes_host']
+        - not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
+  tasks:
+    - name: Apply Hermes gateway exposure role
+      # Plain tasks, no block/always: always is useless here because an
+      # unreachable delegated task removes hermes from the play before the
+      # always section is reached (strategy/__init__.py appends the host to
+      # _removed_hosts on unreachable), and the co-hosted localhost above
+      # already guarantees the dedicated teardown play below runs for
+      # every outcome (unreachable abort, task failure, or success).
+      ansible.builtin.include_role:
+        name: hermes
+      when: inventory_hostname in groups['hermes_host']
+
+    - name: Flush restart handlers inside the silence window
+      # Ansible's implicit handler flush runs at end of play, i.e. after
+      # the teardown play below would have run. A vhost or Homepage change
+      # would then queue `Restart Swag Internal` / `Restart Homepage` and
+      # fire them outside the maintenance window. Flushing here keeps the
+      # service restarts inside the silence.
+      ansible.builtin.meta: flush_handlers
+
+- name: Remove Grafana alert silence on the controller
+  # Teardown lives in its own controller-side play instead of an `always`
+  # in the work play: on an unreachable delegated task the strategy marks
+  # the hermes host unreachable and removes it from the play, which skips
+  # its `always` section (stranding the all-alert-names silence until its
+  # 30-minute expiry and suppressing unrelated alerts), and when every
+  # host in a play has failed/unreachable the executor breaks out of the
+  # play loop entirely (playbook_executor.py break_play), skipping any
+  # follow-up play of the same play too. The co-hosted localhost in the
+  # work play above keeps that play from ever being all-failed, so this
+  # play runs regardless of how the work play ended, while the work play
+  # still reports unreachable/failed hosts — the deployment still fails.
+  # `hosts: localhost, all` mirrors the master_playbook silence convention
+  # so any --limit value still matches the play. The include is guarded to
+  # the first live host so exactly one teardown runs regardless of matched
+  # hosts — on --limit hermes success that host is hermes itself (TQM
+  # drops the unreachable host from later plays, matching the old always'
+  # limitation), and every inner task delegates to localhost anyway, so
+  # the executor host is irrelevant. It is a no-op when no silence was
+  # created (grafana_silence_id undefined on localhost); the
+  # master-silence guard keeps master_playbook-managed silences untouched.
+  # Residual corner (same as the old always): a --limit run narrowed to
+  # ONLY the host that goes unreachable has no live host left to run the
+  # teardown, and the silence falls back to its 30-minute auto-expiry.
+  hosts: localhost, all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Remove Grafana alert silence
+      ansible.builtin.include_tasks:
+        file: tasks/grafana_remove_silence.yaml
+      when:
+        - inventory_hostname == (ansible_play_hosts | first)
+        - not (hostvars['localhost']['grafana_master_silence_active'] | default(false))

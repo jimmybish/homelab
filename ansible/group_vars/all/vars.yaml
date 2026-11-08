@@ -169,6 +169,8 @@ internal_searxng_url: "https://searxng.{{ internal_domain }}"
 
 internal_hermes_api_url: "http://hermes.{{ internal_domain }}:{{ hermes_api_server_port }}/v1"
 
+internal_hermes_gateway_url: "https://hermes-gateway.{{ internal_domain }}"
+
 internal_comfyui_url: "http://comfyui.{{ internal_domain }}:8188"
 
 internal_open_webui_url: "https://open-webui.{{ internal_domain }}"

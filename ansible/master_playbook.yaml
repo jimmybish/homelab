@@ -81,6 +81,9 @@
 - name: Deploy n8n
   ansible.builtin.import_playbook: deploy_n8n.yaml
 
+- name: Deploy Hermes gateway exposure
+  ansible.builtin.import_playbook: deploy_hermes.yaml
+
 - name: Deploy Paperless
   ansible.builtin.import_playbook: deploy_paperless.yaml
 

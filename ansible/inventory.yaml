@@ -183,6 +183,11 @@ searxng_host:
   hosts:
     hermes:
 
+# Hermes (gateway web UI exposure; also targeted by deploy_kanban_ui.yaml)
+hermes_host:
+  hosts:
+    hermes:
+
 # Tracearr
 tracearr_host:
   hosts:

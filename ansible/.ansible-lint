@@ -11,6 +11,7 @@ exclude_paths:
   - roles/arr_suite/tasks/tasks/
   - roles/bambuddy/tasks/tasks/
   - roles/grafana/tasks/tasks/
+  - roles/hermes/tasks/tasks/
   - roles/homepage/tasks/tasks/
   - roles/jellyfin/tasks/tasks/
   - roles/jellyseerr/tasks/tasks/
