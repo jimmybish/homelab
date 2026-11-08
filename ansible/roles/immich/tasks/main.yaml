@@ -289,6 +289,170 @@
   ansible.builtin.meta: flush_handlers
   when: immich_external_mount_ready | default(false) | bool
 
+# Boot-race detection (PR #27 review comment 4507729531): dockerd restores
+# immich_server (restart: unless-stopped) at daemon start, which can beat the
+# fstab NFS mount (_netdev,nofail). The rprivate bind then keeps the empty
+# host directory for the container's whole life even after the host mount
+# lands, and every later deploy sees an unchanged host mount plus unchanged
+# compose config, so nothing ever recreates the container to re-establish the
+# bind. Compare host and container views by mount device number (maj:min):
+# the bind is live only when the container's /photos-external mountinfo entry
+# carries the same device as the host mount point. Device number, not entry
+# count, is required here: the NAS export root_squashes this host, so
+# readdir is EACCES even for root on BOTH views (verified live on the
+# immich host) and a file listing cannot tell an empty stale bind from a
+# live unreadable share.
+- name: Probe host device of external library mount point
+  ansible.builtin.command:
+    cmd: findmnt -rn -o MAJ:MIN -T {{ immich_external_library_folder | quote }}
+  register: immich_host_mount_dev_probe
+  changed_when: false
+  check_mode: false
+  ignore_errors: true
+
+- name: Probe host target of external library mount point
+  # Fresh TARGET read after the mount task above: the earlier
+  # immich_external_mountpoint_stat fact predates this run's mount, so a
+  # mount that succeeded during THIS play would otherwise read as absent.
+  # Equality with the folder path (not mere -T success) means the folder
+  # itself is the mount point, same semantics as the round-12 probe.
+  ansible.builtin.command:
+    cmd: findmnt -rn -o TARGET -T {{ immich_external_library_folder | quote }}
+  register: immich_host_mount_target_probe
+  changed_when: false
+  check_mode: false
+  ignore_errors: true
+
+- name: Derive host external library mount view
+  # Truthful status via 'is not failed' on ignore_errors results (same
+  # rationale as the mount task above: failed_when: false would overwrite
+  # result['failed']). The maj:min shape check keeps the value that gets
+  # interpolated into the container-side regex below constrained to digits
+  # and a colon.
+  ansible.builtin.set_fact:
+    immich_host_mount_active: >-
+      {{ immich_host_mount_target_probe is not failed
+         and (immich_host_mount_target_probe.stdout | default('') | trim)
+            == (immich_external_library_folder | trim)
+         and immich_host_mount_dev_probe is not failed
+         and (immich_host_mount_dev_probe.stdout | default('') | trim)
+            is match('^[0-9]+:[0-9]+$') }}
+    immich_host_mount_dev: "{{ immich_host_mount_dev_probe.stdout | default('') | trim }}"
+
+- name: Probe container view of the external library bind
+  # Reads the container's own /proc/self/mountinfo (a /proc read of the
+  # container's mount namespace, never a readdir of the squashed share, and
+  # cat is in the base image so no grep dependency). rc 0 = the exec ran
+  # inside a running container, so its mountinfo is authoritative. Any
+  # non-zero rc (container stopped/restarting: docker CLI rc 1 with 'Error
+  # ...' on stderr; exec failure: rc 125/126) is UNKNOWN and must never
+  # block or churn the stack.
+  become: false
+  ansible.builtin.command:
+    cmd: docker exec immich_server cat /proc/self/mountinfo
+  register: immich_container_bind_probe
+  changed_when: false
+  check_mode: false
+  ignore_errors: true
+  when: immich_host_mount_active | bool
+
+- name: Build external library bind mountinfo pattern
+  # Built in its OWN task (round-14 review finding): a set_fact value is not
+  # readable by sibling keys of the same set_fact invocation, so deriving
+  # seen/stale alongside the pattern here would abort every deploy with
+  # 'immich_ext_bind_mountinfo_re is undefined'.
+  #
+  # A live bind shows up in the container's mountinfo as a line whose third
+  # field (major:minor) equals the host share's device, rooted at any path,
+  # mounted at exactly /photos-external (trailing space anchors the
+  # mount-point field so a hypothetical /photos-external-2 prefix can never
+  # false-match). The device value interpolated into the pattern was
+  # shape-validated above to [0-9]+:[0-9]+, so no regex metacharacters can
+  # leak in. When the host mount is inactive the value is empty and the
+  # pattern simply never matches anything; every consumer is gated on
+  # immich_host_mount_active / immich_ext_bind_stale anyway.
+  ansible.builtin.set_fact:
+    immich_ext_bind_mountinfo_re: '^[0-9]+ [0-9]+ {{ immich_host_mount_dev }} [^ ]+ /photos-external '
+
+- name: Derive external library bind convergence
+  # Single source of truth for the repair, the report and the assert below.
+  # stale is only true when the host mount is active, the exec PROVENLY ran
+  # (rc 0) and the pattern is absent from the container's mountinfo;
+  # anything else is converged or UNKNOWN and never triggers churn.
+  ansible.builtin.set_fact:
+    immich_container_bind_seen: >-
+      {{ (immich_container_bind_probe.rc | default(125)) == 0
+         and ((immich_container_bind_probe.stdout_lines | default([])
+               | select('match', immich_ext_bind_mountinfo_re) | list | length) > 0) }}
+    immich_ext_bind_stale: >-
+      {{ (immich_host_mount_active | bool)
+         and (immich_container_bind_probe.rc | default(125)) == 0
+         and not ((immich_container_bind_probe.stdout_lines | default([])
+                   | select('match', immich_ext_bind_mountinfo_re) | list | length) > 0) }}
+
+- name: Report external library bind view
+  ansible.builtin.debug:
+    msg: >-
+      External library bind /photos-external:
+      {{ 'host mount inactive (NAS export unavailable); container bind check skipped, startup untouched.'
+         if not (immich_host_mount_active | bool)
+         else ('UNKNOWN: container probe failed (rc '
+         ~ (immich_container_bind_probe.rc | default('n/a'))
+         ~ '); leaving the stack untouched.'
+         if (immich_container_bind_probe.rc | default(125)) != 0
+         else ('converged: container mountinfo shows host share device '
+         ~ immich_host_mount_dev ~ ' at /photos-external.'
+         if immich_container_bind_seen | bool
+         else ('STALE: host has the share mounted (device '
+         ~ immich_host_mount_dev
+         ~ ') but the running container does not see it at /photos-external
+         (boot race); recreating the server service now.'))) }}
+
+- name: Repair stale external library bind
+  # Only a recreate fixes a stale rprivate bind: the container's bind mounts
+  # are re-established from the live host tree when the container is
+  # created. recreate: always is the collection parameter that maps to
+  # docker compose up --force-recreate (verified against the installed
+  # community.docker docker_compose_v2 source: get_up_cmd emits
+  # --force-recreate when recreate == 'always' and appends the services list
+  # after '--'), so exactly immich-server is recreated while
+  # redis/database/machine-learning are left running untouched. This is a
+  # direct module call, NOT a handler and NOT another conditional
+  # flush_handlers: it cannot strand the queued proxy/homepage handlers
+  # (sibling finding t_57d1271b class).
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ immich_parent_folder }}"
+    state: present
+    recreate: always
+    services:
+      - immich-server
+  when: immich_ext_bind_stale | bool
+
+- name: Re-probe container view after bind repair
+  become: false
+  ansible.builtin.command:
+    cmd: docker exec immich_server cat /proc/self/mountinfo
+  register: immich_container_bind_reprobe
+  changed_when: false
+  check_mode: false
+  ignore_errors: true
+  when: immich_ext_bind_stale | bool
+
+- name: Assert external library bind converged after repair
+  ansible.builtin.assert:
+    that:
+      - (immich_container_bind_reprobe.rc | default(125)) == 0
+      - ((immich_container_bind_reprobe.stdout_lines | default([])
+          | select('match', immich_ext_bind_mountinfo_re) | list | length) > 0)
+    fail_msg: >-
+      immich_server was recreated but its /photos-external still does not
+      show the host share device {{ immich_host_mount_dev }}. Check the NFS
+      export and the container's mount namespace manually.
+    success_msg: >-
+      immich_server sees the host share at /photos-external after recreate.
+  when: immich_ext_bind_stale | bool
+
 # Check if Immich port is open and listening
 - name: Check if Immich port is open and listening
   community.general.listen_ports_facts:
