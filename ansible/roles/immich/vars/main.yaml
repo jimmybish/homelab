@@ -11,9 +11,10 @@
 # LOCAL disk: Immich does not support NFS-backed Postgres, and the QNAP
 # /Photos export rejects writes from this host (run-761 evidence), so
 # UPLOAD_LOCATION (/data: uploads, thumbs, encoded-video, profile) is a
-# local bind mount. The NAS photo share (:{{ fs_photos }}) is only ever
-# mounted read-only host-side for Immich's EXTERNAL LIBRARY feature (the
-# per-user external path is configured in the Immich admin UI).
+# local bind mount. The NAS photo share (:{{ fs_photos }}) is mounted by
+# docker as the photos-external docker-local NFS driver volume, read-only,
+# for Immich's EXTERNAL LIBRARY feature (the per-user external path is
+# configured in the Immich admin UI).
 
 # Application images are sha256-pinned to the exact reviewed release v3.3.5
 # (published 2026-10-21) instead of the mutable `release` tag, so server and
@@ -42,10 +43,13 @@ immich_model_cache_folder: "{{ immich_parent_folder }}/model-cache"
 # thumbs, encoded-video and profile live here. The container runs as root
 # (no user: mapping in compose), so the role creates it root:<docker group>.
 immich_library_folder: "{{ immich_parent_folder }}/library"
-# Host-side mount point for the read-only NAS photo share, bind-mounted
-# into the server container at /photos-external:ro for the external
-# library feature. Stays empty until the NAS owner exports /Photos to
-# this host read-only (role mount task uses ignore_errors: true).
+# Residue path from the retired host-side NFS mount of the NAS photo share
+# (round-12 and earlier). Since round 13 the share is mounted by the docker
+# daemon itself as the photos-external docker-local NFS volume declared in
+# the compose template (house pattern, roles/jellyfin mytv/mymovies), so
+# this path is no longer created or mounted; the cleanup tasks in tasks/
+# remove the fstab entry, live mount, and directory left behind by
+# run-785-era deploys.
 immich_external_library_folder: "{{ immich_parent_folder }}/photos-external"
 
 # Feature flags

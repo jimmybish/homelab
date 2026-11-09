@@ -40,14 +40,14 @@
     fail_msg: "immich_trusted_proxies did not resolve to a valid IPv4/CIDR (value withheld)."
     success_msg: "immich_trusted_proxies resolved to a valid IPv4/CIDR."
 
-# The host-side NFS mount below needs /sbin/mount.nfs, which ships in
-# Ubuntu's nfs-common package. No shared OS/Docker role in this host's
-# deploy path installs it (verified: zero nfs references in roles/docker
-# and roles/os_configure), so the immich role owns the dependency. Without
-# it the ansible.posix.mount task dies with "mount.nfs: not found" even
-# when the NAS export permits access, and the mount task's ignore_errors
-# would let the deploy finish with a silently empty external library.
-# Installed unconditionally before any mount-point/mount work so a freshly
+# The docker-local NFS volume for the read-only external library is mounted
+# by the docker daemon via /sbin/mount.nfs, which ships in Ubuntu's
+# nfs-common package. No shared OS/Docker role in this host's deploy path
+# installs it (verified: zero nfs references in roles/docker and
+# roles/os_configure), so the immich role owns the dependency. Without it,
+# creation of the photos-external docker volume fails with
+# "mount.nfs: not found" even when the NAS export permits access. Installed
+# unconditionally before the compose template renders so a freshly
 # provisioned target converges the same as the current one (idempotent:
 # apt reports ok when the package is already present).
 - name: Ensure nfs-common is installed for the NFS external library mount
@@ -60,7 +60,8 @@
 # under the parent folder: NFS-backed Postgres is unsupported by Immich, and
 # the QNAP /Photos export rejects writes from this host (run-761 evidence),
 # so the writable library must live on local disk. The NAS photo share is
-# only ever mounted read-only host-side for the external library feature.
+# mounted by docker itself as the photos-external NFS volume (see the compose
+# template), not host-side, so no mount point is created for it here.
 # The rendered docker-compose.yaml embeds the vaulted DB password, so neither
 # the parent directory nor the file may be world-readable. House pattern (per
 # the firecrawl/tronbyt_vllm_thinking precedent): parent 0750 root:<docker
@@ -110,134 +111,14 @@
     owner: root
     group: "{{ docker_user }}"
 
-# Detect whether the mount point is an active mount before enforcing
-# ownership/mode on it (run-788 evidence: once the NAS adds this host to
-# the ro /Photos export, the fstab-persisted mount from a prior deploy is
-# live at this path, so it is the read-only NFS root and the file module's
-# chgrp/chmod dies with EROFS before the mount task below ever runs).
-# `stat -c %m` was tried and rejected: on the live NFS root it dies with
-# EACCES under root_squash (round-12 live probe on the target host: "cannot
-# change to directory ... Permission denied"). findmnt -T resolves the
-# deepest mount containing the path purely from mountinfo (verified live:
-# rc=0 and TARGET = the folder path for the live ro nfs export mount)
-# without touching the directory, so it works on the ro export itself.
-# Existence is checked first so a fresh deploy (path absent) skips the probe
-# and falls through to the file task exactly as before. Truthful detection,
-# no ignore_errors, no failed_when.
-- name: Check whether external library path exists
-  ansible.builtin.stat:
-    path: "{{ immich_external_library_folder }}"
-  register: immich_external_path_stat
-
-- name: Check whether external library path is an active mountpoint
-  ansible.builtin.command:
-    cmd: findmnt -rn -o TARGET -T {{ immich_external_library_folder | quote }}
-  register: immich_external_mountpoint_stat
-  changed_when: false
-  check_mode: false
-  when: immich_external_path_stat.stat.exists
-
-- name: Derive external library mountpoint status
-  # Single source of truth for the skip decision and the report below.
-  # findmnt -T returns the deepest mount containing the path; equality with
-  # the (absolute, templated) folder path means the folder itself is the
-  # mount point. When the path is absent the probe is skipped, stdout is
-  # undefined, default('') never equals the absolute folder path, and the
-  # result is false => the file task enforces as today. If some unrelated
-  # mount merely contains the folder, TARGET differs from it and the file
-  # task still enforces on the plain directory.
-  ansible.builtin.set_fact:
-    immich_external_path_is_mountpoint: >-
-      {{ (immich_external_mountpoint_stat.stdout | default('') | trim)
-         == (immich_external_library_folder | trim) }}
-
-- name: Report external library path mount status
-  ansible.builtin.debug:
-    msg: >-
-      External library path {{ immich_external_library_folder }} is
-      {{ 'not present; it will be created and owned root:docker group.'
-      if not immich_external_path_stat.stat.exists
-      else ('an active mountpoint (live read-only NFS export); ownership
-      and mode are properties of the exported filesystem, so local
-      enforcement is skipped.'
-      if immich_external_path_is_mountpoint | bool
-      else 'a plain directory; local ownership/mode will be enforced.') }}
-
-- name: Setup Immich external library mount point
-  # Host-side mount point for the read-only NAS photo share, bind-mounted
-  # into the server container at /photos-external:ro. Skipped when the path
-  # is already an active mount (see the probe tasks above): the ro NFS root
-  # cannot be chowned/chmodded (EROFS) and its ownership is a property of
-  # the export, not something this play may manage.
-  ansible.builtin.file:
-    path: "{{ immich_external_library_folder }}"
-    state: directory
-    mode: '0750'
-    owner: root
-    group: "{{ docker_user }}"
-  when: not (immich_external_path_is_mountpoint | default(false) | bool)
-
-- name: Mount NAS photo share read-only for the external library
-  # Host-side NFS mount + bind instead of a docker nfs volume: docker mounts
-  # nfs volumes at container-create time, so a rejected export (the NAS
-  # /Photos export currently whitelists only the media-stack host) would
-  # fail immich_server startup. With a bind mount, a failed NFS mount leaves
-  # an empty read-only directory and the server still comes up healthy on
-  # local /data alone. soft (not hard) matches the fleet's read-only share
-  # precedent and keeps external-library scans from hanging if the NAS goes
-  # down; no writes ever traverse this mount, so soft-mode EIO cannot
-  # corrupt data. _netdev/nofail keep boot clean while the export is
-  # missing. ignore_errors (NOT failed_when: false) is deliberate: the
-  # export is expected to be rejected until the NAS owner adds this host
-  # to the read-only /Photos export, and failed_when: false would overwrite
-  # result['failed'] (task_executor _evaluate_failed_when_result sets
-  # result['failed'] = result['failed_when_result']), making every
-  # downstream status test lie. ignore_errors keeps the real failed status
-  # while letting the play continue. notify is provably safe here: the
-  # linear strategy queues notifications only on the non-failed branch and
-  # only when the result is changed (plugins/strategy/__init__.py: the
-  # '_ansible_notify' handling sits in the else of `if task_result
-  # .is_failed():` and is gated by `task_result.is_changed()`), so a
-  # rejected export never queues the restart and an idempotent already-
-  # mounted run never queues it either. Only a genuine absent->mounted
-  # transition does, which the rprivate /photos-external bind requires
-  # (see the compose template header).
-  ansible.posix.mount:
-    src: "{{ immich_fileserver_ip }}:{{ fs_photos }}"
-    path: "{{ immich_external_library_folder }}"
-    fstype: nfs
-    opts: "ro,soft,nolock,vers=3,_netdev,nofail"
-    state: mounted
-    boot: true
-  register: immich_external_mount
-  ignore_errors: true
-  notify:
-    - Restart Immich
-
-- name: Report external library mount outcome
-  ansible.builtin.debug:
-    msg: >-
-      External library mount at {{ immich_external_library_folder }}:
-      {{ 'mounted read-only.' if (immich_external_mount is succeeded
-         and not immich_external_mount is changed)
-         else ('newly mounted read-only; the server will be recreated so the
-         rprivate /photos-external bind sees the share.'
-         if (immich_external_mount is succeeded and immich_external_mount is changed)
-         else ('FAILED: ' ~ (immich_external_mount.msg | default('no message'))
-         ~ ' (expected until the NAS owner adds this host to the read-only
-         /Photos export). Immich external-library scanning is deferred; the
-         server runs healthy on local /data alone.')) }}
-
-- name: Record genuine external mount transition
-  # Explicit fact for the flush below (reviewer finding 1): the handler must
-  # fire only on a genuinely successful AND changed mount. Both halves are
-  # enforced twice over - by strategy notification gating (see mount task
-  # comment) and by this fact, which is what actually enables the flush.
-  ansible.builtin.set_fact:
-    immich_external_mount_ready: >-
-      {{ immich_external_mount is not failed
-         and immich_external_mount is changed }}
-
+# Round-13 (2026-11-09): the read-only NAS photo share moved from a
+# host-side ansible.posix.mount + rprivate bind to a docker-local NFS
+# driver volume (house pattern, roles/jellyfin mytv/mymovies). The old
+# probe/mount/report machinery is gone; the two tasks below only have to
+# remove residue left by run-785-era deploys (an fstab entry and a live
+# host mount at immich_external_library_folder). They run AFTER compose
+# convergence (further down) so no container still bind-references the
+# host path while it is unmounted.
 - name: Allow Immich port through UFW
   community.general.ufw:
     rule: allow
@@ -270,188 +151,103 @@
     state: present
     remove_orphans: true
 
-- name: Flush handlers after external mount transition
-  # rprivate bind propagation means a container created while the mount was
-  # absent keeps an empty /photos-external forever; only recreating the
-  # container re-establishes the bind over the live share. This flush is
-  # deliberately placed AFTER the compose template render and the compose-up
-  # task above: the queued Restart Immich handler runs docker_compose_v2
-  # state:restarted, which requires docker-compose.yaml to exist and the
-  # project to be up, so draining the queue any earlier (before the template
-  # task) would abort a fresh deployment whose NAS export was already
-  # reachable. Semantics: fresh deploy with a reachable export -> compose-up
-  # starts the containers, this flush recreates the server so the
-  # /photos-external bind sees the share (one extra recreate on first run,
-  # acceptable); mount failed (export missing, current live state) -> the
-  # strategy queued nothing and the fact is false, so the flush is skipped;
-  # idempotent rerun -> no changes, flush skipped, and any compose-template
-  # notification drains at normal play end as before.
-  ansible.builtin.meta: flush_handlers
-  when: immich_external_mount_ready | default(false) | bool
+# Round-13 residue cleanup (must run AFTER compose convergence): run-785-era
+# deploys persisted a host-side fstab mount of the NAS share at
+# immich_external_library_folder and containers bind-referenced it. Now that
+# the share is a docker-local NFS volume, the compose-up above (with
+# remove_orphans: true) has already recreated/replaced the containers, so
+# nothing binds that host path any more and it is safe to unmount and delete.
+# Truthful detection via ignore_errors + 'is not failed' (never
+# failed_when: false, which overwrites result['failed']); a fresh host with
+# no residue converges with zero changes.
+- name: Check obsolete host mount point presence
+  ansible.builtin.stat:
+    path: "{{ immich_external_library_folder }}"
+  register: immich_legacy_mount_stat
 
-# Boot-race detection (PR #27 review comment 4507729531): dockerd restores
-# immich_server (restart: unless-stopped) at daemon start, which can beat the
-# fstab NFS mount (_netdev,nofail). The rprivate bind then keeps the empty
-# host directory for the container's whole life even after the host mount
-# lands, and every later deploy sees an unchanged host mount plus unchanged
-# compose config, so nothing ever recreates the container to re-establish the
-# bind. Compare host and container views by mount device number (maj:min):
-# the bind is live only when the container's /photos-external mountinfo entry
-# carries the same device as the host mount point. Device number, not entry
-# count, is required here: the NAS export root_squashes this host, so
-# readdir is EACCES even for root on BOTH views (verified live on the
-# immich host) and a file listing cannot tell an empty stale bind from a
-# live unreadable share.
-- name: Probe host device of external library mount point
-  ansible.builtin.command:
-    cmd: findmnt -rn -o MAJ:MIN -T {{ immich_external_library_folder | quote }}
-  register: immich_host_mount_dev_probe
-  changed_when: false
-  check_mode: false
-  ignore_errors: true
-
-- name: Probe host target of external library mount point
-  # Fresh TARGET read after the mount task above: the earlier
-  # immich_external_mountpoint_stat fact predates this run's mount, so a
-  # mount that succeeded during THIS play would otherwise read as absent.
-  # Equality with the folder path (not mere -T success) means the folder
-  # itself is the mount point, same semantics as the round-12 probe.
+- name: Probe obsolete host mount point mount status
+  # findmnt -T resolves purely from mountinfo without touching the (possibly
+  # root-squashed, EACCES-on-readdir) NFS root; guarded on existence so a
+  # fresh host never runs it against an absent path.
   ansible.builtin.command:
     cmd: findmnt -rn -o TARGET -T {{ immich_external_library_folder | quote }}
-  register: immich_host_mount_target_probe
+  register: immich_legacy_live_probe
   changed_when: false
   check_mode: false
   ignore_errors: true
+  when: immich_legacy_mount_stat.stat.exists
 
-- name: Derive host external library mount view
-  # Truthful status via 'is not failed' on ignore_errors results (same
-  # rationale as the mount task above: failed_when: false would overwrite
-  # result['failed']). The maj:min shape check keeps the value that gets
-  # interpolated into the container-side regex below constrained to digits
-  # and a colon.
-  ansible.builtin.set_fact:
-    immich_host_mount_active: >-
-      {{ immich_host_mount_target_probe is not failed
-         and (immich_host_mount_target_probe.stdout | default('') | trim)
-            == (immich_external_library_folder | trim)
-         and immich_host_mount_dev_probe is not failed
-         and (immich_host_mount_dev_probe.stdout | default('') | trim)
-            is match('^[0-9]+:[0-9]+$') }}
-    immich_host_mount_dev: "{{ immich_host_mount_dev_probe.stdout | default('') | trim }}"
-
-- name: Probe container view of the external library bind
-  # Reads the container's own /proc/self/mountinfo (a /proc read of the
-  # container's mount namespace, never a readdir of the squashed share, and
-  # cat is in the base image so no grep dependency). rc 0 = the exec ran
-  # inside a running container, so its mountinfo is authoritative. Any
-  # non-zero rc (container stopped/restarting: docker CLI rc 1 with 'Error
-  # ...' on stderr; exec failure: rc 125/126) is UNKNOWN and must never
-  # block or churn the stack.
-  become: false
+- name: Probe obsolete fstab entry for the host mount point
+  # --fstab searches /etc/fstab only (no path access needed), rc!=0 when no
+  # entry matches - a normal outcome, kept truthful via ignore_errors.
   ansible.builtin.command:
-    cmd: docker exec immich_server cat /proc/self/mountinfo
-  register: immich_container_bind_probe
+    cmd: findmnt --fstab -rn -o TARGET {{ immich_external_library_folder | quote }}
+  register: immich_legacy_fstab_probe
   changed_when: false
   check_mode: false
   ignore_errors: true
-  when: immich_host_mount_active | bool
 
-- name: Build external library bind mountinfo pattern
-  # Built in its OWN task (round-14 review finding): a set_fact value is not
-  # readable by sibling keys of the same set_fact invocation, so deriving
-  # seen/stale alongside the pattern here would abort every deploy with
-  # 'immich_ext_bind_mountinfo_re is undefined'.
-  #
-  # A live bind shows up in the container's mountinfo as a line whose third
-  # field (major:minor) equals the host share's device, rooted at any path,
-  # mounted at exactly /photos-external (trailing space anchors the
-  # mount-point field so a hypothetical /photos-external-2 prefix can never
-  # false-match). The device value interpolated into the pattern was
-  # shape-validated above to [0-9]+:[0-9]+, so no regex metacharacters can
-  # leak in. When the host mount is inactive the value is empty and the
-  # pattern simply never matches anything; every consumer is gated on
-  # immich_host_mount_active / immich_ext_bind_stale anyway.
+- name: Derive obsolete host mount residue
+  # Single source of truth for the cleanup tasks below. Equality (not mere
+  # -T success) means the folder itself is the mount point, same semantics
+  # as the retired round-12 probe. A skipped live probe (directory absent)
+  # registers {'skipped': True} with no stdout, so the equality is false
+  # and no live mount is inferred on a path that cannot be mounted here.
   ansible.builtin.set_fact:
-    immich_ext_bind_mountinfo_re: '^[0-9]+ [0-9]+ {{ immich_host_mount_dev }} [^ ]+ /photos-external '
+    immich_legacy_mount_live: >-
+      {{ (immich_legacy_live_probe is not skipped)
+         and (immich_legacy_live_probe is not failed)
+         and ((immich_legacy_live_probe.stdout | default('') | trim)
+              == (immich_external_library_folder | trim)) }}
+    immich_legacy_fstab_present: >-
+      {{ (immich_legacy_fstab_probe is not failed)
+         and ((immich_legacy_fstab_probe.stdout | default('') | trim)
+              == (immich_external_library_folder | trim)) }}
 
-- name: Derive external library bind convergence
-  # Single source of truth for the repair, the report and the assert below.
-  # stale is only true when the host mount is active, the exec PROVENLY ran
-  # (rc 0) and the pattern is absent from the container's mountinfo;
-  # anything else is converged or UNKNOWN and never triggers churn.
-  ansible.builtin.set_fact:
-    immich_container_bind_seen: >-
-      {{ (immich_container_bind_probe.rc | default(125)) == 0
-         and ((immich_container_bind_probe.stdout_lines | default([])
-               | select('match', immich_ext_bind_mountinfo_re) | list | length) > 0) }}
-    immich_ext_bind_stale: >-
-      {{ (immich_host_mount_active | bool)
-         and (immich_container_bind_probe.rc | default(125)) == 0
-         and not ((immich_container_bind_probe.stdout_lines | default([])
-                   | select('match', immich_ext_bind_mountinfo_re) | list | length) > 0) }}
+- name: Unmount obsolete live host mount
+  # Explicit live teardown for the live-only residue branch (mounted with
+  # no fstab entry, e.g. manually mounted or entry already removed), and
+  # the first half of live+fstab. The module contract for unmounted is
+  # "unmount without changing fstab" (module source: "Do not change fstab
+  # state, but unmount"), so fstab handling lives in the absent task
+  # below. Skipped when nothing is mounted, so no-residue and fstab-only
+  # runs take no action here.
+  # ansible.posix.mount is kept as an import only for this cleanup; new
+  # mounts for this role never use it.
+  ansible.posix.mount:
+    path: "{{ immich_external_library_folder }}"
+    state: unmounted
+  when:
+    - immich_legacy_mount_live | bool
 
-- name: Report external library bind view
-  ansible.builtin.debug:
-    msg: >-
-      External library bind /photos-external:
-      {{ 'host mount inactive (NAS export unavailable); container bind check skipped, startup untouched.'
-         if not (immich_host_mount_active | bool)
-         else ('UNKNOWN: container probe failed (rc '
-         ~ (immich_container_bind_probe.rc | default('n/a'))
-         ~ '); leaving the stack untouched.'
-         if (immich_container_bind_probe.rc | default(125)) != 0
-         else ('converged: container mountinfo shows host share device '
-         ~ immich_host_mount_dev ~ ' at /photos-external.'
-         if immich_container_bind_seen | bool
-         else ('STALE: host has the share mounted (device '
-         ~ immich_host_mount_dev
-         ~ ') but the running container does not see it at /photos-external
-         (boot race); recreating the server service now.'))) }}
+- name: Remove obsolete host mount point directory
+  # Runs after the unmount above (rmtree on a live NFS mount would fail)
+  # and before the fstab task below, so ansible.posix.mount state: absent
+  # never hits its internal os.rmdir path (which fail_jsons on a
+  # non-empty directory). file state: absent removes the directory and
+  # any stale contents; it is a no-op when the path is already gone.
+  ansible.builtin.file:
+    path: "{{ immich_external_library_folder }}"
+    state: absent
+  when:
+    - immich_legacy_mount_stat.stat.exists
+      or immich_legacy_mount_live | bool
 
-- name: Repair stale external library bind
-  # Only a recreate fixes a stale rprivate bind: the container's bind mounts
-  # are re-established from the live host tree when the container is
-  # created. recreate: always is the collection parameter that maps to
-  # docker compose up --force-recreate (verified against the installed
-  # community.docker docker_compose_v2 source: get_up_cmd emits
-  # --force-recreate when recreate == 'always' and appends the services list
-  # after '--'), so exactly immich-server is recreated while
-  # redis/database/machine-learning are left running untouched. This is a
-  # direct module call, NOT a handler and NOT another conditional
-  # flush_handlers: it cannot strand the queued proxy/homepage handlers
-  # (sibling finding t_57d1271b class).
-  become: false
-  community.docker.docker_compose_v2:
-    project_src: "{{ immich_parent_folder }}"
-    state: present
-    recreate: always
-    services:
-      - immich-server
-  when: immich_ext_bind_stale | bool
-
-- name: Re-probe container view after bind repair
-  become: false
-  ansible.builtin.command:
-    cmd: docker exec immich_server cat /proc/self/mountinfo
-  register: immich_container_bind_reprobe
-  changed_when: false
-  check_mode: false
-  ignore_errors: true
-  when: immich_ext_bind_stale | bool
-
-- name: Assert external library bind converged after repair
-  ansible.builtin.assert:
-    that:
-      - (immich_container_bind_reprobe.rc | default(125)) == 0
-      - ((immich_container_bind_reprobe.stdout_lines | default([])
-          | select('match', immich_ext_bind_mountinfo_re) | list | length) > 0)
-    fail_msg: >-
-      immich_server was recreated but its /photos-external still does not
-      show the host share device {{ immich_host_mount_dev }}. Check the NFS
-      export and the container's mount namespace manually.
-    success_msg: >-
-      immich_server sees the host share at /photos-external after recreate.
-  when: immich_ext_bind_stale | bool
+- name: Drop obsolete fstab entry for the host mount point
+  # state: absent is the documented fstab-removal state (module source:
+  # "absent: Remove from fstab and unmounted"). The prior task pair used
+  # state: unmounted for this, but unmounted NEVER edits fstab, so the
+  # run-785 nofail entry survived and every later fstab-only run
+  # recreated and deleted the directory (round-13 blocking finding).
+  # With the directory already removed above and the mount already
+  # unmounted, absent converges to a pure /etc/fstab text edit; when no
+  # entry matches it reports no change, so second passes are no-op for
+  # every residue branch (live+fstab, live-only, fstab-only, none).
+  ansible.posix.mount:
+    path: "{{ immich_external_library_folder }}"
+    state: absent
+  when:
+    - immich_legacy_fstab_present | bool
 
 # Check if Immich port is open and listening
 - name: Check if Immich port is open and listening

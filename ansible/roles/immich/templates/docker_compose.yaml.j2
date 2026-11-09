@@ -8,14 +8,19 @@
 # UPLOAD_LOCATION lives on the photo host's local disk. The NAS photo share is
 # exposed read-only at /photos-external for Immich's EXTERNAL LIBRARY feature
 # only.
-# The external mount is a host-side NFS mount bind-mounted in (mounted by the
-# role with ignore_errors: true) rather than a docker nfs volume: a docker nfs
-# volume that the export rejects fails container creation and blocks startup,
-# whereas a bind of a not-yet-mounted host dir just presents an empty folder.
-# Docker bind propagation is rprivate, so once the NAS export is added the
-# role's mount task goes changed and the Restart Immich handler (notified by
-# the mount task, flushed mid-play) re-establishes the bind over the live
-# share.
+# The external mount is a docker-local NFS driver volume (house pattern,
+# matching roles/jellyfin's mytv/mymovies): the docker daemon mounts the
+# export itself (via the host NFS client from nfs-common, installed by the
+# role) when the volume is created, so there is no host-side fstab entry, no
+# bind-propagation (rprivate) boot race, and nothing in /etc/docker-storage
+# for this share.
+# Tradeoff (accepted by Jimmy 2026-11-09, round 13): docker creates NFS
+# volumes at container-create time, so if the NAS /Photos export is rejected
+# or unreachable, immich_server creation fails and it sits in a restart loop
+# until the export returns. The live export has been reachable from this
+# host since the round-12 probe (findmnt shows the ro nfs mount), so the
+# degraded case is an availability regression only while the NAS is down,
+# same failure class as Jellyfin's mytv/mymovies volumes.
 
 name: immich
 
@@ -25,7 +30,7 @@ services:
     image: {{ immich_server_image }}
     volumes:
       - {{ immich_library_folder }}:/data
-      - {{ immich_external_library_folder }}:/photos-external:ro
+      - photos-external:/photos-external:ro
       - /etc/localtime:/etc/localtime:ro
     environment:
       TZ: {{ timezone }}
@@ -89,6 +94,19 @@ services:
       disable: false
     networks:
       - immich_net
+
+volumes:
+  # Docker-local NFS volume for the read-only NAS photo share (house pattern
+  # per roles/jellyfin mytv/mymovies). immich_fileserver_ip is derived from
+  # the qnap inventory group exactly like jellyfin_fileserver_ip. ro + soft
+  # (read-only external library; scans must not hang the host if the NAS
+  # goes down), nolock + vers=3 match the fleet's QNAP NFS precedent.
+  photos-external:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr={{ immich_fileserver_ip }},nolock,soft,ro,vers=3"
+      device: ":{{ fs_photos }}"
 
 networks:
   immich_net:
