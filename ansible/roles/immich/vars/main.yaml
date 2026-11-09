@@ -1,0 +1,58 @@
+---
+# Research and Documentation
+# Immich: https://immich.app/docs/
+# - High performance self-hosted photo and video management
+# - Official release compose (source of pins below, pulled 2026-10-03):
+#   https://github.com/immich-app/immich/releases/latest/download/docker-compose.yml
+# - Env vars: https://immich.app/docs/install/environment-variables/
+#
+# DB image and valkey are sha256-pinned exactly as in the official release
+# compose. DB data, the ML model-cache, and the writable library all live on
+# LOCAL disk: Immich does not support NFS-backed Postgres, and the QNAP
+# /Photos export rejects writes from this host (run-761 evidence), so
+# UPLOAD_LOCATION (/data: uploads, thumbs, encoded-video, profile) is a
+# local bind mount. The NAS photo share (:{{ fs_photos }}) is mounted by
+# docker as the photos-external docker-local NFS driver volume, read-only,
+# for Immich's EXTERNAL LIBRARY feature (the per-user external path is
+# configured in the Immich admin UI).
+
+# Application images are sha256-pinned to the exact reviewed release v3.3.5
+# (published 2026-10-21) instead of the mutable `release` tag, so server and
+# ML can never be deployed from different generations. The digests below are
+# the docker-content-digest values ghcr.io serves for the v3.3.5 manifest
+# lists, resolved from the registry on 2026-10-27. At pinning time `release`
+# still resolved to these same two digests, but the tag is upstream-controlled
+# and moves without notice; do not go back to it.
+immich_server_image: "ghcr.io/immich-app/immich-server:v3.3.5@sha256:485d546a2e31d6a8b4db8423fcba5c109de8c218d93410af115fd1ccfc4352a6"
+immich_ml_image: "ghcr.io/immich-app/immich-machine-learning:v3.3.5@sha256:5b28c9352c8374b8a1ed96fbdd8d6755fea6e43510ec43fdf6538aa02ea40f56"
+# Official postgres image tag (vectorchord); sha256 pinned per release compose
+immich_db_image: "ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23"
+# Valkey (Redis-compatible) digest taken from the same reviewed v3.3.5 release
+# compose (the previous 70739f85... pin predated this release)
+immich_redis_image: "docker.io/valkey/valkey:9@sha256:c123e3715db63d06d4ad6964884037aa0d5d4d703939b9929954112889708e1d"
+
+# External port (verified free on the target host at triage time)
+immich_port: 2283
+
+# Volume paths
+immich_parent_folder: "{{ docker_storage_folder }}/immich-stack"
+immich_database_folder: "{{ immich_parent_folder }}/database"
+immich_model_cache_folder: "{{ immich_parent_folder }}/model-cache"
+# Writable library (UPLOAD_LOCATION /data) on local disk: the QNAP /Photos
+# export rejects writes from this host (run-761 evidence), so uploads,
+# thumbs, encoded-video and profile live here. The container runs as root
+# (no user: mapping in compose), so the role creates it root:<docker group>.
+immich_library_folder: "{{ immich_parent_folder }}/library"
+# Residue path from the retired host-side NFS mount of the NAS photo share
+# (round-12 and earlier). Since round 13 the share is mounted by the docker
+# daemon itself as the photos-external docker-local NFS volume declared in
+# the compose template (house pattern, roles/jellyfin mytv/mymovies), so
+# this path is no longer created or mounted; the cleanup tasks in tasks/
+# remove the fstab entry, live mount, and directory left behind by
+# run-785-era deploys.
+immich_external_library_folder: "{{ immich_parent_folder }}/photos-external"
+
+# Feature flags
+immich_configure_dns: true
+immich_configure_proxy: true
+immich_configure_homepage: true

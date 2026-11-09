@@ -1,0 +1,324 @@
+---
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Get fileserver IP
+  ansible.builtin.set_fact:
+    immich_fileserver_ip: "{{ (lookup('ansible.builtin.inventory_hostnames', 'qnap').split(','))[0] }}"
+
+# Immich's env-var reference defines IMMICH_TRUSTED_PROXIES as a
+# comma-separated list of IP addresses, so resolve the reverse-proxy host to
+# its runtime address at deploy time instead of passing the inventory alias.
+- name: Gather reverse proxy host facts
+  ansible.builtin.setup:
+  delegate_to: "{{ groups['proxy_host'][0] }}"
+  delegate_facts: true
+
+- name: Derive trusted proxy IP from proxy host facts
+  ansible.builtin.set_fact:
+    immich_trusted_proxies: "{{ hostvars[groups['proxy_host'][0]]['ansible_default_ipv4']['address'] }}"
+
+# Offline/render guard: prove the derived value is an IPv4 address or
+# IPv4 CIDR, never an inventory alias. Dependency-free regex match (netaddr
+# is not installed on the control node, so ansible.utils.ipaddr is unusable
+# here). The value itself is not echoed on success.
+- name: Assert trusted proxies is an IP/CIDR
+  ansible.builtin.assert:
+    that:
+      - immich_trusted_proxies is match(
+          '^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}(/(3[0-2]|[12][0-9]|[1-9]))?$'
+        )
+      - immich_trusted_proxies != (groups['proxy_host'][0] | default(''))
+    fail_msg: "immich_trusted_proxies did not resolve to a valid IPv4/CIDR (value withheld)."
+    success_msg: "immich_trusted_proxies resolved to a valid IPv4/CIDR."
+
+# The docker-local NFS volume for the read-only external library is mounted
+# by the docker daemon via /sbin/mount.nfs, which ships in Ubuntu's
+# nfs-common package. No shared OS/Docker role in this host's deploy path
+# installs it (verified: zero nfs references in roles/docker and
+# roles/os_configure), so the immich role owns the dependency. Without it,
+# creation of the photos-external docker volume fails with
+# "mount.nfs: not found" even when the NAS export permits access. Installed
+# unconditionally before the compose template renders so a freshly
+# provisioned target converges the same as the current one (idempotent:
+# apt reports ok when the package is already present).
+- name: Ensure nfs-common is installed for the NFS external library mount
+  ansible.builtin.package:
+    name: nfs-common
+    state: present
+
+# 2. Directory Setup
+# UPLOAD_LOCATION (/data), DB data and model-cache are all LOCAL bind mounts
+# under the parent folder: NFS-backed Postgres is unsupported by Immich, and
+# the QNAP /Photos export rejects writes from this host (run-761 evidence),
+# so the writable library must live on local disk. The NAS photo share is
+# mounted by docker itself as the photos-external NFS volume (see the compose
+# template), not host-side, so no mount point is created for it here.
+# The rendered docker-compose.yaml embeds the vaulted DB password, so neither
+# the parent directory nor the file may be world-readable. House pattern (per
+# the firecrawl/tronbyt_vllm_thinking precedent): parent 0750 root:<docker
+# group> and compose 0640 root:<docker group>. The deploy ssh account on the
+# target host is a member of that group and docker compose runs without
+# become, so group-readable is the required reader model.
+- name: Setup Immich parent directory
+  ansible.builtin.file:
+    path: "{{ immich_parent_folder }}"
+    state: directory
+    mode: '0750'
+    owner: root
+    group: "{{ docker_user }}"
+
+# PGDATA is enforced to the steady state of the pinned immich Postgres image,
+# verified by inspecting the image at this commit (sha256-pinned
+# ghcr.io/immich-app/postgres:14-vectorchord0.4.3): /etc/passwd defines
+# postgres as uid/gid 999 and the official docker-entrypoint.sh chowns PGDATA
+# to postgres and chmods it 00700. PostgreSQL refuses to run on a group- or
+# world-readable data directory, so the previous 1000:1000/0755 enforcement
+# fought the entrypoint on every container start. Managing the exact runtime
+# ownership/mode keeps this task converged (no later run flips PGDATA).
+- name: Setup Immich database directory
+  ansible.builtin.file:
+    path: "{{ immich_database_folder }}"
+    state: directory
+    mode: '0700'
+    owner: "999"
+    group: "999"
+
+- name: Setup Immich model-cache directory
+  ansible.builtin.file:
+    path: "{{ immich_model_cache_folder }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Setup Immich library directory
+  # Local UPLOAD_LOCATION (uploads, thumbs, encoded-video, profile). The
+  # server container runs as root (no user: mapping in compose), so this
+  # matches the parent-dir house pattern and root creates the subdirs.
+  ansible.builtin.file:
+    path: "{{ immich_library_folder }}"
+    state: directory
+    mode: '0750'
+    owner: root
+    group: "{{ docker_user }}"
+
+# Round-13 (2026-11-09): the read-only NAS photo share moved from a
+# host-side ansible.posix.mount + rprivate bind to a docker-local NFS
+# driver volume (house pattern, roles/jellyfin mytv/mymovies). The old
+# probe/mount/report machinery is gone; the two tasks below only have to
+# remove residue left by run-785-era deploys (an fstab entry and a live
+# host mount at immich_external_library_folder). They run AFTER compose
+# convergence (further down) so no container still bind-references the
+# host path while it is unmounted.
+- name: Allow Immich port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ immich_port }}"
+    proto: tcp
+  when: ansible_os_family == "Debian"
+
+# 3. Deploy Configuration Files & Run Compose
+- name: Deploy Immich using Docker Compose
+  ansible.builtin.template:
+    src: "templates/docker_compose.yaml.j2"
+    dest: "{{ immich_parent_folder }}/docker-compose.yaml"
+    mode: '0640'
+    owner: root
+    group: "{{ docker_user }}"
+    force: true
+  no_log: true
+  # diff is a TASK-level keyword, not a template module argument
+  # (ansible.builtin.template has no diff param; nesting it inside the
+  # module args fails the live run with "Unsupported parameters"). Matches
+  # the kanban_ui compose-template task pattern.
+  diff: false
+  notify:
+    - Restart Immich
+
+- name: Run Immich docker-compose up
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ immich_parent_folder }}"
+    state: present
+    remove_orphans: true
+
+# Round-13 residue cleanup (must run AFTER compose convergence): run-785-era
+# deploys persisted a host-side fstab mount of the NAS share at
+# immich_external_library_folder and containers bind-referenced it. Now that
+# the share is a docker-local NFS volume, the compose-up above (with
+# remove_orphans: true) has already recreated/replaced the containers, so
+# nothing binds that host path any more and it is safe to unmount and delete.
+# Truthful detection via ignore_errors + 'is not failed' (never
+# failed_when: false, which overwrites result['failed']); a fresh host with
+# no residue converges with zero changes.
+- name: Check obsolete host mount point presence
+  ansible.builtin.stat:
+    path: "{{ immich_external_library_folder }}"
+  register: immich_legacy_mount_stat
+
+- name: Probe obsolete host mount point mount status
+  # findmnt -T resolves purely from mountinfo without touching the (possibly
+  # root-squashed, EACCES-on-readdir) NFS root; guarded on existence so a
+  # fresh host never runs it against an absent path.
+  ansible.builtin.command:
+    cmd: findmnt -rn -o TARGET -T {{ immich_external_library_folder | quote }}
+  register: immich_legacy_live_probe
+  changed_when: false
+  check_mode: false
+  ignore_errors: true
+  when: immich_legacy_mount_stat.stat.exists
+
+- name: Probe obsolete fstab entry for the host mount point
+  # --fstab searches /etc/fstab only (no path access needed), rc!=0 when no
+  # entry matches - a normal outcome, kept truthful via ignore_errors.
+  ansible.builtin.command:
+    cmd: findmnt --fstab -rn -o TARGET {{ immich_external_library_folder | quote }}
+  register: immich_legacy_fstab_probe
+  changed_when: false
+  check_mode: false
+  ignore_errors: true
+
+- name: Derive obsolete host mount residue
+  # Single source of truth for the cleanup tasks below. Equality (not mere
+  # -T success) means the folder itself is the mount point, same semantics
+  # as the retired round-12 probe. A skipped live probe (directory absent)
+  # registers {'skipped': True} with no stdout, so the equality is false
+  # and no live mount is inferred on a path that cannot be mounted here.
+  ansible.builtin.set_fact:
+    immich_legacy_mount_live: >-
+      {{ (immich_legacy_live_probe is not skipped)
+         and (immich_legacy_live_probe is not failed)
+         and ((immich_legacy_live_probe.stdout | default('') | trim)
+              == (immich_external_library_folder | trim)) }}
+    immich_legacy_fstab_present: >-
+      {{ (immich_legacy_fstab_probe is not failed)
+         and ((immich_legacy_fstab_probe.stdout | default('') | trim)
+              == (immich_external_library_folder | trim)) }}
+
+- name: Unmount obsolete live host mount
+  # Explicit live teardown for the live-only residue branch (mounted with
+  # no fstab entry, e.g. manually mounted or entry already removed), and
+  # the first half of live+fstab. The module contract for unmounted is
+  # "unmount without changing fstab" (module source: "Do not change fstab
+  # state, but unmount"), so fstab handling lives in the absent task
+  # below. Skipped when nothing is mounted, so no-residue and fstab-only
+  # runs take no action here.
+  # ansible.posix.mount is kept as an import only for this cleanup; new
+  # mounts for this role never use it.
+  ansible.posix.mount:
+    path: "{{ immich_external_library_folder }}"
+    state: unmounted
+  when:
+    - immich_legacy_mount_live | bool
+
+- name: Remove obsolete host mount point directory
+  # Runs after the unmount above (rmtree on a live NFS mount would fail)
+  # and before the fstab task below, so ansible.posix.mount state: absent
+  # never hits its internal os.rmdir path (which fail_jsons on a
+  # non-empty directory). file state: absent removes the directory and
+  # any stale contents; it is a no-op when the path is already gone.
+  ansible.builtin.file:
+    path: "{{ immich_external_library_folder }}"
+    state: absent
+  when:
+    - immich_legacy_mount_stat.stat.exists
+      or immich_legacy_mount_live | bool
+
+- name: Drop obsolete fstab entry for the host mount point
+  # state: absent is the documented fstab-removal state (module source:
+  # "absent: Remove from fstab and unmounted"). The prior task pair used
+  # state: unmounted for this, but unmounted NEVER edits fstab, so the
+  # run-785 nofail entry survived and every later fstab-only run
+  # recreated and deleted the directory (round-13 blocking finding).
+  # With the directory already removed above and the mount already
+  # unmounted, absent converges to a pure /etc/fstab text edit; when no
+  # entry matches it reports no change, so second passes are no-op for
+  # every residue branch (live+fstab, live-only, fstab-only, none).
+  ansible.posix.mount:
+    path: "{{ immich_external_library_folder }}"
+    state: absent
+  when:
+    - immich_legacy_fstab_present | bool
+
+# Check if Immich port is open and listening
+- name: Check if Immich port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Immich port is listening
+  ansible.builtin.assert:
+    that:
+      - immich_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Immich port {{ immich_port }} is not open and listening!"
+    success_msg: "Immich port {{ immich_port }} is open and listening."
+
+# Proxy Configuration
+- name: Configure nginx proxy for immich
+  when: immich_configure_proxy | default(true)
+  block:
+    - name: Get immich host IP for proxy
+      ansible.builtin.set_fact:
+        immich_proxy_ip: "{{ ansible_default_ipv4.address }}"
+
+    - name: Deploy immich nginx proxy config
+      ansible.builtin.template:
+        src: "templates/immich.subdomain.conf.j2"
+        dest: "{{ proxy_folder }}/internal/nginx/proxy-confs/immich.subdomain.conf"
+        # SWAG normalizes proxy-confs to 0664 at startup (verified live on the
+        # proxy host: every non-sample file in proxy-confs is -rw-rw-r--);
+        # deploying anything else guarantees a mode-only change + restart.
+        mode: '0664'
+        owner: "{{ docker_user }}"
+        group: "{{ docker_user }}"
+      delegate_to: "{{ groups['proxy_host'][0] }}"
+      notify: Restart Swag Internal
+
+# DNS Configuration
+- name: Ensure deployment host DNS override exists
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_ensure_host_override.yaml"
+  vars:
+    _dns_configure: "{{ immich_configure_dns | default(true) }}"
+  when: immich_configure_dns | default(true)
+
+- name: Create immich DNS alias
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/pfsense_dns_create_alias.yaml"
+  vars:
+    _dns_configure: "{{ immich_configure_dns | default(true) }}"
+    _dns_alias_host: immich
+    _dns_alias_descr: Immich photo library
+    _dns_is_proxied: true
+  when: immich_configure_dns | default(true)
+
+# Homepage Configuration
+- name: Add immich service to Homepage Media section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: Immich
+    _homepage_marker: immich service
+    _homepage_template: immich_service.yaml.j2
+    _homepage_insertafter: "^- Media:"
+  when: immich_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for immich
+  ansible.builtin.debug:
+    msg: "immich homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify: Restart Homepage
+  when: immich_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config

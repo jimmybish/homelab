@@ -112,6 +112,14 @@ sonarr_host:
   hosts:
     docker-1:
 
+# Immich - dedicated deployment target group. Declared as the parent of
+# sonarr_host (children: sonarr_host) so membership tracks the media-stack
+# Docker host automatically (no hostname repeated here); deploy_immich.yaml
+# targets this group instead of borrowing sonarr_host.
+immich_host:
+  children:
+    sonarr_host:
+
 # MCP Sonarr
 mcp_sonarr_host:
   hosts:

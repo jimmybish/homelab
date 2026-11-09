@@ -1,0 +1,113 @@
+# Immich photo and video management stack
+# Managed by Ansible - roles/immich/templates/docker_compose.yaml.j2
+# Image pins and service shape mirror the official release compose:
+#   https://github.com/immich-app/immich/releases/latest/download/docker-compose.yml
+# DB data, model-cache and the writable library (/data, UPLOAD_LOCATION) are
+# LOCAL bind mounts: NFS-backed Postgres is unsupported by Immich, and the
+# QNAP /Photos export currently rejects all writes (run-761 evidence), so
+# UPLOAD_LOCATION lives on the photo host's local disk. The NAS photo share is
+# exposed read-only at /photos-external for Immich's EXTERNAL LIBRARY feature
+# only.
+# The external mount is a docker-local NFS driver volume (house pattern,
+# matching roles/jellyfin's mytv/mymovies): the docker daemon mounts the
+# export itself (via the host NFS client from nfs-common, installed by the
+# role) when the volume is created, so there is no host-side fstab entry, no
+# bind-propagation (rprivate) boot race, and nothing in /etc/docker-storage
+# for this share.
+# Tradeoff (accepted by Jimmy 2026-11-09, round 13): docker creates NFS
+# volumes at container-create time, so if the NAS /Photos export is rejected
+# or unreachable, immich_server creation fails and it sits in a restart loop
+# until the export returns. The live export has been reachable from this
+# host since the round-12 probe (findmnt shows the ro nfs mount), so the
+# degraded case is an availability regression only while the NAS is down,
+# same failure class as Jellyfin's mytv/mymovies volumes.
+
+name: immich
+
+services:
+  immich-server:
+    container_name: immich_server
+    image: {{ immich_server_image }}
+    volumes:
+      - {{ immich_library_folder }}:/data
+      - photos-external:/photos-external:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      TZ: {{ timezone }}
+      IMMICH_ENV: production
+      DB_HOSTNAME: database
+      DB_PORT: "5432"
+      DB_USERNAME: immich
+      DB_PASSWORD: "{{ immich_db_password }}"
+      DB_DATABASE_NAME: immich
+      DB_VECTOR_EXTENSION: vectorchord
+      REDIS_HOSTNAME: redis
+      REDIS_PORT: "6379"
+      IMMICH_TRUSTED_PROXIES: "{{ immich_trusted_proxies }}"
+    ports:
+      - "{{ immich_port }}:2283"
+    depends_on:
+      - redis
+      - database
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+    networks:
+      - immich_net
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: {{ immich_ml_image }}
+    volumes:
+      - {{ immich_model_cache_folder }}:/cache
+    environment:
+      TZ: {{ timezone }}
+      IMMICH_ENV: production
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+    networks:
+      - immich_net
+
+  redis:
+    container_name: immich_redis
+    image: {{ immich_redis_image }}
+    healthcheck:
+      test: redis-cli ping | grep -q PONG || exit 1
+    restart: unless-stopped
+    networks:
+      - immich_net
+
+  database:
+    container_name: immich_postgres
+    image: {{ immich_db_image }}
+    environment:
+      POSTGRES_USER: immich
+      POSTGRES_PASSWORD: "{{ immich_db_password }}"
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    volumes:
+      - {{ immich_database_folder }}:/var/lib/postgresql/data
+    shm_size: 128mb
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+    networks:
+      - immich_net
+
+volumes:
+  # Docker-local NFS volume for the read-only NAS photo share (house pattern
+  # per roles/jellyfin mytv/mymovies). immich_fileserver_ip is derived from
+  # the qnap inventory group exactly like jellyfin_fileserver_ip. ro + soft
+  # (read-only external library; scans must not hang the host if the NAS
+  # goes down), nolock + vers=3 match the fleet's QNAP NFS precedent.
+  photos-external:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr={{ immich_fileserver_ip }},nolock,soft,ro,vers=3"
+      device: ":{{ fs_photos }}"
+
+networks:
+  immich_net:
+    driver: bridge
