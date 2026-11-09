@@ -16,11 +16,13 @@
     - proxmox_zfs_autotrim_state.stdout | default('') | trim != proxmox_zfs_autotrim
 
 # Disable NVMe APST to work around broken Samsung 990 PRO power-state firmware
-# that suspended rpool with uncorrectable I/O errors. Appends the parameter to
-# the single /etc/kernel/cmdline line, preserving any existing parameters, and
-# only when it is not already present (idempotent). Activated on next boot after
-# proxmox-boot-tool refresh; a reboot is performed manually per node.
-- name: Disable NVMe APST in kernel cmdline
+# that suspended rpool with uncorrectable I/O errors. The parameter is managed for
+# both boot loaders proxmox-boot-tool can use, so it survives a boot-mode change:
+#   - systemd-boot reads /etc/kernel/cmdline
+#   - GRUB ignores that file and builds its cmdline from /etc/default/grub(.d)
+# Both changes notify `proxmox-boot-tool refresh` (which runs update-grub in GRUB
+# mode). They take effect on the next boot; reboots are performed manually per node.
+- name: Disable NVMe APST in kernel cmdline (systemd-boot)
   ansible.builtin.replace:
     path: /etc/kernel/cmdline
     regexp: '^(?!.*nvme_core\.default_ps_max_latency_us=)(.*boot=zfs.*)$'
@@ -28,6 +30,68 @@
     backup: true
   when: proxmox_nvme_disable_apst | bool
   notify: Refresh Proxmox boot config
+  tags:
+    - nvme_apst
+
+- name: Ensure GRUB drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/default/grub.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: proxmox_nvme_disable_apst | bool
+  tags:
+    - nvme_apst
+
+# grub-mkconfig sources /etc/default/grub then grub.d/*.cfg in glob order. The zz-
+# prefix keeps this drop-in last, so a drop-in that resets GRUB_CMDLINE_LINUX
+# cannot drop the parameter (Proxmox's zfs.cfg appends to it).
+# GRUB_CMDLINE_LINUX (not _DEFAULT) also covers recovery-mode entries.
+- name: Disable NVMe APST in kernel cmdline (GRUB)
+  ansible.builtin.copy:
+    dest: /etc/default/grub.d/zz-nvme-apst.cfg
+    content: |
+      # Managed by Ansible (proxmox role): disable NVMe APST on Samsung 990 PRO.
+      case " ${GRUB_CMDLINE_LINUX-} " in
+        *" nvme_core.default_ps_max_latency_us=0 "*) ;;
+        *) GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX:+${GRUB_CMDLINE_LINUX} }nvme_core.default_ps_max_latency_us=0" ;;
+      esac
+    owner: root
+    group: root
+    mode: '0644'
+  when: proxmox_nvme_disable_apst | bool
+  notify: Refresh Proxmox boot config
+  tags:
+    - nvme_apst
+
+- name: Remove GRUB NVMe APST drop-in when disabled
+  ansible.builtin.file:
+    path: /etc/default/grub.d/zz-nvme-apst.cfg
+    state: absent
+  when: not (proxmox_nvme_disable_apst | bool)
+  notify: Refresh Proxmox boot config
+  tags:
+    - nvme_apst
+
+- name: Read effective NVMe APST latency limit
+  ansible.builtin.slurp:
+    src: /sys/module/nvme_core/parameters/default_ps_max_latency_us
+  register: proxmox_nvme_apst_latency
+  failed_when: false
+  when: proxmox_nvme_disable_apst | bool
+  tags:
+    - nvme_apst
+
+- name: Report NVMe APST state
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: default_ps_max_latency_us={{ _apst_value }}
+      ({{ 'APST disabled' if _apst_value == '0'
+          else 'APST still active - reboot required after boot config refresh' }})
+  vars:
+    _apst_value: "{{ (proxmox_nvme_apst_latency.content | default('') | b64decode | trim) or 'unknown' }}"
+  when: proxmox_nvme_disable_apst | bool
   tags:
     - nvme_apst
 

@@ -100,6 +100,50 @@ Because a scrape failure doesn't necessarily mean the host is down, this alert s
 
 **Status:** This is a real storage-path failure, not a benign reboot or a thermal pad issue. The 990 Pro temperature trace showed the NVMe was not hot when metrics stopped, and the Asus NUC 12 Pro chassis has identical built-in thermal pads on Proxmox-1 and Proxmox-2.
 
+### NVMe Baseline for Both Proxmox Nodes (2026-10-21)
+
+User-provided `smartctl -i /dev/nvme0n1` output confirms that both nodes were running firmware **`4B2QJXD7`** at the capture times below. These are pre-update readings; no firmware update was performed as part of recording them. The shared model and firmware do not establish that both nodes' failures have the same root cause.
+
+| Field | proxmox-1 | proxmox-2 |
+|-------|-----------|-----------|
+| Capture time (AEDT, UTC+11) | 2026-10-21 10:57:07 | 2026-10-21 10:58:05 |
+| Model number | Samsung SSD 990 PRO 2TB | Samsung SSD 990 PRO 2TB |
+| Serial number | `S7DNNU0Y674859F` | `S7DNNU0Y674865L` |
+| Firmware version | `4B2QJXD7` | `4B2QJXD7` |
+| Namespace 1 utilization at capture | 740,095,266,816 bytes (740 GB) | 1,182,099,603,456 bytes (1.18 TB) |
+| Namespace 1 IEEE EUI-64 | `002538 4651a40dcb` | `002538 4651a40dd1` |
+
+Additional fields were identical on both drives:
+
+| Field | Value |
+|-------|-------|
+| PCI vendor/subsystem ID | `0x144d` |
+| IEEE OUI identifier | `0x002538` |
+| Total NVM capacity | 2,000,398,934,016 bytes (2.00 TB) |
+| Unallocated NVM capacity | 0 bytes |
+| Controller ID | 1 |
+| NVMe version | 2.0 |
+| Number of namespaces | 1 |
+| Namespace 1 size/capacity | 2,000,398,934,016 bytes (2.00 TB) |
+| Namespace 1 formatted LBA size | 512 bytes |
+
+### NVMe Firmware Tracking
+
+The baseline above is historical. Current firmware per node:
+
+| Node | Drive serial | Firmware | Updated | Verified |
+|------|--------------|----------|---------|----------|
+| proxmox-1 | `S7DNNU0Y674859F` | **`8B2QJXD7`** (Samsung, Dec 2025: "To improve read-operation stability") | 2026-11-08, from `4B2QJXD7` | Prometheus `node_nvme_info{firmware_revision="8B2QJXD7"}` from 15:17 AEDT; host rebooted 15:15:20 AEDT (last pre-update sample 14:24 AEDT) |
+| proxmox-2 | `S7DNNU0Y674865L` | `4B2QJXD7` (Samsung, Dec 2024) | Not yet updated | Prometheus `node_nvme_info` on 2026-11-08 |
+
+Check current values at any time with `node_nvme_info{instance=~"proxmox-[12].*"}` in Prometheus or `smartctl -i /dev/nvme0n1` on the node.
+
+**Why proxmox-1 was updated:** proxmox-1 hung during the 04:00 PBS backup on 2026-10-18 (~05:46 AEDT) and 2026-10-21 (~05:54 AEDT). Loki retained kernel `nvme nvme0: I/O tag … timeout` READ/WRITE/FLUSH aborts and a controller reset just before logging stopped, each time while an LXC on `local-zfs` was being uploaded. Backups on 2026-10-19 and 2026-10-20 completed. The backup task status `Error: unexpected status` is a consequence of the hang, not its cause.
+
+**What to watch:** while proxmox-2 stays on `4B2QJXD7`, the two nodes give a direct comparison. If proxmox-1 completes nightly backups with no NVMe timeouts and proxmox-2 still has storage hangs, that supports firmware as a factor. If proxmox-1 hangs again with NVMe timeouts on `8B2QJXD7`, firmware alone is not the fix. Note that nightly backups also succeeded on some nights before the update, so a few clean nights is not conclusive.
+
+**Updating a drive:** Samsung's ISO cannot be written with Etcher/DD for these NUCs. Its El Torito and MBR boot records are BIOS-only, and NUC 12 Pro firmware is UEFI-only with no CSM. Format the USB as GPT + FAT32 and copy the ISO contents onto it (it contains `\EFI\BOOT\BOOTX64.EFI`), or use Rufus with the ISO selected (GPT, UEFI non-CSM, FAT32, ISO Image mode). Boot it from the F10 menu. Disable Secure Boot temporarily if it is rejected.
+
 ### Ruled Out
 
 - **Thermal pad differences**: Both NUCs use the same chassis and built-in thermal pads.
@@ -109,8 +153,12 @@ Because a scrape failure doesn't necessarily mean the host is down, this alert s
 
 ### Yet To Be Implemented
 
-- **Disable NVMe APST / power-state management** by setting `nvme_core.default_ps_max_latency_us=0` on the Proxmox boot cmdline.
-- **Update Samsung 990 Pro firmware** on both nodes to the newest available release.
+- **Disable NVMe APST / power-state management** by setting `nvme_core.default_ps_max_latency_us=0` on the Proxmox boot cmdline. Verified 2026-11-08 (read-only):
+  - **proxmox-2: done.** In both the running and configured cmdline; `/sys/module/nvme_core/parameters/default_ps_max_latency_us` = `0`. Applied by the `proxmox` role on 2026-06-14 (backup `/etc/kernel/cmdline.82807.2026-06-14@13:39:13~`), active since the 2026-07-29 reboot. Boots via systemd-boot.
+  - **proxmox-1: done, verified after reboot at 2026-11-08 15:43:20 AEDT.** The running cmdline includes `nvme_core.default_ps_max_latency_us=0` and `/sys/module/nvme_core/parameters/default_ps_max_latency_us` reads `0`. Kernel 6.17.13-2-pve, NVMe firmware `8B2QJXD7`, `rpool` ONLINE. Before this it had sysfs value `100000`: proxmox-1 boots via **GRUB** on its ESP (`09C0-9F7F`), and GRUB ignores `/etc/kernel/cmdline`, so the role's original task never applied. The `proxmox` role now also deploys `/etc/default/grub.d/zz-nvme-apst.cfg`, which appends the parameter to `GRUB_CMDLINE_LINUX` (normal and recovery entries), then runs `proxmox-boot-tool refresh` (`update-grub` in GRUB mode). Applied with `deploy_proxmox.yaml --tags nvme_apst` on 2026-11-08; rerunning with that tag prints each node's APST state.
+  - `nvme-cli` is not installed on either node, so the APST feature (`nvme get-feature /dev/nvme0 -f 0x0c -H`) has not been read from the controller itself.
+  - Because proxmox-1 changed firmware and APST together (APST disabled from 2026-11-08 15:43), the two nodes now have the same APST state but different firmware. A stable proxmox-1 from here on can't be attributed to firmware or APST alone, since both changed on the same day.
+- **Update Samsung 990 Pro firmware** on both nodes to the newest available release. proxmox-1 is done (`8B2QJXD7`, 2026-11-08); proxmox-2 is still on `4B2QJXD7`. See NVMe Firmware Tracking above.
 - **Enable persistent journaling** so the last boot's kernel and ZFS messages survive a hard reset.
 - **Enable crash capture** with `kdump` or equivalent so a future hang/panic can be inspected.
 - **Add storage-path alerting** for NVMe media errors, I/O timeouts, and repeated ZFS suspend events.
@@ -128,8 +176,8 @@ When the issue is active, collect the following before power-cycling if possible
 
 ### Next Steps
 
-1. Keep the 68°C alert in place so we still get early warning if temperatures do rise.
-2. Apply the NVMe APST change and firmware update before the next heavy write window.
+1. Keep NVMe temperature alerting in place for early warning. As of 2026-10-23 it evaluates only the **Composite** sensor (hwmon `temp1`, which Samsung's 0-70°C operating spec is measured against): `NVMe Drive Temperature High` warns above 70°C for 10 minutes and recovers below 65°C; `NVMe Drive Temperature Critical` fires when the composite reaches the drive-reported warning threshold (~82°C) or the drive asserts its SMART temperature alarm. The previous 68°C rule alerted on the hottest of all sensors, so daily backup-load peaks on Sensor 2 caused firing/recovery noise.
+2. Apply the NVMe APST change and firmware update before the next heavy write window. Firmware is updated on proxmox-1 only; decide whether to update proxmox-2 now or keep it on `4B2QJXD7` for a while as a comparison.
 3. Capture the commands above during the next failure so we can confirm whether the trigger is power-state handling, firmware, or another NVMe path issue.
 
 ---
