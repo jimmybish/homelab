@@ -42,6 +42,9 @@
 - name: Deploy ComfyUI
   ansible.builtin.import_playbook: deploy_comfyui.yaml
 
+- name: Deploy Immich machine learning
+  ansible.builtin.import_playbook: deploy_immich_ml.yaml
+
 - name: Deploy wg-easy
   ansible.builtin.import_playbook: deploy_wg_easy.yaml
 

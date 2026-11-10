@@ -60,6 +60,11 @@ spark:
     sparky:
     nova:
 
+# Immich machine learning (remote ML, GB10) - Sparky only
+immich_ml_host:
+  hosts:
+    sparky:
+
 # ComfyUI - Nova only
 comfyui_host:
   hosts:

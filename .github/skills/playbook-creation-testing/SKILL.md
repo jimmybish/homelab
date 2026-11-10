@@ -176,6 +176,29 @@ ansible-playbook -i inventory.yaml deploy_plex.yaml --vault-password-file ~/ansi
 
 ### Maintenance Playbooks
 
+#### Ubuntu update monitoring lessons (2026-11-10)
+
+- Use inventory and `--list-hosts` as the source of truth. For
+  `update_ubuntu.yaml`, `--limit 'ubuntu:!mgmt'` retains the `localhost, all`
+  silence plays via the selected hosts; their API calls delegate to localhost.
+  Excluding the controller from maintenance does not prohibit local orchestration.
+- A failed host in a `serial: 1` batch can terminate the playbook before later
+  hosts **and the cleanup play**. Report unattempted hosts separately from failed
+  hosts; do not silently rerun around a failure or change repository sources.
+- Verify Grafana silence state through its API, not just the creation message.
+  On a Sydney-local controller, `strftime` without UTC conversion followed by a
+  literal `Z` produced a future, **pending** silence rather than active maintenance
+  coverage. If normal cleanup is skipped, remove only that run's silence using
+  the existing DELETE API and verify `status.state: expired`. Report the timestamp
+  defect for a separately authorized code change; do not assume auto-expiry.
+- Verify reachability, boot ID changes, kernel, `/var/run/reboot-required`, and
+  `dpkg --audit` after maintenance. `apt-get -s dist-upgrade` checks remaining
+  work without another upgrade/reboot cycle. Its summary can say either
+  `0 upgraded` or `0 to upgrade`; a grep mismatch is not an apt failure.
+- Long package downloads can leave `/var/log/apt/term.log` unchanged while
+  `apt-get` is still running. Inspect read-only process/log state and keep
+  monitoring; do not kill package managers, clear locks, or alter apt sources.
+
 ```bash
 # Update all Ubuntu hosts (dist-upgrade + reboot if changed, runs serial: 1)
 ansible-playbook -i inventory.yaml update_ubuntu.yaml --vault-password-file ~/ansible_key

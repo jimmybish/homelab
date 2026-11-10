@@ -1,0 +1,145 @@
+---
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Verify NVIDIA Container Toolkit can expose the GPU
+  ansible.builtin.command:
+    cmd: docker info
+  register: immich_ml_docker_info
+  changed_when: false
+  failed_when: "'nvidia' not in immich_ml_docker_info.stdout"
+
+- name: Setup Immich ML directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0750'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  loop:
+    - "{{ immich_ml_folder }}"
+    - "{{ immich_ml_build_folder }}"
+    - "{{ immich_ml_source_folder }}"
+    - "{{ immich_ml_cache_folder }}"
+
+- name: Allow Immich ML port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ immich_ml_port }}"
+    proto: tcp
+    from_ip: "{{ immich_ml_firewall_source }}"
+  when: ansible_os_family == "Debian"
+
+- name: Download Immich ML source tarball
+  ansible.builtin.get_url:
+    url: "https://github.com/{{ immich_ml_source_repo }}/archive/{{ immich_ml_source_commit }}.tar.gz"
+    dest: "{{ immich_ml_build_folder }}/immich-{{ immich_ml_image_tag }}.tar.gz"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+# Only machine-learning/ is needed; strip the archive root and that directory
+- name: Extract Immich ML build context
+  ansible.builtin.unarchive:
+    src: "{{ immich_ml_build_folder }}/immich-{{ immich_ml_image_tag }}.tar.gz"
+    dest: "{{ immich_ml_source_folder }}"
+    remote_src: true
+    include:
+      - "immich-{{ immich_ml_source_commit }}/machine-learning"
+    extra_opts:
+      - --strip-components=2
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    creates: "{{ immich_ml_source_folder }}/Dockerfile.dgx-spark"
+
+- name: Check whether the Immich ML image already exists
+  ansible.builtin.command:
+    cmd: "docker image inspect {{ immich_ml_image }}:{{ immich_ml_image_tag }}"
+  register: immich_ml_image_inspect
+  changed_when: false
+  failed_when: false
+
+# ONNX Runtime is compiled from source, so this takes ~30+ minutes. Run it async
+# so the SSH connection is not held open, and only when the tagged image is missing.
+- name: Build Immich ML image for GB10 (ARM64 + CUDA)
+  ansible.builtin.command:
+    argv:
+      - docker
+      - build
+      - --file
+      - Dockerfile.dgx-spark
+      - --build-arg
+      - "ORT_BUILD_JOBS={{ immich_ml_build_jobs }}"
+      - --tag
+      - "{{ immich_ml_image }}:{{ immich_ml_image_tag }}"
+      - .
+    chdir: "{{ immich_ml_source_folder }}"
+  environment:
+    DOCKER_BUILDKIT: "1"
+  async: "{{ immich_ml_build_timeout }}"
+  poll: 30
+  when: immich_ml_image_inspect.rc != 0
+  changed_when: true
+  notify:
+    - Restart Immich ML
+
+- name: Deploy Immich ML Docker Compose configuration
+  ansible.builtin.template:
+    src: docker_compose.yaml.j2
+    dest: "{{ immich_ml_folder }}/docker-compose.yaml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+  notify:
+    - Restart Immich ML
+
+- name: Run Immich ML
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ immich_ml_folder }}"
+    state: present
+    remove_orphans: true
+
+- name: Wait for Immich ML HTTP service
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ immich_ml_port }}/ping"
+    return_content: true
+  register: immich_ml_ping
+  until:
+    - immich_ml_ping.status == 200
+    - "'pong' in immich_ml_ping.content"
+  retries: 30
+  delay: 5
+
+- name: Check if Immich ML port is open and listening
+  community.general.listen_ports_facts:
+
+- name: Assert Immich ML port is listening
+  ansible.builtin.assert:
+    that:
+      - immich_ml_port | int in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: "Immich ML port {{ immich_ml_port }} is not open and listening!"
+    success_msg: "Immich ML port {{ immich_ml_port }} is open and listening."
+
+# get_available_providers() alone is not enough: ORT keeps listing CUDA when the
+# provider library cannot be dlopen'd, then silently falls back to CPU.
+- name: Verify the ONNX Runtime CUDA provider loads in the container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - immich-ml
+      - python
+      - -c
+      - >-
+        import ctypes, os, onnxruntime as ort;
+        ps = ort.get_available_providers();
+        assert 'CUDAExecutionProvider' in ps, ps;
+        ctypes.CDLL(os.path.join(os.path.dirname(ort.__file__), 'capi', 'libonnxruntime_providers_cuda.so'));
+        print('CUDA EP OK', ort.__version__)
+  register: immich_ml_cuda_check
+  changed_when: false
+  failed_when: "'CUDA EP OK' not in immich_ml_cuda_check.stdout"

@@ -1,0 +1,6 @@
+---
+- name: Deploy Immich machine learning on Sparky
+  hosts: immich_ml_host
+  become: true
+  roles:
+    - immich_ml

@@ -137,6 +137,8 @@ internal_n8n_url: "https://n8n.{{ internal_domain }}"
 
 internal_firecrawl_url: "http://127.0.0.1:3002"
 
+internal_immich_ml_url: "http://{{ groups['immich_ml_host'][0] }}.{{ internal_domain }}:3003"
+
 internal_omada_sdn_url: "https://omada-sdn:8043"
 
 internal_paperless_url: "https://paperless.{{ internal_domain }}"

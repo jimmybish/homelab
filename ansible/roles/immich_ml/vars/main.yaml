@@ -1,0 +1,44 @@
+---
+# Research Notes - Immich machine learning (remote ML on Sparky, GB10)
+# Discussion: https://github.com/immich-app/immich/discussions/10647
+# Upstream docs: https://docs.immich.app/guides/remote-machine-learning
+# Build recipe: https://github.com/volschin/immich/blob/main/machine-learning/Dockerfile.dgx-spark
+# Security advisories: https://github.com/immich-app/immich/security/advisories
+# Last reviewed: 2026-11-09
+#
+# Upstream only publishes linux/amd64 CUDA images and no arm64 CUDA 13 ONNX
+# Runtime wheel exists, so the image is built on Sparky from a pinned commit of
+# the volschin/immich fork, which carries Dockerfile.dgx-spark (ORT built from
+# source for sm_121, Ubuntu 26.04 / Python 3.14 / CUDA 13.3.1), uv.dgx-spark.lock
+# and the ORT >= 1.26 CUDA EP registration patch (immich-app/immich#30530).
+# Only the machine-learning/ directory is extracted from the commit tarball.
+# The fork tracks upstream main, so choose a commit whose ML API matches the
+# Immich server version that will use this endpoint.
+#
+# CUDA 13.2.x / 13.3.0 do not build (CCCL bug); the Dockerfile pins 13.3.1.
+# The build compiles ORT from source (~30 min at 8 jobs, ~2 GB RAM per nvcc job).
+#
+# Port: 3003/TCP (GET /ping returns "pong", POST /predict is the API).
+# No authentication - restrict access with the firewall source variable.
+# Volumes: /cache (downloaded models). Container runs as root.
+# No database, cache or sidecars. No proxy, DNS alias or Homepage entry: the
+# Immich server is pointed straight at http://sparky:3003 (Settings > Machine
+# Learning). Sparky already has a pfSense host override.
+
+immich_ml_source_repo: volschin/immich
+immich_ml_source_commit: 5607bfce135b262797b657aec573dadcf8bb2f70
+immich_ml_image: immich-machine-learning-dgx-spark
+immich_ml_image_tag: "{{ immich_ml_source_commit[:12] }}"
+immich_ml_port: 3003
+immich_ml_build_jobs: 6
+immich_ml_build_timeout: 7200
+
+immich_ml_folder: "{{ docker_storage_folder }}/immich-ml"
+immich_ml_build_folder: "{{ immich_ml_folder }}/build"
+immich_ml_source_folder: "{{ immich_ml_build_folder }}/src-{{ immich_ml_image_tag }}"
+immich_ml_cache_folder: "{{ immich_ml_folder }}/cache"
+
+# Seconds of inactivity before a model is unloaded from GPU memory (<= 0 keeps loaded)
+immich_ml_model_ttl: 300
+immich_ml_workers: 1
+immich_ml_firewall_source: any
