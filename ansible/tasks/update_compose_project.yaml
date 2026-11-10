@@ -1,0 +1,132 @@
+---
+# Static per-service policy is read with check-mode-safe builtins. Do not log
+# decoded YAML, loop items containing service definitions, or module exceptions.
+- name: Initialize project policy and outcome
+  ansible.builtin.set_fact:
+    compose_registry_services: []
+    compose_local_services: []
+    compose_update_stage: policy
+    compose_pull_result: {}
+
+- name: Pull registry images then converge only after a successful pull phase
+  block:
+    - name: Read exact managed manifest privately
+      ansible.builtin.slurp:
+        src: "{{ compose_project }}/docker-compose.yaml"
+      become: false
+      register: compose_manifest
+      no_log: true
+
+    - name: Decode service policy privately
+      ansible.builtin.set_fact:
+        compose_policy: "{{ compose_manifest.content | b64decode | from_yaml }}"
+      no_log: true
+
+    # Fail closed rather than guess policy in includes, extends or interpolation.
+    # Current managed manifests use static service maps (YAML anchors supported).
+    - name: Require explicit self-contained service policy
+      ansible.builtin.assert:
+        that:
+          - compose_policy is mapping
+          - compose_policy.services is mapping
+          - compose_policy.services | length > 0
+          - "'include' not in compose_policy"
+      no_log: true
+
+    # Some module versions omit --policy always, leaving manifest policy active.
+    # Registry targets must therefore use the default or explicit always policy.
+    - name: Validate static service policy
+      ansible.builtin.assert:
+        that:
+          - item.value is mapping
+          - "'extends' not in item.value"
+          - "'profiles' not in item.value"
+          - item.value.pull_policy | default('always') in ['always', 'never', 'missing', 'build', 'if_not_present', 'daily', 'weekly']
+          - "'build' in item.value or item.value.pull_policy | default('always') in ['always', 'never']"
+          - "'build' in item.value or item.value.image | default('') | length > 0"
+      loop: "{{ compose_policy.services | dict2items }}"
+      no_log: true
+
+    - name: Select registry services excluding builds and explicit never policy
+      ansible.builtin.set_fact:
+        compose_registry_services: "{{ compose_registry_services + ([item.key] if not excluded else []) }}"
+        compose_local_services: "{{ compose_local_services + ([item.key] if excluded else []) }}"
+      vars:
+        excluded: "{{ 'build' in item.value or item.value.pull_policy | default('always') == 'never' }}"
+      loop: "{{ compose_policy.services | dict2items }}"
+      no_log: true
+
+    - name: Mark pull stage
+      ansible.builtin.set_fact:
+        compose_update_stage: pull
+
+    # Never pass []: Compose interprets that as ALL services. include_deps must
+    # stay false so dependencies cannot reintroduce excluded local services.
+    - name: Pull latest registry images (docker compose v2)
+      become: false
+      community.docker.docker_compose_v2_pull:
+        project_src: "{{ compose_project }}"
+        files: [docker-compose.yaml]
+        services: "{{ compose_registry_services }}"
+        policy: always
+        ignore_buildable: true
+        include_deps: false
+      when: compose_registry_services | length > 0
+      register: compose_pull_result
+      no_log: true
+
+    - name: Mark convergence stage
+      ansible.builtin.set_fact:
+        compose_update_stage: up
+
+    - name: Bring up containers using only available images (docker compose v2)
+      become: false
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_project }}"
+        files: [docker-compose.yaml]
+        state: present
+        build: never
+        pull: never
+        remove_orphans: true
+      register: compose_up_result
+      no_log: true
+
+    - name: Record registry outcome separately from local images not upgraded
+      ansible.builtin.set_fact:
+        docker_update_results: >-
+          {{ docker_update_results + [{
+            'project': compose_project, 'status': 'ok',
+            'check_mode': ansible_check_mode,
+            'registry_services': compose_registry_services,
+            'registry': ('updated' if compose_pull_result.changed | default(false) else 'unchanged')
+              if compose_registry_services | length > 0 else 'not_applicable',
+            'local_services': compose_local_services,
+            'local': 'not_upgraded' if compose_local_services | length > 0 else 'not_applicable',
+            'convergence_changed': compose_up_result.changed
+          }] }}
+  rescue:
+    - name: Record sanitized project failure and continue other projects
+      ansible.builtin.set_fact:
+        docker_update_results: >-
+          {{ docker_update_results + [{
+            'project': compose_project, 'status': 'failed',
+            'check_mode': ansible_check_mode,
+            'registry_services': compose_registry_services,
+            'local_services': compose_local_services,
+            'local': 'not_upgraded' if compose_local_services | length > 0 else 'not_applicable',
+            'registry': (('updated' if compose_pull_result.changed | default(false) else 'unchanged')
+              if compose_update_stage == 'up' else
+              ('failed' if compose_update_stage == 'pull' else 'not_attempted'))
+              if compose_registry_services | length > 0 else 'not_applicable',
+            'error': compose_update_stage ~ '_failed',
+            'rc': ansible_failed_result.rc | default(none),
+            'up': 'failed' if compose_update_stage == 'up' else 'skipped'
+          }] }}
+  always:
+    - name: Discard secret-bearing manifest and module results
+      ansible.builtin.set_fact:
+        compose_manifest: {}
+        compose_policy: {}
+        compose_pull_result: {}
+        compose_up_result: {}
+      no_log: true

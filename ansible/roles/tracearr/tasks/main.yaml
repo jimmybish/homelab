@@ -40,7 +40,7 @@
   ansible.builtin.file:
     path: "{{ tracearr_database_folder }}"
     state: directory
-    mode: '0755'
+    mode: '0700'
     owner: "1000"
     group: "1000"
 
@@ -64,7 +64,7 @@
 - name: Deploy tracearr using Docker Compose
   ansible.builtin.template:
     src: "templates/docker_compose.yaml.j2"
-    dest: "{{ tracearr_folder }}/docker-compose.yaml"
+    dest: "{{ tracearr_parent_folder }}/docker-compose.yaml"
     mode: '0644'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
@@ -75,7 +75,11 @@
 - name: Run tracearr docker-compose up
   become: false
   community.docker.docker_compose_v2:
-    project_src: "{{ tracearr_folder }}"
+    project_src: "{{ tracearr_parent_folder }}"
+    files:
+      - docker-compose.yaml
+    pull: "{{ tracearr_compose_pull | default('policy') }}"
+    build: never
     state: present
     remove_orphans: true
 

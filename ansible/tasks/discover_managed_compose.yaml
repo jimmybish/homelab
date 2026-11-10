@@ -1,0 +1,49 @@
+---
+# Only <storage>/<real directory>/docker-compose.yaml is managed by the updater.
+- name: Inspect Docker storage directory without following symlinks
+  ansible.builtin.stat:
+    path: "{{ docker_storage_folder }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+  register: compose_storage
+
+- name: Require a real Docker storage directory
+  ansible.builtin.assert:
+    that:
+      - compose_storage.stat.isdir | default(false)
+      - not (compose_storage.stat.islnk | default(false))
+    fail_msg: "Docker storage must be an existing, non-symlink directory: {{ docker_storage_folder }}"
+
+- name: Find immediate Docker storage directories
+  ansible.builtin.find:
+    paths: "{{ docker_storage_folder }}"
+    file_type: directory
+    recurse: false
+    follow: false
+  register: compose_directories
+
+- name: Reject incomplete Docker storage discovery
+  ansible.builtin.assert:
+    that:
+      - compose_directories.skipped_paths | default({}) | length == 0
+    fail_msg: "Cannot inspect Docker storage: {{ compose_directories.skipped_paths | default({}) }}"
+
+- name: Inspect exact managed Compose candidates without following symlinks
+  ansible.builtin.stat:
+    path: "{{ item.path }}/docker-compose.yaml"
+    follow: false
+    get_checksum: false
+    get_mime: false
+  loop: "{{ compose_directories.files | sort(attribute='path') }}"
+  loop_control:
+    label: "{{ item.path }}/docker-compose.yaml"
+  register: compose_candidates
+
+- name: Set list of valid compose projects (parent directories)
+  ansible.builtin.set_fact:
+    valid_compose_projects: >-
+      {{ compose_candidates.results
+         | selectattr('stat.isreg', 'defined')
+         | selectattr('stat.isreg')
+         | map(attribute='stat.path') | map('dirname') | list }}
