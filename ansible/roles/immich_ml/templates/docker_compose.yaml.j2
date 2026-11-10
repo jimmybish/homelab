@@ -1,0 +1,15 @@
+services:
+  immich-ml:
+    image: {{ immich_ml_image }}:{{ immich_ml_image_tag }}
+    container_name: immich-ml
+    pull_policy: never
+    restart: unless-stopped
+    gpus: all
+    environment:
+      TZ: {{ timezone }}
+      MACHINE_LEARNING_WORKERS: "{{ immich_ml_workers }}"
+      MACHINE_LEARNING_MODEL_TTL: "{{ immich_ml_model_ttl }}"
+    ports:
+      - "{{ immich_ml_port }}:3003"
+    volumes:
+      - {{ immich_ml_cache_folder }}:/cache
