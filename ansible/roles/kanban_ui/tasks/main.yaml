@@ -263,12 +263,14 @@
     - kanban_ui
 
 - name: Deploy Kanban UI Docker Compose definition
+  # Match peer roles: the unprivileged container updater must read this
+  # credential-free manifest. Secrets stay in separate owner-only files.
   ansible.builtin.template:
     src: docker_compose.yaml.j2
     dest: "{{ kanban_ui_compose_file }}"
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
-    mode: '0600'
+    mode: '0644'
   register: kanban_ui_compose_template
   no_log: true
   diff: false
