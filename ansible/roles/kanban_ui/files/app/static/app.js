@@ -249,8 +249,28 @@ function reconcile(parent, desired) {
   }
 }
 const tabEls = new Map();  // col name -> {el, n}
-const colEls = new Map();  // col name -> {el, count, body, cards:Map(id->el), lanes:Map(name->el), empty}
+const colEls = new Map();  // col name -> {el, count, colChk, body, cards:Map(id->el), lanes:Map(name->el), empty}
 let boardSig = "";
+
+/* Tri-state select-all state for one column header checkbox. Called from
+   renderInner for the CURRENT visible (post-filter) task set, so it always
+   reflects what is actually rendered. Selection semantics: select-all
+   touches exactly the visible ids (search/tenant/assignee filters respected;
+   hidden cards never enter S.sel). `checked` and `indeterminate` are DOM
+   PROPERTIES — h() only emits attributes, and a cached column node reuses
+   the same input element across renders, so assigning both every time is
+   what keeps per-card toggles in sync (a card toggle mutates S.sel and
+   cardSig changes -> this path re-runs for every column). */
+function applyColumnCheck(rec, tasks) {
+  const chk = rec.colChk;
+  if (!chk) return;
+  const total = tasks.length;
+  let sel = 0;
+  for (const t of tasks) if (S.sel.has(t.id)) sel++;
+  chk.checked = total > 0 && sel === total;
+  chk.indeterminate = sel > 0 && sel < total;
+  chk.disabled = total === 0;
+}
 
 function renderInner() {
   const now = Math.floor(Date.now() / 1000);
@@ -294,7 +314,23 @@ function renderInner() {
       const count = h("span", { class: "col-count" });
       const droppable = DROP_COLS.has(name); // PR#13 finding 4354363915
       const el = h("div", { class: `column col-${name}${droppable ? "" : " col-display-only"}`, "data-col": name });
+      // Select-all lives in the column header as a focusable <input> SIBLING
+      // of the title text and the col-add button — never a descendant of a
+      // button node (W3C ACT 307n5z: presentational-children would strip its
+      // checkbox semantics; same rule that keeps .card-check outside
+      // .card-open). State (checked / indeterminate / label) is recomputed
+      // for every visible set by applyColumnCheck below; h() cannot set the
+      // indeterminate PROPERTY, so nothing here reads a stale checked attr.
+      const colChk = h("input", { type: "checkbox", class: "col-check", "aria-label": "Select all tasks in " + (COL_LABEL[name] || name), title: "Select all tasks in this column" });
+      colChk.addEventListener("click", e => {
+        e.stopPropagation(); // the head is non-interactive today; defensive against future wrappers
+        const ids = visibleTasks(((S.data.columns || []).find(c => c.name === name) || {}).tasks || []).map(t => t.id);
+        if (colChk.checked) ids.forEach(id => S.sel.add(id));
+        else ids.forEach(id => S.sel.delete(id));
+        render();
+      });
       el.append(h("div", { class: "col-head" },
+        colChk,
         h("span", { class: "col-dot" }), COL_LABEL[name] || name, count,
         ...(CREATEABLE_COLS.has(name)
           ? [h("button", { class: "col-add", title: "Create task in this column", onclick: () => openCreateModal({ column: name }) }, "＋")]
@@ -315,12 +351,13 @@ function renderInner() {
           if (ids.length) await moveTasks(ids, name);
         });
       }
-      rec = { el, count, body, cards: new Map(), lanes: new Map(), empty: h("div", { class: "col-empty" }, "Nothing here") };
+      rec = { el, count, colChk, body, cards: new Map(), lanes: new Map(), empty: h("div", { class: "col-empty" }, "Nothing here") };
       colEls.set(name, rec);
     }
     rec.el.classList.toggle("mobile-active", name === S.mobileCol);
     const tasks = vis[name];
     rec.count.textContent = String(tasks.length);
+    applyColumnCheck(rec, tasks);
 
     const desired = []; const ids = new Set();
     if (!tasks.length) {
