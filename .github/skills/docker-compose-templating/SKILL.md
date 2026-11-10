@@ -83,6 +83,17 @@ networks:
 
 ## Best Practices
 
+### Relocating an existing manifest
+
+Keep managed manifests at `<docker_storage_folder>/<stack>/docker-compose.yaml`
+for exact-depth updater discovery; data subdirectories need not move. Before a
+relocation, inspect deployed `com.docker.compose.project` labels and preserve that
+identity with an explicit top-level `name` (also honored by the updater). Do not
+infer the old project from a folder name. Validate the staged config without
+printing credentials, compare absolute mounts and cached/running image IDs, and
+use a no-pull deployment for a location-only migration. Old-manifest removal is
+a separately authorized one-off, not a permanent role cleanup task.
+
 ### Single-Container Templates
 
 - Default Docker bridge networking is usually sufficient

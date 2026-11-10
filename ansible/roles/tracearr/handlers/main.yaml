@@ -2,7 +2,11 @@
 - name: Start tracearr
   become: false
   community.docker.docker_compose_v2:
-    project_src: "{{ tracearr_folder }}"
+    project_src: "{{ tracearr_parent_folder }}"
+    files:
+      - docker-compose.yaml
+    pull: "{{ tracearr_compose_pull | default('policy') }}"
+    build: never
     state: restarted
     remove_orphans: true
 

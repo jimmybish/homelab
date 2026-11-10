@@ -26,6 +26,8 @@ tracearr_redis_version: "8-alpine"
 tracearr_port: 3001
 
 # Volume paths - Multi-container stack pattern
+# The manifest lives at the stack root; data paths below remain unchanged.
+tracearr_compose_project_name: tracearr
 tracearr_parent_folder: "{{ docker_storage_folder }}/tracearr-stack"
 tracearr_folder: "{{ tracearr_parent_folder }}/tracearr"
 tracearr_database_folder: "{{ tracearr_parent_folder }}/database"

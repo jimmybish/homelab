@@ -1,3 +1,6 @@
+# Preserve the deployed project/network identity when moving the manifest.
+name: "{{ tracearr_compose_project_name }}"
+
 services:
   tracearr:
     image: ghcr.io/connorgallopo/tracearr:{{ tracearr_version }}

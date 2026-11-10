@@ -1,6 +1,5 @@
 ---
-# Playbook to update all Docker Compose containers to the latest version
-# Equivalent to: docker compose pull && docker compose up -d
+# Registry-only updates. Local image upgrades belong to deployment roles.
 
 # hosts is `localhost, all` so ANY --limit value still matches this play
 # (a narrower pattern is dropped when the limit selects a host outside it).
@@ -13,54 +12,48 @@
       vars:
         grafana_silence_comment: "Updating all Docker containers"
       run_once: true
+      when: not ansible_check_mode
 
 - name: Update all Docker Compose containers
   hosts:
     - ubuntu
   become: true
   tasks:
-    - name: Find all docker-compose.yaml files
-      ansible.builtin.find:
-        paths: "{{ docker_storage_folder }}"
-        patterns: "docker-compose.yaml,docker-compose.yml"
-        recurse: true
-      register: compose_files
-
-    - name: Set list of valid compose projects (parent directories)
+    - name: Initialize sanitized updater results
       ansible.builtin.set_fact:
-        valid_compose_projects: "{{ compose_files.files | map(attribute='path') | map('dirname') | unique | list }}"
+        docker_update_results: []
 
-    - name: Remove stopped containers for each project
-      become: false
-      community.docker.docker_prune:
-        containers: true
-      failed_when: false
+    - name: Process managed projects without preventing Grafana cleanup
+      block:
+        - name: Discover managed Compose projects
+          ansible.builtin.include_tasks: tasks/discover_managed_compose.yaml
 
-    - name: Pull latest images (docker compose v2)
-      become: false
-      community.docker.docker_compose_v2_pull:
-        project_src: "{{ item }}"
-      loop: "{{ valid_compose_projects }}"
-      ignore_errors: true
-      register: pull_results
+        - name: Show exact managed Compose projects
+          ansible.builtin.debug:
+            var: valid_compose_projects
 
-    - name: Bring up containers (docker compose v2)
-      become: false
-      community.docker.docker_compose_v2:
-        project_src: "{{ item }}"
-        state: present
-        remove_orphans: true
-      loop: "{{ valid_compose_projects }}"
-      ignore_errors: true
-      register: up_results
+        # Pre-existing GLOBAL stopped-container prune, not project-scoped.
+        - name: Remove stopped containers for each project
+          become: false
+          community.docker.docker_prune:
+            containers: true
+          failed_when: false
+          when: not ansible_check_mode
 
-    - name: Show pull results
-      ansible.builtin.debug:
-        var: pull_results
-
-    - name: Show up results
-      ansible.builtin.debug:
-        var: up_results
+        - name: Update each managed Compose project
+          ansible.builtin.include_tasks: tasks/update_compose_project.yaml
+          loop: "{{ valid_compose_projects }}"
+          loop_control:
+            loop_var: compose_project
+      rescue:
+        - name: Record discovery or orchestration failure without raw output
+          ansible.builtin.set_fact:
+            docker_update_results: >-
+              {{ docker_update_results + [{
+                'project': docker_storage_folder, 'status': 'failed',
+                'check_mode': ansible_check_mode,
+                'error': 'discovery_or_orchestration_failed'
+              }] }}
 
 - name: Re-enable Grafana alerts after container updates
   hosts: localhost, all
@@ -69,3 +62,18 @@
     - name: Remove Grafana silence
       ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
       run_once: true
+      when: not ansible_check_mode
+
+- name: Report registry updates after Grafana cleanup
+  hosts: ubuntu
+  gather_facts: false
+  tasks:
+    - name: Show sanitized updater summary
+      ansible.builtin.debug:
+        var: docker_update_results
+
+    - name: Fail when any project failed
+      ansible.builtin.assert:
+        that:
+          - docker_update_results | selectattr('status', 'equalto', 'failed') | list | length == 0
+        fail_msg: "Docker updater failed; see sanitized project/stage results above. Grafana cleanup was attempted."

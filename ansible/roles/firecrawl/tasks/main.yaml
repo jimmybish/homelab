@@ -60,14 +60,16 @@
     success_msg: "Firecrawl is loopback-only and requires no UFW allow rule."
 
 - name: Deploy Firecrawl Docker Compose definition
+  # Deliberately readable by the unprivileged updater; do not widen other files.
   ansible.builtin.template:
     src: docker_compose.yaml.j2
     dest: "{{ firecrawl_compose_file }}"
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
-    mode: '0600'
+    mode: '0644'
   register: firecrawl_compose_template
   no_log: true
+  diff: false
   notify: Restart Firecrawl
 
 - name: Inspect pinned local Firecrawl images

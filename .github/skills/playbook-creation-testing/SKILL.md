@@ -209,6 +209,9 @@ ansible-playbook -i inventory.yaml update_ubuntu.yaml --vault-password-file ~/an
 # Pull latest Docker images and recreate containers across all Ubuntu hosts
 ansible-playbook -i inventory.yaml update_docker_containers.yaml --vault-password-file ~/ansible_key
 
+# Preview only: no Grafana silence API writes, pruning, or container/image changes
+ansible-playbook -i inventory.yaml update_docker_containers.yaml --vault-password-file ~/ansible_key --limit ubuntu --check
+
 # Update Docker containers on a single host
 ansible-playbook -i inventory.yaml update_docker_containers.yaml --vault-password-file ~/ansible_key --limit 'docker-1'
 
@@ -221,6 +224,19 @@ ansible-playbook -i inventory.yaml shutdown_hosts.yaml --vault-password-file ~/a
 # Initial OS setup (users, packages, SSH, firewall)
 ansible-playbook -i inventory.yaml os_setup.yaml --vault-password-file ~/ansible_key
 ```
+
+For container updater safety/exclusions and local regressions, see
+`ansible/docs/docker-container-updates.md`. Inventory Compose locations read-only
+before changing discovery depth: legitimate nested stacks may be excluded.
+Never add `check_mode: false` to force pull/up/prune or maintenance API writes.
+Check mode can fail registry predictions for locally built images; report those
+failures even when legacy `ignore_errors` leaves the recap successful. Compare
+before/after Docker metadata separately from any explicitly authorized live deploy.
+Do not use `--diff` for secret-bearing Compose templates.
+For ad-hoc read-only Compose validation, use an absolute
+`--file /etc/docker-storage/<service>/docker-compose.yaml config --quiet` path
+or explicitly set the working directory. Do not assume `--project-directory`
+also changes where a relative `--file` is resolved.
 
 ### Homepage-Specific Operations
 
