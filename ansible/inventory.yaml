@@ -43,12 +43,16 @@ ubuntu:
     plex-lxc:
     proxy:
 
-# Docker VM hosts (non-LXC) - used for cAdvisor scraping
-docker_vm_hosts:
+# Single scope for cAdvisor Compose deployment and Prometheus scraping.
+# Non-LXC Docker hosts; Nova added by approved scope unification, 2026-11-11.
+cadvisor_hosts:
   hosts:
     docker-1:
     docker-2:
     proxy:
+    hermes:
+    sparky:
+    nova:
 
 # All Debian hosts
 debian:

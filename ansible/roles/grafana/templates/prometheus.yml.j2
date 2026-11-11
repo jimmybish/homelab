@@ -10,7 +10,7 @@ scrape_configs:
       - targets: ['loki:3100']
   - job_name: 'cadvisor'
     static_configs:
-{% for host in groups.get('docker_vm_hosts', []) %}
+{% for host in groups.get('cadvisor_hosts', []) %}
 {% if host == inventory_hostname %}
       - targets:
         - {{ ansible_default_ipv4.address }}:8089

@@ -1,0 +1,56 @@
+---
+- name: Inspect Prometheus for live configuration validation
+  become: false
+  community.docker.docker_container_info:
+    name: prometheus
+  register: grafana_prometheus_before
+
+# The directory is already mounted at /prometheus. Validate with the running
+# binary before publishing; never pull an image or recreate the stack here.
+- name: Stage Prometheus configuration for validation
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ grafana_prometheus_data_folder }}/prometheus.yml.candidate"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+
+- name: Validate candidate with the running Prometheus promtool
+  become: false
+  community.docker.docker_container_exec:
+    container: prometheus
+    argv:
+      - /bin/promtool
+      - check
+      - config
+      - /prometheus/prometheus.yml.candidate
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - grafana_prometheus_before.exists
+    - grafana_prometheus_before.container.State.Running
+
+- name: Publish Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ grafana_prometheus_data_folder }}/prometheus.yml"
+    mode: '0644'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    backup: true
+  notify: Reload Prometheus configuration
+
+# Also recover a previous publication whose handler did not finish.
+- name: Detect a stale Prometheus single-file bind
+  become: false
+  community.docker.docker_container_exec:
+    container: prometheus
+    argv: [/bin/cmp, -s, /prometheus/prometheus.yml, /etc/prometheus/prometheus.yml]
+  register: grafana_prometheus_bind_compare
+  failed_when: grafana_prometheus_bind_compare.rc not in [0, 1]
+  changed_when: grafana_prometheus_bind_compare.rc == 1
+  notify: Reload Prometheus configuration
+  when:
+    - not ansible_check_mode
+    - grafana_prometheus_before.exists
+    - grafana_prometheus_before.container.State.Running

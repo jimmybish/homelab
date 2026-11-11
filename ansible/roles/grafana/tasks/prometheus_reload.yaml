@@ -1,0 +1,40 @@
+---
+# An atomic host-side template replacement leaves the single-file bind mounted
+# on the old inode. Refresh that view from the directory bind before SIGHUP.
+# cmp avoids copying onto the same file when both mounts already agree.
+# BusyBox cp tries to create the unlinked bind target and fails with EEXIST;
+# dd opens/truncates that existing inode instead.
+- name: Refresh Prometheus single-file bind from validated source
+  become: false
+  community.docker.docker_container_exec:
+    container: prometheus
+    argv:
+      - /bin/sh
+      - -c
+      - >-
+        cmp -s /prometheus/prometheus.yml /etc/prometheus/prometheus.yml ||
+        dd if=/prometheus/prometheus.yml of=/etc/prometheus/prometheus.yml conv=fsync
+
+- name: Validate the exact Prometheus reload path
+  become: false
+  community.docker.docker_container_exec:
+    container: prometheus
+    argv: [/bin/promtool, check, config, /etc/prometheus/prometheus.yml]
+  changed_when: false
+
+- name: Reload Prometheus without restarting its container
+  become: false
+  community.docker.docker_container_exec:
+    container: prometheus
+    argv: [/bin/kill, -HUP, "1"]
+
+- name: Verify Prometheus readiness after configuration reload
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ grafana_prometheus_port }}/-/ready"
+    return_content: true
+  register: grafana_prometheus_ready
+  until:
+    - grafana_prometheus_ready.status == 200
+    - "'Prometheus Server is Ready.' in grafana_prometheus_ready.content"
+  retries: 10
+  delay: 2

@@ -4,3 +4,6 @@ docker_apt_repository: "deb [arch=amd64] https://download.docker.com/linux/ubunt
 docker_daemon_options:
   storage-driver: "overlay2"
 docker_cadvisor_port: 8089
+# Retain the former image, recovered from Docker journals on all five hosts.
+docker_cadvisor_image: gcr.io/cadvisor/cadvisor@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
+docker_cadvisor_folder: "{{ docker_storage_folder }}/cadvisor"
