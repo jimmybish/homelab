@@ -4,6 +4,79 @@ Quick-reference runbook for recurring issues. When responding to an alert or tro
 
 ---
 
+## cAdvisor missing after maintenance
+
+**Confirmed 2026-11-11 (Australia/Sydney):** docker-1, docker-2, proxy, Hermes,
+and Sparky had no cAdvisor container or cached image. Prometheus's three
+configured cAdvisor targets (docker-1, docker-2, proxy) returned connection
+refused, `up=0`, and Grafana `cadvisor-down-1` was firing. Alloy only collects
+Docker logs and host metrics here; it does not recreate or scrape cAdvisor.
+
+**Cause:** the 2026-11-10 stop-all maintenance left standalone cAdvisor
+containers stopped. The updater's host-global `docker_prune: containers: true`
+deleted them, although its task name misleadingly said "for each project".
+Compose-only discovery/start cannot recreate non-Compose exporters. Subsequent
+image cleanup also removed their unused image; Docker journals on all five
+hosts retained the same `gcr.io/cadvisor/cadvisor` digest.
+
+**Restoration / source of truth:** after approved scope unification on
+2026-11-11, `cadvisor_hosts` manages both deployment and scraping for docker-1,
+docker-2, proxy, Hermes, Sparky, and Nova. The obsolete three-host scrape-only
+group was removed after confirming it had no unrelated consumers. The Docker role pins the recovered
+v0.55.1 image digest
+`sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57`,
+retaining port 8089, read-only host mounts, existing UFW rules, and
+`unless-stopped` without adding privileged mode.
+
+From `ansible/`, deploy **only** tagged exporter tasks:
+
+```bash
+ansible-playbook -i inventory.yaml os_setup.yaml --vault-password-file ~/ansible_key --tags cadvisor --limit cadvisor_hosts
+```
+
+Check `--list-tasks` first: only cAdvisor firewall/Compose/migration/metrics tasks should
+be selected (other plays may gather facts). Do not use the blanket updater or
+an untagged OS/service deployment to restore exporters. A manual stop is not
+reversed by `unless-stopped`; use this role to restore the desired started state.
+
+**Compose migration (2026-11-11):** the Docker role now manages
+`/etc/docker-storage/cadvisor/docker-compose.yaml` with explicit project
+`cadvisor` and unchanged container name/image digest/runtime semantics. The
+updater discovers this exact `.yaml` manifest and can recreate missing cAdvisor;
+it is a registry service, not a local-only image. The digest remains pinned.
+See [migration and rollback](docker-container-updates.md#cadvisor-compose-migration-2026-11-11).
+Do not restore the former ongoing standalone `docker_container: state: started`
+task alongside Compose.
+
+**Prometheus config-only reload:** use `deploy_grafana.yaml --tags
+prometheus_config --limit grafana_host` with the normal inventory/vault flags;
+see [the narrow runbook](docker-container-updates.md#prometheus-configuration-only).
+Atomic host-file replacement leaves Prometheus's single-file bind on an
+unlinked inode. BusyBox `cp` fails with `File exists` on that mount; the handler
+uses guarded, truncating `dd` from the directory bind, validates the exact reload
+path with promtool, and sends SIGHUP. Stale-bind detection makes a rerun recover
+an interrupted publication even when the host file is already current. No
+container restart, alert silence, or unrelated stack deployment is required.
+
+**Verification:** inspect running/healthy state, stable restart count and
+restart policy; inspect actual startup errors and Docker factory registration.
+Require `/metrics` to include version and named-container `container_last_seen`
+samples, not merely HTTP 200 or root-cgroup metrics. Check from *inside the
+Prometheus container*, not just localhost on the exporter. For docker-1, use its
+actual configured scrape IP (`192.168.0.5:8089`), not its FQDN: container DNS for
+the collector's own hostname is not the host scrape address. Check the live
+`/api/v1/targets` scrape URLs/errors, then `up{job="cadvisor"}` and the Grafana
+rule after the 15-second scrape / one-minute alert evaluation cycles.
+Hermes/Sparky have no configured `up` series; probe their endpoints directly
+from the collector rather than claiming they are monitored.
+
+**Prevention:** the updater no longer performs host-global stopped-container
+pruning in any mode; focused regression tests reject it. Image-policy,
+discovery, failure cleanup, and check-mode behavior are unchanged. No broad
+image/volume garbage collection replaces the removed operation.
+
+---
+
 ## Sparky "Node Exporter Scrape Failing" (formerly "Host Down")
 
 **Alert:** `Node Exporter Scrape Failing` (Grafana, uid `host-down-1`, severity: critical) and `Sparky Unreachable (No Logs)` (uid `sparky-unreachable-1`, severity: critical)

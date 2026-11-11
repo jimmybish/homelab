@@ -152,3 +152,14 @@ Every role that deploys a Docker service should include a handler to restart it.
 - **Restart Swag Internal:** Include if the role deploys an internal proxy config. Most web-facing services use this.
 - **Restart Swag External:** Include only if the role deploys an external proxy config (public internet access).
 - Only include the handlers your role actually notifies — omit unused ones.
+
+### Existing Prometheus configuration-only changes
+
+Use `deploy_grafana.yaml --tags prometheus_config --limit grafana_host` with the
+standard inventory/vault flags, not the full-stack restart handler. An atomic
+template update can leave its single-file bind on an unlinked inode: BusyBox
+`cp` fails with `File exists`. The repository's reload path validates with the
+running promtool, detects/refreshes that stale bind using guarded `dd`, then
+sends SIGHUP without a restart. Rerun the same tag to recover an interrupted
+publication; verify the reload timestamp and actual scrape targets, not just
+readiness. See `ansible/docs/known-issues.md` before troubleshooting.

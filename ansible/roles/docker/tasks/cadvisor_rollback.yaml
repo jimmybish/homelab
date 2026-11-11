@@ -1,0 +1,50 @@
+---
+# Only reached for a positively identified standalone instance. Keep the original
+# image/config/mounts/runtime intact instead of reconstructing it from defaults.
+- name: Inspect name holder after failed migration
+  become: false
+  community.docker.docker_container_info:
+    name: cadvisor
+  register: docker_cadvisor_failed
+
+- name: Refuse removal of a foreign name holder during rollback
+  ansible.builtin.assert:
+    that:
+      - >-
+        docker_cadvisor_failed.container.Config.Labels.get('com.docker.compose.project', '') == 'cadvisor' and
+        docker_cadvisor_failed.container.Config.Labels.get('com.docker.compose.service', '') == 'cadvisor' and
+        docker_cadvisor_failed.container.Config.Labels.get('com.docker.compose.project.working_dir', '') ==
+          docker_cadvisor_folder and
+        docker_cadvisor_failed.container.Config.Labels.get('com.docker.compose.project.config_files', '') ==
+          docker_cadvisor_folder ~ '/docker-compose.yaml'
+  when:
+    - docker_cadvisor_failed.exists
+    - docker_cadvisor_failed.container.Id != docker_cadvisor_before.container.Id
+
+- name: Remove only this migration's failed Compose replacement
+  become: false
+  community.docker.docker_container:
+    name: "{{ docker_cadvisor_failed.container.Id }}"
+    state: absent
+    keep_volumes: true
+  when:
+    - docker_cadvisor_failed.exists
+    - docker_cadvisor_failed.container.Id != docker_cadvisor_before.container.Id
+
+- name: Restore legacy container name
+  become: false
+  ansible.builtin.command:
+    argv: [docker, rename, "{{ docker_cadvisor_before.container.Id }}", cadvisor]
+  changed_when: true
+  when: not docker_cadvisor_failed.exists or docker_cadvisor_failed.container.Id != docker_cadvisor_before.container.Id
+
+- name: Restore previously running legacy container
+  become: false
+  ansible.builtin.command:
+    argv: [docker, start, "{{ docker_cadvisor_before.container.Id }}"]
+  changed_when: true
+  when: docker_cadvisor_before.container.State.Running
+
+- name: Verify recovered legacy metrics
+  ansible.builtin.include_tasks: cadvisor_health.yaml
+  when: docker_cadvisor_before.container.State.Running

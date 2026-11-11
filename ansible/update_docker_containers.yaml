@@ -32,14 +32,8 @@
           ansible.builtin.debug:
             var: valid_compose_projects
 
-        # Pre-existing GLOBAL stopped-container prune, not project-scoped.
-        - name: Remove stopped containers for each project
-          become: false
-          community.docker.docker_prune:
-            containers: true
-          failed_when: false
-          when: not ansible_check_mode
-
+        # Never globally prune stopped containers: standalone exporters and
+        # intentionally stopped workloads are not recreated by Compose.
         - name: Update each managed Compose project
           ansible.builtin.include_tasks: tasks/update_compose_project.yaml
           loop: "{{ valid_compose_projects }}"

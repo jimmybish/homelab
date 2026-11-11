@@ -94,14 +94,10 @@
     proto: tcp
   when: ansible_os_family == "Debian"
 
-- name: Deploy Prometheus config
-  ansible.builtin.template:
-    src: "templates/prometheus.yml.j2"
-    dest: "{{ grafana_prometheus_data_folder }}/prometheus.yml"
-    mode: '0644'
-    owner: "{{ docker_user }}"
-    group: "{{ docker_user }}"
-    force: true
+- name: Validate and deploy Prometheus configuration
+  ansible.builtin.import_tasks: prometheus_config.yaml
+  tags:
+    - prometheus_config
 
 - name: Ensure Grafana provisioning directory exists
   ansible.builtin.file:

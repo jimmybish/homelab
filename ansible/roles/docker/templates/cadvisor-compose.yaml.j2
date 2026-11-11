@@ -1,0 +1,17 @@
+# Managed by Ansible. Registry image remains digest-pinned; no build/local policy.
+name: cadvisor
+services:
+  cadvisor:
+    image: "{{ docker_cadvisor_image }}"
+    container_name: cadvisor
+    restart: unless-stopped
+    # Preserve the standalone network and IPv4 binding (not a new Compose network).
+    network_mode: bridge
+    ports:
+      - "0.0.0.0:{{ docker_cadvisor_port }}:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro

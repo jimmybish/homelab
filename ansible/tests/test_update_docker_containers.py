@@ -138,8 +138,6 @@ class ComposeUpdaterTests(unittest.TestCase):
         guarded = [
             plays[0]["tasks"][0],
             plays[2]["tasks"][0],
-            next(t for t in plays[1]["tasks"][1]["block"] if
-                 "community.docker.docker_prune" in t),
         ]
         for task in guarded:
             self.assertEqual(task["when"], "not ansible_check_mode")
@@ -153,6 +151,14 @@ class ComposeUpdaterTests(unittest.TestCase):
                      ANSIBLE / "tasks/grafana_remove_silence.yaml"):
             self.assertNotRegex(path.read_text(),
                                 r"check_mode:\s*(false|no|off|0)\b")
+
+    def test_updater_has_no_host_global_garbage_collection(self):
+        # Compose cannot recreate standalone cAdvisor or stopped runtime jobs.
+        # Guard orchestration and included task sources, not just check mode.
+        for path in (UPDATER, DISCOVERY, PROJECT_TASKS):
+            source = path.read_text()
+            self.assertNotIn("community.docker.docker_prune", source)
+            self.assertNotRegex(source, r"docker\s+(?:container|image|volume|system)\s+prune")
 
     def updater_fixture(self):
         shutil.copy(UPDATER, self.root / UPDATER.name)
@@ -211,9 +217,7 @@ m.exit_json(changed=outcome.get('changed_' + kind, False),
 from ansible.module_utils.basic import AnsibleModule
 m = AnsibleModule(argument_spec={'containers': {'type': 'bool'}},
                   supports_check_mode=True)
-if m.check_mode:
-    m.fail_json(msg='PRUNE_MUST_NOT_EXECUTE')
-m.exit_json(changed=False)
+m.fail_json(msg='PRUNE_MUST_NOT_EXECUTE')
 """)
         return {"ANSIBLE_COLLECTIONS_PATH": str(collections)}
 

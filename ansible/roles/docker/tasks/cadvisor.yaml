@@ -1,0 +1,160 @@
+---
+- name: Inspect existing cAdvisor ownership before any changes
+  become: false
+  community.docker.docker_container_info:
+    name: cadvisor
+  register: docker_cadvisor_before
+
+- name: Classify legacy cAdvisor
+  ansible.builtin.set_fact:
+    docker_cadvisor_legacy: >-
+      {{ docker_cadvisor_before.exists and
+         not (docker_cadvisor_before.container.Config.Labels | default({}, true)
+              | dict2items | selectattr('key', 'match', '^com\.docker\.compose\.') | list) }}
+
+- name: Refuse foreign Compose ownership or unrecognized standalone cAdvisor
+  ansible.builtin.assert:
+    that:
+      - >-
+        (docker_cadvisor_legacy and
+         docker_cadvisor_before.container.Config.Image == docker_cadvisor_image and
+         docker_cadvisor_before.container.HostConfig.Binds | sort ==
+           ['/:/rootfs:ro', '/var/run:/var/run:ro', '/sys:/sys:ro',
+            '/var/lib/docker/:/var/lib/docker:ro', '/dev/disk/:/dev/disk:ro'] | sort and
+         docker_cadvisor_before.container.HostConfig.NetworkMode == 'bridge' and
+         docker_cadvisor_before.container.HostConfig.RestartPolicy.Name == 'unless-stopped' and
+         docker_cadvisor_before.container.HostConfig.PortBindings ==
+           {'8080/tcp': [{'HostIp': '0.0.0.0', 'HostPort': docker_cadvisor_port | string}]} and
+         not docker_cadvisor_before.container.HostConfig.Privileged)
+        or
+        (not docker_cadvisor_legacy and
+         docker_cadvisor_before.container.Config.Labels.get('com.docker.compose.project', '') == 'cadvisor' and
+         docker_cadvisor_before.container.Config.Labels.get('com.docker.compose.service', '') == 'cadvisor' and
+         docker_cadvisor_before.container.Config.Labels.get('com.docker.compose.project.working_dir', '') ==
+           docker_cadvisor_folder and
+         docker_cadvisor_before.container.Config.Labels.get('com.docker.compose.project.config_files', '') ==
+           docker_cadvisor_folder ~ '/docker-compose.yaml')
+    fail_msg: "Unrecognized cAdvisor ownership/runtime: refusing migration or takeover."
+  when: docker_cadvisor_before.exists
+
+- name: Create cAdvisor Compose directory
+  ansible.builtin.file:
+    path: "{{ docker_cadvisor_folder }}"
+    state: directory
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0755'
+
+- name: Validate and deploy exact cAdvisor manifest
+  ansible.builtin.template:
+    src: cadvisor-compose.yaml.j2
+    dest: "{{ docker_cadvisor_folder }}/docker-compose.yaml"
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0644'
+    validate: "docker compose --project-name cadvisor --file %s config --quiet"
+
+- name: Cache pinned cAdvisor image only if missing before any interruption
+  become: false
+  community.docker.docker_image:
+    name: "{{ docker_cadvisor_image }}"
+    source: pull
+    force_source: false
+
+- name: Verify cached pinned image
+  become: false
+  community.docker.docker_image_info:
+    name: "{{ docker_cadvisor_image }}"
+  register: docker_cadvisor_cached
+
+- name: Require cached image and legacy image parity before disruption
+  ansible.builtin.assert:
+    that:
+      - docker_cadvisor_cached.images | length == 1
+      - not docker_cadvisor_legacy or docker_cadvisor_cached.images[0].Id == docker_cadvisor_before.container.Image
+  when: not ansible_check_mode
+
+- name: Explain check-mode migration without touching the live container
+  ansible.builtin.debug:
+    msg: "Would migrate legacy cAdvisor using a stopped rollback copy, then Compose up and metrics validation."
+  changed_when: true
+  when: ansible_check_mode and docker_cadvisor_legacy
+
+- name: Inspect manifest availability for safe Compose dry run
+  ansible.builtin.stat:
+    path: "{{ docker_cadvisor_folder }}/docker-compose.yaml"
+  register: docker_cadvisor_manifest
+  when: ansible_check_mode
+
+- name: Preview existing Compose convergence without mutations
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ docker_cadvisor_folder }}"
+    project_name: cadvisor
+    files: [docker-compose.yaml]
+    state: present
+    build: never
+    pull: never
+    remove_orphans: false
+  when:
+    - ansible_check_mode
+    - not docker_cadvisor_legacy
+    - docker_cadvisor_manifest.stat.exists
+    - docker_cadvisor_cached.images | length == 1
+
+# No forced check_mode:false: staged files do not exist on a fresh dry run.
+# Live convergence validates config/image before stopping the legacy instance.
+- name: Converge cAdvisor with rollback protection
+  when: not ansible_check_mode
+  block:
+    - name: Stop only confirmed legacy cAdvisor for migration
+      become: false
+      ansible.builtin.command:
+        argv: [docker, stop, "{{ docker_cadvisor_before.container.Id }}"]
+      when: docker_cadvisor_legacy
+      changed_when: true
+
+    - name: Retain exact legacy container as a temporary rollback copy
+      become: false
+      ansible.builtin.command:
+        argv:
+          - docker
+          - rename
+          - "{{ docker_cadvisor_before.container.Id }}"
+          - "cadvisor-legacy-{{ docker_cadvisor_before.container.Id[:12] }}"
+      when: docker_cadvisor_legacy
+      changed_when: true
+
+    - name: Converge cAdvisor using only the validated manifest and cached image
+      become: false
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_cadvisor_folder }}"
+        project_name: cadvisor
+        files: [docker-compose.yaml]
+        state: present
+        build: never
+        pull: never
+        remove_orphans: false
+        wait: true
+        wait_timeout: 120
+
+    - name: Validate running cAdvisor before discarding rollback copy
+      ansible.builtin.include_tasks: cadvisor_health.yaml
+  rescue:
+    - name: Restore exact legacy instance after failed migration
+      ansible.builtin.include_tasks: cadvisor_rollback.yaml
+      when: docker_cadvisor_legacy
+
+    - name: Report failed convergence even after successful rollback
+      ansible.builtin.fail:
+        msg: "cAdvisor Compose convergence failed; legacy rollback was attempted if applicable. Inspect health before retrying."
+
+- name: Discard only confirmed legacy rollback copy after successful health checks
+  become: false
+  community.docker.docker_container:
+    name: "{{ docker_cadvisor_before.container.Id }}"
+    state: absent
+    keep_volumes: true
+  when:
+    - docker_cadvisor_legacy
+    - not ansible_check_mode

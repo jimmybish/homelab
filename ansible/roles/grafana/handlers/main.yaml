@@ -1,4 +1,10 @@
 ---
+- name: Reload Prometheus configuration
+  ansible.builtin.include_tasks: "{{ role_path }}/tasks/prometheus_reload.yaml"
+  when:
+    - grafana_prometheus_before.exists
+    - grafana_prometheus_before.container.State.Running
+
 - name: Start Grafana
   become: false
   community.docker.docker_compose_v2:

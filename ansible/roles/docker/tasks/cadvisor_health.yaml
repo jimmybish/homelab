@@ -1,0 +1,24 @@
+---
+- name: Verify cAdvisor is running and healthy
+  become: false
+  community.docker.docker_container_info:
+    name: cadvisor
+  register: docker_cadvisor_after
+  retries: 12
+  delay: 5
+  until:
+    - docker_cadvisor_after.exists
+    - docker_cadvisor_after.container.State.Running
+    - docker_cadvisor_after.container.State.Health.Status == 'healthy'
+
+- name: Verify cAdvisor named-container metrics endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ docker_cadvisor_port }}/metrics"
+    return_content: true
+    status_code: 200
+  register: docker_cadvisor_metrics
+  retries: 12
+  delay: 5
+  until:
+    - "'cadvisor_version_info' in docker_cadvisor_metrics.content"
+    - docker_cadvisor_metrics.content is search('container_last_seen\\{[^\\n]*name="[^"]+"')
