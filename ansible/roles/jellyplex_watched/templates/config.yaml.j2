@@ -1,0 +1,7 @@
+# {{ ansible_managed }}
+# JellyPlex-Watched v9+ configuration (pydantic-settings YAML format).
+# Server definitions and sync directions still come from the legacy .env
+# (higher priority source) until fully migrated; this file provides the
+# per-server user mappings that the ambiguous legacy USER_MAPPING env var
+# cannot express. Mounted read-only at /app/config/config.yaml.
+{{ jellyplex_watched_user_mappings_yaml }}
