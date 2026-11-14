@@ -1,0 +1,261 @@
+---
+# Research Notes - Honcho (plastic-labs/honcho)
+# Official repo: https://github.com/plastic-labs/honcho
+# Release used: v3.6.0 (published 2026-11-10; verified via GitHub releases API)
+# Upstream compose example: https://github.com/plastic-labs/honcho/blob/v3.6.0/docker-compose.yml.example
+# Image availability (research gate 1, verified 2026-11-11 via GHCR tags/list +
+# manifests API): ghcr.io/plastic-labs/honcho publishes version tags
+# (v3.6.0 index digest sha256:eb906a2d251aa48b22347e4465b40785ea7a84e2bfd1105780416bf1f0121099,
+# linux/amd64 + linux/arm64). No source build needed - unlike firecrawl, the
+# upstream registry is usable, so this role pins the published image by tag.
+#
+# Health endpoint (research gate 2): src/main.py defines @app.get("/health")
+# returning {"status":"ok"} with NO auth dependency. The card's "/healthz"
+# does not exist upstream; the compose healthcheck mirrors upstream's
+# /health probe. Verified against the v3.6.0 release tarball.
+#
+# Entrypoint (research gate 4): upstream runs alembic migrations at boot via
+# docker/entrypoint.sh -> scripts/provision_db.py -> src.migrate.main() before
+# exec'ing fastapi. The api service replicates upstream's entrypoint override
+# so migrations run automatically. migrations/env.py runs
+# CREATE EXTENSION IF NOT EXISTS vector itself, so database/init.sql is not
+# required (unlike the upstream compose's bind-mounted init.sql).
+#
+# Services: api + deriver + database (pgvector/pgvector:pg15) + redis
+# (redis:8.2) per upstream docker-compose.yml.example. NO mcp service
+# (pinned decision). DB/redis are NOT published to the host: upstream's
+# 127.0.0.1 publishes are dropped and POSTGRES_HOST_AUTH_METHOD=trust is
+# removed; the api/deriver containers reach them over the compose network
+# with the vaulted password.
+#
+# LLM backend (research gate 3, 2026-11-11): the pinned decision routes all
+# LLM traffic through LiteLLM on sparky ({{ internal_sparky_url }},
+# port 4000 per group_vars/all/vars.yaml). Live probe results from mgmt:
+#   - sparky:4000 -> connection refused (no LiteLLM proxy listening;
+#     group_vars/spark/vars.yaml defines vllm_sparkrun_proxy_port "4000" but
+#     no litellm container/unit is up - "sudo docker ps | grep -iE
+#     litellm|proxy" -> none, "ss -tln | grep :4000" -> none).
+#   - sparky:8000 -> vLLM is serving model "qwen38-flash-next"
+#     (nvidia/Qwen3.8-Flash-Next-FP4-Local, max_model_len 262144).
+#     /v1/chat/completions accepts tools + tool_choice and returned 200
+#     (tool-call capable request surface). /v1/embeddings -> 404 (NO
+#     embedding model on this endpoint).
+# Consequence for the deploy card (t_296f2e57):
+#   1. Restore the sparky LiteLLM proxy (:4000) OR override
+#      honcho_llm_base_url to the direct vLLM endpoint
+#      ("http://<sparky-LAN-host>:8000" - see groups['spark']).
+#   2. Replace honcho_llm_api_key below (placeholder) with the real LiteLLM
+#      master key / vLLM key from Jimmy - vault TODO.
+#   3. Set honcho_embedding_model to a model that exists on the chosen
+#      endpoint and set honcho_embedding_dimensions to match its vector
+#      size BEFORE first migration (the api container fail-boots on a
+#      dimension mismatch via src/startup/embedding_validator.py).
+#
+# Auth: AUTH_USE_AUTH=true with the vaulted AUTH_JWT_SECRET (HS256).
+# /health stays unauthenticated (verified in src/main.py). MULTI_TENANT=false
+# (pinned). TENANT_ID is stamped on the first migration and cannot change
+# afterwards - set deliberately here.
+#
+# Deploy card t_296f2e57 RESOLUTION of the earlier TODO list (2026-11-11):
+#   - "Restore LiteLLM :4000 or repoint": resolved by repointing
+#     honcho_llm_base_url to the sparky vLLM :8000 (LiteLLM :4000 has no
+#     proxy anywhere on sparky; vLLM verified tool-call + json_object
+#     capable). The vaulted honcho_llm_api_key placeholder stays - vLLM
+#     enforces no API key; the openai transport merely needs a non-empty
+#     value. No secret rotation needed for the deriver to function.
+#   - "Set embedding model + dims BEFORE first migration": resolved by the
+#     in-compose TEI embedder + EMBEDDING_VECTOR_DIMENSIONS=768 + the
+#     configure_embeddings.py ALTER slotted into the api entrypoint between
+#     alembic and fastapi (upstream bootstrap order).
+#
+# Container user: upstream image runs as non-root "app" (uid from image);
+# postgres official image entrypoint chowns its own PGDATA, so the bind
+# directories are root-owned 0755 pre-start.
+
+honcho_version: "v3.6.0"
+honcho_image: "ghcr.io/plastic-labs/honcho:v3.6.0@sha256:eb906a2d251aa48b22347e4465b40785ea7a84e2bfd1105780416bf1f0121099"
+honcho_postgres_image: "pgvector/pgvector:pg15"
+honcho_redis_image: "redis:8.2"
+
+# LAN-only exposure (pinned decision): docker-proxy binds the published port
+# to the hermes LAN address; nothing is bound on 0.0.0.0.
+#
+# Private-topology values are vaulted (review r1 finding 8 - pii-pre-review
+# treats RFC1918 host/CIDR literals in tracked files as PII). The _secret
+# vars hold the vault ciphertext blocks below; the working vars are the
+# standard lazy-template indirection (same pattern as internal_domain), so
+# comparison/argv consumers always receive the decrypted str.
+honcho_bind_address: "{{ honcho_bind_address_secret }}"
+honcho_port: 8000
+honcho_container_port: 8000
+honcho_api_workers: 1
+honcho_deriver_workers: 1
+
+# Compose project dir (pinned: {{ docker_storage_folder }}/honcho)
+honcho_folder: "{{ docker_storage_folder }}/honcho"
+honcho_database_folder: "{{ honcho_folder }}/database"
+honcho_redis_folder: "{{ honcho_folder }}/redis"
+
+# Database (password is vaulted below; upstream's trust auth is dropped)
+honcho_postgres_user: "honcho"
+honcho_postgres_database: "honcho"
+
+# Single-tenant, self-hosted posture (pinned)
+honcho_multi_tenant: false
+honcho_tenant_id: "hermes"
+honcho_namespace: "hermes"
+honcho_vector_store_type: "pgvector"
+
+# Auth (pinned): JWT HS256 auth enabled with a vaulted secret.
+honcho_auth_use_auth: true
+
+# LLM backend (deploy card t_296f2e57 decision, 2026-11-11): the pinned
+# LiteLLM-on-sparky route is NOT usable - sparky :4000 has no LiteLLM proxy
+# (no container, no unit, nothing listening; probe from mgmt + sparky) and
+# group_vars only reserves the port. The LIVE OpenAI-compatible endpoint is
+# the sparky vLLM at :8000 serving qwen38-flash-next: /v1/chat/completions
+# verified 200 with real content, response_format json_object works, and
+# tool_choice=required returned tool_calls (deriver needs tool calling). It
+# enforces no API key; honcho_llm_api_key below is a non-empty placeholder
+# the openai transport requires but the server ignores. If a LiteLLM proxy
+# ever comes up on :4000, repoint honcho_llm_base_url to internal_sparky_url.
+# honcho_llm_base_url gets "/v1" appended for OpenAI-transport base URLs.
+honcho_llm_base_url: "http://{{ groups['spark'][0] }}.{{ internal_domain }}:8000"
+honcho_llm_model: "qwen38-flash-next"
+honcho_deriver_structured_output_mode: "json_object"
+
+# Small-model routing tier (card t_8d13e3e1): high-frequency
+# deriver/summary/minimal-dialectic work runs on the 4B llama.cpp sidecar
+# (sparkrun honcho-deriver-4b job) instead of the big vLLM. The sidecar
+# host is pinned in the inventory (honcho_small_llm_host group), not as a
+# literal here (review r1 finding 3), and resolves through internal_domain.
+# Port + served model name are durable service facts, not RFC1918 literals,
+# so they stay unvaulted. The sidecar :8082 is LAN-bound and smoke-tested:
+# /v1/models lists qwen3-4b-deriver, tool-calling and response_format
+# json_object both pass. The llama.cpp server ignores API keys, so the
+# tier reuses HONCHO_LLM_API_KEY via the existing OVERRIDES__API_KEY_ENV
+# convention - same non-empty placeholder as vLLM.
+# The fallback tier sends structured-output failures back to the big model:
+# DERIVER_MODEL_CONFIG__FALLBACK__* requires an explicit transport (pydantic
+# FallbackModelSettings in the v3.6.0 image has no transport default - live
+# probe: omitting it aborts settings load with 'fallback.transport Field
+# required'), hence _TRANSPORT=openai.
+honcho_deriver_small_host: "{{ groups['honcho_small_llm_host'][0] }}"
+honcho_deriver_small_model: "qwen3-4b-deriver"
+honcho_deriver_small_base_url: "http://{{ honcho_deriver_small_host }}.{{ internal_domain }}:8082"
+honcho_deriver_fallback_transport: "openai"
+
+# Embeddings (deploy card t_296f2e57 decision): NO /v1/embeddings endpoint
+# exists anywhere in the fleet (sparky vLLM 404s, no ollama/TEI anywhere,
+# docker-1/-2 :8000 are web UIs). The startup validators
+# (src/startup/embedding_validator.py) fail CLOSED on any dim mismatch, and
+# the deriver + hybrid recall both need vectors. This role therefore runs an
+# in-compose CPU embedder (Text Embeddings Inference, /v1/embeddings is in
+# its openapi surface, tag cpu-1.9.4 digest 2538ea1c verified on GHCR)
+# serving BAAI/bge-base-en-v1.5 (768-dim) on the compose network only.
+# bge-base is MIT-licensed; ~400 MB model cache under honcho_folder/tei,
+# ~300 MB CPU RSS - fits hermes (11 GB free, 15 GB RAM headroom OK).
+# EMBEDDING_VECTOR_DIMENSIONS is IMMUTABLE after the first migration: the
+# columns are created vector(1536) by default, and the api entrypoint runs
+# scripts/configure_embeddings.py --yes (present in the image, ships ALTERs
+# to EMBEDDING.* dims before validators run) - change this value later only
+# via the upstream destroy+rebuild recipe.
+honcho_embedding_enabled: true
+honcho_embedding_image: "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d"
+honcho_embedding_model: "BAAI/bge-base-en-v1.5"
+honcho_embedding_dimensions: 768
+honcho_embedding_folder: "{{ honcho_folder }}/tei"
+# Compose-internal only (no host publish, same policy as database/redis).
+honcho_embedding_base_url: "http://embeddings:80"
+
+# Feature flags: API-only LAN service - no SWAG proxy, no DNS alias, no
+# reverse-proxy exposure (clients use http://<LAN IP>:8000 directly).
+honcho_configure_homepage: true
+honcho_configure_proxy: false
+honcho_configure_dns: false
+honcho_is_proxied: false
+
+# Homepage card URL (no proxy URL exists for this service; the homepage
+# rebuild in roles/homepage runs without this role's vars, so the template
+# carries a matching default).
+honcho_public_url: "http://{{ honcho_bind_address }}:{{ honcho_port }}"
+
+honcho_readiness_retries: 40
+honcho_readiness_delay: 5
+
+# UFW source pinning (deploy card t_296f2e57): never open 8000 to Anywhere.
+# All current callers (hermes profiles, mgmt verification) are on the LAN
+# CIDR. Keep the list in vars so an extra monitoring host can be added
+# without touching tasks. The CIDR is vaulted (review r1 finding 8); the
+# indirection resolves to a plain str at task-argument templating time.
+honcho_ufw_sources:
+  - "{{ honcho_ufw_source_cidr_secret }}"
+honcho_ufw_allow_anywhere: false
+
+# --- Vaulted secrets -------------------------------------------------------
+# Minted 2026-11-11 (dev A card t_b0564bec) with:
+#   ansible-vault encrypt_string --vault-password-file ~/ansible_key \
+#     --stdin-name '<var>'   (value piped via stdin, never argv)
+# v2 note: the first mint pass used a non-existent --stdin flag and produced
+# corrupt (odd-length hex) blocks that failed decryption; all three blocks
+# below were re-minted with fresh values and decrypt-verified against
+# ~/ansible_key.
+#
+# Deploy card t_296f2e57 alignment (2026-11-11): roles/hermes
+# hermes_honcho_client_jwt_secret (dev B's mint of the same AUTH_JWT_SECRET)
+# was corrupt in its committed block and has been RE-VAULTED on mgmt to this
+# exact plaintext - decrypt-verified byte-identical to honcho_auth_jwt_secret.
+# honcho_llm_api_key stays a placeholder: the chosen LLM endpoint (sparky
+# vLLM :8000) enforces no API key, and the openai transport only requires a
+# non-empty value. Swap it (and honcho_llm_base_url) together if a keyed
+# LiteLLM proxy comes up on :4000 later.
+
+honcho_postgres_password: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  38353439653362386261373066396531633465313937623237643638306237373035396334383439
+  3938353764666132633761336631346637383734323638340a316533656537373538333561366635
+  33356438393264663966383064646636303866383264633531633566353533653937383530346364
+  3834623533323636320a386334373461633664323364336533626330303230613934343037396332
+  62663838326535666462353539646365643635323134333531643265323862653031656538333363
+  6265393564326339393437383063386664633736396533396137
+
+honcho_auth_jwt_secret: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  39346130346230643839393239343639613632326331363837636134613763356466353635666437
+  6166663032633439373566613261366265386133386339380a613030366365333965313535666530
+  34366663613466663461306433646131343964393861363263356166353232656464633939656264
+  3932306364343939310a356365633837623839666537303930313365303064303166323365636630
+  36303966636339343635316465366230343237306432653163363039386336613031623936616461
+  35613736386533386165653536626463363336376138646632336339316565393364306633336634
+  33363133343030393333636362316466653439303233313736383534313233386331363663323236
+  64313031393833616663
+
+honcho_llm_api_key: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  63626635396233336139316263633963336432633035646266336334383065623930663130613163
+  3638346233383462326632646431353539356464636137660a376661636139633063353130333862
+  64613363636634353966333635316137653463653962633337323430366134653339303966666164
+  6231363566353864360a313530353033313631663336316134363438656634346434623633623533
+  64623538396432663163313939376536346635363562636433383430303265393135626431396565
+  6135316563663937643939613835373462323039333737306639
+
+# Private-topology secrets (review r1 finding 8): RFC1918 bind address and
+# LAN CIDR are durable internal-topology identifiers (pii-pre-review) - kept
+# as vault ciphertext, consumed through the honcho_bind_address /
+# honcho_ufw_sources indirections above. Minted 2026-11-11 fix card
+# t_0d641077 via ansible-vault encrypt_string (stdin pipe, never argv).
+honcho_bind_address_secret: !vault |
+            $ANSIBLE_VAULT;1.1;AES256
+            61616432396130613430313066303965396137376232646433366633613637373535633430393332
+            3265346533633738363932633866333861346636366664320a373639653336646336316538666265
+            66653266616233376534313762326436346461663639376433343838633233636561343731653166
+            6662376639353031370a663539393533313738316635333930636231643635666536353065653866
+            6238
+
+honcho_ufw_source_cidr_secret: !vault |
+            $ANSIBLE_VAULT;1.1;AES256
+            66323139623364623566666133653961643361666462306339653831356638396331623633363433
+            3831656338663237663135626366396461363531386636620a306362626335306535636162613034
+            65333861376663383032386266383866643930646430353739363966306466386362623535613364
+            3438336237323961630a626239313639353233316330386435383865383334303962616232626365
+            6166

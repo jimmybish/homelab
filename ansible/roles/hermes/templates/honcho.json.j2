@@ -1,0 +1,67 @@
+{# Per-profile honcho.json for the honcho memory provider (catalog plugin
+   official@4d492b1d). Layout verified against the installed plugin's
+   client.py: hosts.<profile_host_key> carries the per-profile block
+   (baseUrl, apiKey, workspace, aiPeer, peerName, pinUserPeer,
+   userPeerAliases, recallMode, sessionStrategy, observationMode,
+   writeFrequency, saveMessages, dialecticCadence, dialecticDepth,
+   dialecticReasoningLevel, a2aSessions, timeout, enabled); root carries
+   pooled shared defaults. Host-block fields win over root in the client's
+   _HostLookup. Honcho's dashboard host block (STORAGE_HONCHO_HOST_BLOCK,
+   plugins/memory/config_schema.py) is THIS SAME file -
+   web_routers/memory_providers.py reads/writes it through
+   client.resolve_config_path()/_host_block(), so one render serves CLI,
+   gateway and dashboard. Each profile gets an identical full host map; the
+   client selects its own block via resolve_active_host() ->
+   profile_host_key(profile). No literal secrets here; apiKey comes from the
+   vault-derived fact set in tasks/honcho_wiring.yaml. -#}
+{% set base = hermes_honcho_client_defaults %}
+{
+  "defaultHost": "hermes",
+  "hosts": {
+{% for h in hermes_honcho_profile_list %}
+{% set hp = h.value %}
+{% set raw_aliases = hp.userPeerAliases | default({}, true) %}
+{# Re-key the pii sentinel to the vaulted Discord ID. Ansible does not
+   template dict KEYS in vars files, so the substitution happens here -
+   inside the no_log/diff:false template task. The raw ID never appears
+   in the repo. #}
+{% set aliases = {} %}
+{% for k, v in raw_aliases.items() %}
+{% if k == '__jimmy_discord_id__' %}
+{% set _alias_skip = aliases.update({hermes_honcho_jimmy_discord_id | string: v}) %}
+{% else %}
+{% set _alias_keep = aliases.update({k: v}) %}
+{% endif %}
+{% endfor %}
+{% set hb = {
+       'baseUrl': hermes_honcho_client_url,
+       'apiKey': hermes_honcho_client_jwt_token,
+       'workspace': base.workspace,
+       'aiPeer': hp.peerName,
+       'peerName': hp.peerName,
+       'pinUserPeer': base.pinUserPeer,
+       'userPeerAliases': aliases,
+       'runtimePeerPrefix': base.runtimePeerPrefix,
+       'recallMode': base.recallMode,
+       'sessionStrategy': hp.sessionStrategy | default(base.sessionStrategy, true),
+       'observationMode': base.observationMode,
+       'writeFrequency': base.writeFrequency,
+       'saveMessages': base.saveMessages,
+       'dialecticCadence': base.dialecticCadence,
+       'dialecticDepth': base.dialecticDepth,
+       'dialecticReasoningLevel': base.dialecticReasoningLevel,
+       'a2aSessions': base.a2aSessions,
+       'timeout': base.timeout,
+       'enabled': base.enabled
+     } %}
+    {{ hp.host_key | to_json }}: {{ hb | to_nice_json(indent=2) | indent(4) }}{{ "," if not loop.last else "" }}
+{% endfor %}
+  },
+  "pinUserPeer": false,
+  "recallMode": "hybrid",
+  "observationMode": "directional",
+  "writeFrequency": "async",
+  "saveMessages": true,
+  "a2aSessions": true,
+  "timeout": {{ base.timeout }}
+}

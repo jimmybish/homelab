@@ -1,0 +1,242 @@
+---
+# Honcho self-hosted deployment (dev A card t_b0564bec).
+# API-only LAN service: no SWAG proxy, no DNS alias (honcho_configure_proxy /
+# honcho_configure_dns are false in vars/main.yaml), so the runbook steps 6
+# and 7 (proxy config, pfSense DNS) are intentionally absent.
+
+- name: Ensure docker-compose is installed
+  ansible.builtin.package:
+    name: docker-compose
+    state: present
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Setup Honcho stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: "0755"
+  loop:
+    - "{{ honcho_folder }}"
+    - "{{ honcho_database_folder }}"
+    - "{{ honcho_redis_folder }}"
+    - "{{ honcho_embedding_folder }}"
+
+- name: Reconcile Honcho redis data dir ownership recursively
+  # The redis image entrypoint (running as root by default) chowns /data to
+  # uid 999 on every start, flipping the bind-mount parent away from the
+  # 2001:2001 0755 the task above enforces - permanent changed=1 churn
+  # (review r1 finding 4). The compose service now pins user= honcho_redis_run_as
+  # (uid below) so the entrypoint skips that chown, and this recursive pass
+  # migrates the legacy 999-owned AOF/RDB files once. Owner/group only, no
+  # mode enforcement, so it converges to ok on every later run.
+  ansible.builtin.file:
+    path: "{{ honcho_redis_folder }}"
+    state: directory
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    recurse: true
+  no_log: true
+
+- name: Resolve compose run-as uid:gid for the redis service
+  # docker_user is vaulted; resolve its numeric ids at deploy time so the
+  # compose user: field carries no username the container cannot map.
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ docker_user }}"]
+  register: honcho_redis_passwd
+  changed_when: false
+  no_log: true
+
+- name: Set redis run-as fact
+  ansible.builtin.set_fact:
+    honcho_redis_run_as: >-
+      {{ (honcho_redis_passwd.stdout.split(':'))[2] }}:{{ (honcho_redis_passwd.stdout.split(':'))[3] }}
+  no_log: true
+
+- name: Assert Honcho LAN bind is a valid single address
+  ansible.builtin.assert:
+    that:
+      - honcho_bind_address is match('^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$')
+      - honcho_bind_address != '0.0.0.0'
+    fail_msg: >-
+      honcho_bind_address must be a single non-wildcard IPv4 address so the
+      API stays LAN-bound and database/redis stay unpublished.
+    success_msg: "Honcho bind address {{ honcho_bind_address }} is explicit."
+
+- name: Remove legacy Anywhere Honcho API rule (pre source-pinning)
+  # The original rule (dev A) opened 8000/tcp to Anywhere. hermes runs other
+  # published services, so the default-deny posture must not be widened for
+  # Honcho (and no rule is needed at all for LAN-internal clients on the same
+  # subnet - pfSense/ LAN is trusted). Pin the source to the Hermes fleet
+  # subnet, and delete the stale Anywhere variant if it exists.
+  community.general.ufw:
+    rule: allow
+    port: "{{ honcho_port | string }}"
+    proto: tcp
+    delete: true
+  when: ansible_os_family == "Debian" and not (honcho_ufw_allow_anywhere | default(false))
+
+- name: Allow Honcho API port through UFW (source-pinned)
+  community.general.ufw:
+    rule: allow
+    port: "{{ honcho_port | string }}"
+    proto: tcp
+    from_ip: "{{ honcho_ufw_source }}"
+    direction: in
+  when:
+    - ansible_os_family == "Debian"
+    - not (honcho_ufw_allow_anywhere | default(false))
+  loop: "{{ honcho_ufw_sources }}"
+  loop_control:
+    loop_var: honcho_ufw_source
+
+- name: Allow Honcho API port through UFW (anywhere, opt-in only)
+  community.general.ufw:
+    rule: allow
+    port: "{{ honcho_port | string }}"
+    proto: tcp
+  when: honcho_ufw_allow_anywhere | default(false)
+
+- name: Deploy Honcho Docker Compose definition
+  ansible.builtin.template:
+    src: templates/docker_compose.yaml.j2
+    dest: "{{ honcho_folder }}/docker-compose.yaml"
+    mode: "0640"
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  no_log: true
+  diff: false
+  notify:
+    - Restart Honcho
+
+- name: Run Honcho Docker Compose project
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ honcho_folder }}"
+    state: present
+    remove_orphans: true
+    wait: true
+    wait_timeout: 600
+
+- name: Apply pending Honcho restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for Honcho API listener
+  ansible.builtin.wait_for:
+    host: "{{ honcho_bind_address }}"
+    port: "{{ honcho_port | int }}"
+    state: started
+    timeout: 300
+
+- name: Gather listening port facts
+  community.general.listen_ports_facts:
+
+- name: Assert Honcho API is listening only on the LAN bind address
+  ansible.builtin.assert:
+    that:
+      - honcho_listeners | length > 0
+      - honcho_listeners | map(attribute='address') | unique | list == [honcho_bind_address]
+    fail_msg: >-
+      Honcho port {{ honcho_port }} is not restricted to {{ honcho_bind_address }}
+      (found: {{ honcho_listeners | map(attribute='address') | unique | list }}).
+    success_msg: >-
+      Honcho port {{ honcho_port }} is bound to {{ honcho_bind_address }} only.
+  vars:
+    honcho_listeners: >-
+      {{ ansible_facts.tcp_listen
+         | selectattr('port', 'equalto', honcho_port | int)
+         | list }}
+
+- name: Assert database and redis ports are not published on the host
+  ansible.builtin.assert:
+    that:
+      - 5432 not in (ansible_facts.tcp_listen | map(attribute='port') | list)
+      - 6379 not in (ansible_facts.tcp_listen | map(attribute='port') | list)
+    fail_msg: >-
+      database (5432) or redis (6379) is published on the host; pinned
+      decision requires compose-internal-only exposure.
+    success_msg: "PostgreSQL and Redis remain compose-internal."
+
+- name: Wait for Honcho unauthenticated health endpoint
+  ansible.builtin.uri:
+    url: "http://{{ honcho_bind_address }}:{{ honcho_port }}/health"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: honcho_health
+  until: >-
+    honcho_health.status == 200 and
+    honcho_health.json | default({}) | dict2items | selectattr('key', 'equalto', 'status')
+    | map(attribute='value') | first | default('') == 'ok'
+  retries: "{{ honcho_readiness_retries }}"
+  delay: "{{ honcho_readiness_delay }}"
+  changed_when: false
+
+- name: Assert authenticated routes reject anonymous requests
+  # AUTH_USE_AUTH=true gate (pinned): /health is intentionally public in
+  # upstream src/main.py but the data plane must require a JWT. Verified
+  # on-host: GET /v3/workspaces is not a route (405), POST is the mutating
+  # entrypoint and answers 401 without a token (auth runs before validation).
+  ansible.builtin.uri:
+    url: "http://{{ honcho_bind_address }}:{{ honcho_port }}/v3/workspaces"
+    method: POST
+    body_format: json
+    body: {}
+    status_code: [401, 403]
+  register: honcho_auth_gate
+  changed_when: false
+
+- name: Inspect Honcho containers
+  become: false
+  community.docker.docker_container_info:
+    name: "{{ item }}"
+  loop: >-
+    {{ ['honcho-api', 'honcho-deriver', 'honcho-database', 'honcho-redis']
+       + (['honcho-embeddings'] if honcho_embedding_enabled | default(false) else []) }}
+  register: honcho_container_info
+  changed_when: false
+
+- name: Assert Honcho containers are running
+  ansible.builtin.assert:
+    that:
+      - honcho_container_info.results[idx].exists
+      - honcho_container_info.results[idx].container.State.Status == 'running'
+    fail_msg: >-
+      Honcho container {{ item }} is {{
+      'missing' if not honcho_container_info.results[idx].exists
+      else honcho_container_info.results[idx].container.State.Status }}.
+    success_msg: "Honcho container {{ item }} is running."
+  loop: "{{ honcho_container_info.results | map(attribute='item') | list }}"
+  loop_control:
+    index_var: idx
+
+- name: Add Honcho to Homepage Infra section
+  ansible.builtin.include_tasks:
+    file: "{{ playbook_dir }}/tasks/homepage_add_service.yaml"
+  vars:
+    _homepage_service_name: Honcho
+    _homepage_marker: honcho service
+    _homepage_template: honcho_service.yaml.j2
+    _homepage_insertafter: "^- Infra:"
+  when: honcho_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config
+
+- name: Notify Homepage restart for Honcho
+  ansible.builtin.debug:
+    msg: "Honcho homepage entry updated"
+  changed_when: _homepage_service_result is changed
+  notify:
+    - Restart Homepage
+  when: honcho_configure_homepage | default(true)
+  tags:
+    - homepage
+    - homepage_config

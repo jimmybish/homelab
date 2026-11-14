@@ -1,0 +1,51 @@
+{# config.yaml patch for the '{{ item.key }}' Hermes profile - owned by
+   roles/hermes tasks/honcho_wiring.yaml (dev B t_8e36c47b). Rewrites ONLY
+   the top-level memory: block as a mapping with provider: honcho added,
+   preserving every other existing memory: sub-key already set live
+   (memory_enabled, user_profile_enabled, char limits) and every other
+   top-level key verbatim (model, channels, security - live profiles carry
+   hand-edited keys the repo template does not model). Idempotent: the task
+   only runs when the slurped content lacks 'provider: honcho', and the
+   rewrite is a no-op semantically when the provider is already set.
+   Layout mirrors hermes_cli/web_routers/memory_providers.py
+   _update_memory_provider_config (memory.provider set alongside the built-in
+   toggles, NOT replacing them). -#}
+{% set current = (hermes_honcho_profile_config.results[hermes_honcho_idx].content | b64decode) if (hermes_honcho_profile_config.results[hermes_honcho_idx] is defined and hermes_honcho_profile_config.results[hermes_honcho_idx].content is defined) else '' %}
+{% set lines = current.splitlines() %}
+{% set pre = [] %}{% set memblock = [] %}{% set post = [] %}
+{% set ns = namespace(state='pre') %}
+{% for l in lines %}
+{% if ns.state == 'pre' %}
+{% if l is match('^memory:') %}
+{% set ns.state = 'mem' %}
+{% else %}
+{% if pre.append(l) %}{% endif %}
+{% endif %}
+{% elif ns.state == 'mem' %}
+{% if l[:1] in [' ', '\t'] or l.strip() == '' %}
+{% if memblock.append(l) %}{% endif %}
+{% else %}
+{% set ns.state = 'post' %}
+{% if post.append(l) %}{% endif %}
+{% endif %}
+{% else %}
+{% if post.append(l) %}{% endif %}
+{% endif %}
+{% endfor %}
+{% set kept = [] %}
+{% for l in memblock %}
+{% if not (l.strip().startswith('provider:') or l.strip() == 'provider') %}
+{% if kept.append(l) %}{% endif %}
+{% endif %}
+{% endfor %}
+{% for l in pre %}
+{{ l }}
+{% endfor %}
+memory:
+  provider: {{ hermes_honcho_plugin_spec }}
+{% for l in kept %}
+{{ l }}
+{% endfor %}
+{% for l in post %}
+{{ l }}
+{% endfor %}
