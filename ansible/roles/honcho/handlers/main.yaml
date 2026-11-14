@@ -1,0 +1,16 @@
+---
+- name: Restart Honcho
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ honcho_folder }}"
+    state: restarted
+    remove_orphans: true
+    wait: true
+    wait_timeout: 300
+
+- name: Restart Homepage
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ homepage_folder }}"
+    state: restarted
+  delegate_to: "{{ groups['homepage_host'][0] }}"

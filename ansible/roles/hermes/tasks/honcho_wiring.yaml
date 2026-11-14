@@ -1,0 +1,411 @@
+---
+# Honcho memory provider CLIENT wiring (dev B card t_8e36c47b), run on the
+# hermes host as part of the hermes role (deploy card wires the include; this
+# file must also stay runnable standalone).
+#
+# SCOPE GUARD (hard rule from triage t_b8583624): NOTHING in this file may
+# restart or touch the hermes-gateway / hermes-dashboard systemd units, their
+# processes, or the gateway stack. The gateway runs the kanban dispatcher in
+# the same cgroup (see main.yaml header note). Honcho config is resolved per
+# session (client.from_global_config reads honcho.json at agent construction
+# and memory.provider at load), so new sessions pick up changes without any
+# restart. The gateway/dashboard PID before/after asserts below make that
+# guard executable during the deploy card (t_296f2e57).
+#
+# Facts this design was verified against on 2026-11-11 (read-only probes on
+# the hermes host, hermes-agent 0.23.0 / code_sha 2bd378ed):
+#   - gateway_state.json served_profiles: default, copilot, dexter, hass,
+#     plexibot, virtuajimmy (6 profiles, matches hermes_honcho_profiles in vars).
+#   - `hermes memory setup` is curses/stdin interactive (memory_setup.py) -
+#     NO non-TTY path exists, so activation writes memory.provider through
+#     this role's config patch (the card's sanctioned fallback) instead.
+#   - `hermes honcho sync` only registers once memory.provider is active.
+#   - The dashboard host block is $HERMES_HOME/honcho.json itself
+#     (web_routers/memory_providers.py _honcho_resolvers -> client
+#     resolve_config_path/_host_block). There is no separate
+#     dashboard/honcho.json location; one template covers AC7.
+
+- name: Snapshot hermes-gateway PID before honcho wiring (scope guard)
+  ansible.builtin.command: systemctl show hermes-gateway -p MainPID --value  # noqa: command-instead-of-module - read-only PID snapshot for the scope guard
+  register: hermes_honcho_gw_pid_before
+  changed_when: false
+
+- name: Snapshot hermes-dashboard PID before honcho wiring (scope guard)
+  ansible.builtin.command: systemctl show hermes-dashboard -p MainPID --value  # noqa: command-instead-of-module - read-only PID snapshot for the scope guard
+  register: hermes_honcho_dash_pid_before
+  changed_when: false
+
+- name: Assert honcho client vars are present
+  ansible.builtin.assert:
+    that:
+      - hermes_honcho_client_url is match('^https?://')
+      - hermes_honcho_client_jwt_secret | length >= 32
+      - hermes_honcho_profiles | length >= 6
+      - (hermes_honcho_profiles.values() | selectattr('pinUserPeer', 'defined') | list) | length == 0
+    fail_msg: >-
+      honcho client vars missing/inconsistent in roles/hermes/vars/main.yaml
+      (pinUserPeer must never be overridden true in hermes_honcho_profiles - pooled
+      mode is a triage pin).
+
+- name: Build honcho profile list (hermes_honcho_profiles, default first)
+  ansible.builtin.set_fact:
+    hermes_honcho_profile_list: >-
+      {{ ([{'key': 'default', 'value': hermes_honcho_profiles['default']}] +
+          (hermes_honcho_profiles | dict2items | rejectattr('key', 'equalto', 'default'))) }}
+
+# ─── Shared api key (HS256 JWT signed with the honcho AUTH_JWT_SECRET) ──────
+# The self-hosted server runs AUTH_USE_AUTH=false but still expects the client
+# apiKey to be a JWT its AUTH_JWT_SECRET verifies (honcho docs, "Self-Hosted
+# Honcho with Authentication"). Minted ONCE with the host's own PyJWT (same
+# lib the server verifies with) and cached root-only, so converges reuse the
+# identical token; a regenerated token would orphan Honcho sessions under the
+# old sub claim. Plaintext secret touches only a 0600 root file for the
+# seconds the mint needs, never argv, never the repo.
+
+- name: Ensure root-only cache dir for the honcho api key
+  ansible.builtin.file:
+    path: /root/.homelab-honcho
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Check cached honcho api key
+  ansible.builtin.stat:
+    path: /root/.homelab-honcho/api_key
+  register: hermes_honcho_key_stat
+
+- name: Stage vaulted JWT secret for minting (root-only, momentary)
+  ansible.builtin.copy:
+    content: "{{ hermes_honcho_client_jwt_secret }}"
+    dest: /root/.homelab-honcho/.jwt_secret
+    owner: root
+    group: root
+    mode: "0600"
+  when: not hermes_honcho_key_stat.stat.exists
+  no_log: true
+  diff: false
+
+- name: Mint honcho api-key JWT (PyJWT HS256, workspace-scoped)
+  # v3.6.0 src/security.py JWTParams contract: an unscoped token (no ad/w/p/s/sc)
+  # verifies but is "JWT not permissioned for this resource" on every data-plane
+  # route (observed live 2026-11-11: all client writes 401'd). Pooled fleet-wide
+  # access needs a WORKSPACE key: w=<workspace> grants all peers/sessions in it
+  # (the server's own create_admin_jwt proves the HS256+secret path works).
+  # Extra sub/iat claims are tolerated by verify_jwt (proven: the unscoped key
+  # passed verification and failed only the permission gate).
+  #
+  # argv-safe (review r1 finding): NO Jinja value is interpolated into shell
+  # text. A fixed python script (roles/hermes/files/honcho_mint_jwt.py) is
+  # copied to the root-only dir and invoked via command+argv; it takes only
+  # file paths and a validated integer, reads the secret from the 0600 file
+  # itself, and validates workspace/jwt_days in python.
+  # NOTE: the `when` guards sit on the individual tasks, NOT on the block -
+  # a block-level when propagates into `always` and would skip the cleanup
+  # when a crashed earlier run left .jwt_secret behind next to an existing
+  # api_key. The always-cleaner therefore runs unconditionally.
+  block:
+    - name: Copy honcho JWT mint helper (fixed content, root-only)
+      ansible.builtin.copy:
+        src: honcho_mint_jwt.py
+        dest: /root/.homelab-honcho/mint_jwt.py
+        owner: root
+        group: root
+        mode: "0600"
+      when: not hermes_honcho_key_stat.stat.exists
+      diff: false
+
+    - name: Mint honcho api-key JWT via argv helper
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_honcho_hermes_venv_python }}"
+          - /root/.homelab-honcho/mint_jwt.py
+          - /root/.homelab-honcho/.jwt_secret
+          - /root/.homelab-honcho/api_key
+          - "{{ hermes_honcho_client_defaults.workspace }}"
+          - "{{ hermes_honcho_client_jwt_days }}"
+      when: not hermes_honcho_key_stat.stat.exists
+      changed_when: true
+      no_log: true
+      diff: false
+
+    - name: Verify minted api key parses as a workspace-scoped JWT
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_honcho_hermes_venv_python }}"
+          - /root/.homelab-honcho/mint_jwt.py
+          - --verify
+          - /root/.homelab-honcho/api_key
+          - /root/.homelab-honcho/.jwt_secret
+          - "{{ hermes_honcho_client_defaults.workspace }}"
+      when: not hermes_honcho_key_stat.stat.exists
+      changed_when: false
+      no_log: true
+  always:
+    # Finding 6: the staged plaintext secret AND the helper are removed
+    # unconditionally, even when staging or minting aborted mid-block.
+    - name: Scrub staged JWT secret and mint helper (always)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /root/.homelab-honcho/.jwt_secret
+        - /root/.homelab-honcho/mint_jwt.py
+        - /root/.homelab-honcho/api_key.tmp
+      no_log: true
+
+- name: Lock down minted api key file
+  ansible.builtin.file:
+    path: /root/.homelab-honcho/api_key
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Read honcho api key
+  ansible.builtin.slurp:
+    src: /root/.homelab-honcho/api_key
+  register: hermes_honcho_api_key_slurp
+  no_log: true
+
+- name: Set honcho api key fact
+  ansible.builtin.set_fact:
+    hermes_honcho_client_jwt_token: "{{ hermes_honcho_api_key_slurp.content | b64decode | trim }}"
+  no_log: true
+
+# ─── Per-profile: plugin install + provider activation + config render ─────
+
+- name: Check honcho plugin installed per profile (home plugins dir)
+  # Catalog entry name is `honcho` but its source subdir is
+  # `hermes-plugin-honcho`; the installed dir has carried both spellings, so
+  # accept either before skipping the install. Product loop => results[i*2+j]
+  # where i indexes hermes_honcho_profile_list and j the candidate spellings.
+  ansible.builtin.stat:
+    path: "{{ item[0].value.home }}/plugins/{{ item[1] }}"
+  register: hermes_honcho_plugin_stat
+  loop: "{{ hermes_honcho_profile_list | product(['honcho', 'hermes-plugin-honcho']) | list }}"
+  loop_control:
+    label: "{{ item[0].key }}/{{ item[1] }}"
+
+- name: Install honcho plugin per profile (official catalog copy)
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_honcho_hermes_bin }}"
+      - plugins
+      - install
+      # --yes-deps answers the Python-dependency consent prompt (honcho-ai SDK);
+      # without it a non-TTY install is REFUSED (verified `--help` on-host
+      # 2026-11-11). --enable skips the enable confirmation so the provider is
+      # loadable in the same run.
+      - "--yes-deps"
+      - "--enable"
+      - "{{ hermes_honcho_plugin_spec }}"
+  environment:
+    HOME: /home/jimmy
+    USER: jimmy
+    LOGNAME: jimmy
+    PATH: /home/jimmy/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    HERMES_HOME: "{{ item.value.home }}"
+  become: true
+  become_user: "{{ hermes_honcho_hermes_user }}"
+  changed_when: true
+  when: >-
+    not (hermes_honcho_plugin_stat.results[loop_idx * 2].stat.exists
+         or hermes_honcho_plugin_stat.results[loop_idx * 2 + 1].stat.exists)
+  loop: "{{ hermes_honcho_profile_list }}"
+  loop_control:
+    loop_var: item
+    label: "{{ item.key }}"
+    index_var: loop_idx
+
+- name: Copy honcho env-bridge helper (fixed content, root-only)
+  # AC6 fix (t_0d641077): Hermes activates plugin dependency environments at
+  # process BOOT (pm.environments.activate_dependencies; a long-running
+  # gateway keeps the generation selected when it started). The honcho
+  # provider imports the `honcho` SDK lazily per turn, so a gateway that
+  # booted before `hermes plugins install --yes-deps` logged the SDK can
+  # never import it and every live-channel turn writes 0 messages (root
+  # cause of the round-1 AC6 failure: journalctl showed 'honcho-ai is
+  # required' warnings from pid 916 on every hass turn). Restarting the
+  # gateway from here is forbidden (its cgroup hosts the kanban dispatcher
+  # and the worker pool - the scope guard asserts PIDs stay put), so the
+  # fixed stdlib helper bridges the pure-python SDK into the generation the
+  # LIVE process already activated. Additive, idempotent, self-limiting:
+  # no-op once the live env carries honcho (any future restart activates
+  # the committed generation, which always does). Fails (rc=1) only when
+  # the committed generation itself lacks the SDK = install genuinely
+  # broken. argv-safe: one absolute path arg, no interpolation.
+  ansible.builtin.copy:
+    src: honcho_env_bridge.py
+    dest: /root/.homelab-honcho/env_bridge.py
+    owner: root
+    group: root
+    mode: "0600"
+  diff: false
+
+- name: Bridge honcho SDK into the live gateway dependency environment
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /root/.homelab-honcho/env_bridge.py
+      - "{{ hermes_honcho_hermes_home }}"
+  register: hermes_honcho_env_bridge
+  changed_when: hermes_honcho_env_bridge.stdout is search('action.{1,4}bridged')
+  failed_when: >-
+    hermes_honcho_env_bridge.rc != 0
+    or hermes_honcho_env_bridge.stdout is search('action.{1,4}error')
+
+- name: Report env-bridge outcome
+  ansible.builtin.debug:
+    msg: "honcho env bridge: {{ hermes_honcho_env_bridge.stdout | default('(no output)') }}"
+
+- name: Read profile config.yaml per profile (for provider state)
+  ansible.builtin.slurp:
+    src: "{{ item.value.home }}/config.yaml"
+  register: hermes_honcho_profile_config
+  loop: "{{ hermes_honcho_profile_list }}"
+  loop_control:
+    loop_var: item
+    label: "{{ item.key }}"
+    index_var: hermes_honcho_idx
+
+- name: Activate honcho provider per profile (memory.provider only if absent)
+  ansible.builtin.template:
+    src: profile_honcho_config_patch.yaml.j2
+    dest: "{{ item.value.home }}/config.yaml"
+    owner: "{{ hermes_honcho_hermes_user }}"
+    group: "{{ hermes_honcho_hermes_user }}"
+    mode: "0600"
+  loop: "{{ hermes_honcho_profile_list }}"
+  loop_control:
+    loop_var: item
+    label: "{{ item.key }}"
+    index_var: hermes_honcho_idx
+  # Guard must look for memory.provider=honcho specifically: every live
+  # config.yaml already carries `provider:` lines under model/custom_providers
+  # (verified 2026-11-11 read-only), so a bare 'provider' substring test would
+  # skip activation forever. A `provider: honcho` line exists nowhere else in
+  # these files today.
+  when: >-
+    (hermes_honcho_profile_config.results[hermes_honcho_idx].content | b64decode)
+    is not search('(?m)^[ \t]*provider:[ \t]*' ~ hermes_honcho_plugin_spec ~ '[ \t]*$')
+
+- name: Render per-profile honcho.json (profile-scoped; CLI+gateway+dashboard)
+  ansible.builtin.template:
+    src: honcho.json.j2
+    dest: "{{ item.value.home }}/honcho.json"
+    owner: "{{ hermes_honcho_hermes_user }}"
+    group: "{{ hermes_honcho_hermes_user }}"
+    mode: "0600"
+  loop: "{{ hermes_honcho_profile_list }}"
+  loop_control:
+    loop_var: item
+    label: "{{ item.key }}"
+  no_log: true
+  diff: false
+
+- name: Sync honcho config across profiles from the default home (CLI sync)
+  # Real idempotency gate (review r1 finding 7): hermes honcho sync always
+  # exits 0, so the rc proves nothing. The command's contract is its stdout
+  # (plugins/honcho/cli.py _sync_profiles): "<N> profile(s) synced." when it
+  # created blocks, "All profiles already have Honcho config." when it did
+  # nothing, and error lines ("Could not list profiles", "No Honcho config
+  # found", "Honcho not configured on default profile", or a
+  # ConfigWriteRefused message) on real failures - all rc 0. changed is
+  # derived from the created-count; failure = non-zero rc, a known error
+  # line, or neither recognized success marker (covers ConfigWriteRefused,
+  # which prints only its exception text).
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_honcho_hermes_bin }}"
+      - honcho
+      - sync
+  environment:
+    HOME: /home/jimmy
+    USER: jimmy
+    LOGNAME: jimmy
+    PATH: /home/jimmy/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    HERMES_HOME: "{{ hermes_honcho_hermes_home }}"
+  become: true
+  become_user: "{{ hermes_honcho_hermes_user }}"
+  register: hermes_honcho_sync_result
+  changed_when: hermes_honcho_sync_result.stdout is search('(^|\n)\s*[1-9][0-9]* profile\(s\) synced\.')
+  failed_when: >-
+    hermes_honcho_sync_result.rc != 0
+    or hermes_honcho_sync_result.stdout is search('Could not list profiles|No Honcho config found|Honcho not configured on default profile')
+    or not (hermes_honcho_sync_result.stdout is search('profile\(s\) synced\.|All profiles already have Honcho config\.'))
+
+- name: Report honcho sync outcome (per-profile files are authoritative; sync only top-ups new profiles)
+  ansible.builtin.debug:
+    msg: >-
+      hermes honcho sync rc={{ hermes_honcho_sync_result.rc }}
+      {{ (hermes_honcho_sync_result.stdout | default('') | truncate(300)) }}
+
+# ─── Verification ────────────────────────────────────────────────────────────
+
+- name: Assert memory.provider honcho active in every profile config.yaml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -E
+      - '^[[:space:]]*provider:[[:space:]]*{{ hermes_honcho_plugin_spec }}[[:space:]]*$'
+      - "{{ item.value.home }}/config.yaml"
+  register: hermes_honcho_provider_grep
+  changed_when: false
+  loop: "{{ hermes_honcho_profile_list }}"
+  loop_control:
+    loop_var: item
+    label: "{{ item.key }}"
+
+- name: Assert honcho.json parses and pooled mode holds in every profile
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_honcho_hermes_venv_python }}"
+      - "-c"
+      - >-
+        import json,sys;
+        d=json.load(open(sys.argv[1]));
+        hk=sys.argv[2];
+        h=d['hosts'][hk];
+        assert d['pinUserPeer'] is False and h['pinUserPeer'] is False, 'pinned';
+        assert h['recallMode']=='hybrid' and h['timeout']==10 and h['a2aSessions'] is True;
+        assert h['baseUrl']==sys.argv[3];
+        assert h['apiKey'] and h['apiKey'].count('.')==2;
+        assert h['sessionStrategy']==sys.argv[4];
+        print('ok', hk)
+      - "{{ item.value.home }}/honcho.json"
+      - "{{ item.value.host_key }}"
+      - "{{ hermes_honcho_client_url }}"
+      - "{{ item.value.sessionStrategy | default(hermes_honcho_client_defaults.sessionStrategy) }}"
+  register: hermes_honcho_json_check
+  changed_when: false
+  loop: "{{ hermes_honcho_profile_list }}"
+  loop_control:
+    loop_var: item
+    label: "{{ item.key }}"
+
+- name: Show honcho.json verification per profile
+  ansible.builtin.debug:
+    msg: "{{ hermes_honcho_json_check.results | map(attribute='stdout') | list }}"
+
+- name: Snapshot hermes-gateway PID after honcho wiring (scope guard)
+  ansible.builtin.command: systemctl show hermes-gateway -p MainPID --value  # noqa: command-instead-of-module - read-only PID snapshot for the scope guard
+  register: hermes_honcho_gw_pid_after
+  changed_when: false
+
+- name: Snapshot hermes-dashboard PID after honcho wiring (scope guard)
+  ansible.builtin.command: systemctl show hermes-dashboard -p MainPID --value  # noqa: command-instead-of-module - read-only PID snapshot for the scope guard
+  register: hermes_honcho_dash_pid_after
+  changed_when: false
+
+- name: Assert no hermes gateway/dashboard process was restarted
+  ansible.builtin.assert:
+    that:
+      - hermes_honcho_gw_pid_after.stdout | trim == hermes_honcho_gw_pid_before.stdout | trim
+      - hermes_honcho_dash_pid_after.stdout | trim == hermes_honcho_dash_pid_before.stdout | trim
+    fail_msg: >-
+      hermes-gateway or hermes-dashboard PID changed during honcho wiring
+      (gateway before={{ hermes_honcho_gw_pid_before.stdout | trim }}
+      after={{ hermes_honcho_gw_pid_after.stdout | trim }}; dashboard
+      before={{ hermes_honcho_dash_pid_before.stdout | trim }}
+      after={{ hermes_honcho_dash_pid_after.stdout | trim }}). honcho_wiring must
+      never restart the gateway - the kanban dispatcher dies with it.

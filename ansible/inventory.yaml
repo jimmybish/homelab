@@ -191,6 +191,17 @@ open_webui_host:
   hosts:
     hermes:
 
+# Honcho memory provider (api + deriver + pgvector + redis)
+honcho_host:
+  hosts:
+    hermes:
+
+# Honcho small-tier LLM sidecar (4B llama.cpp sparkrun job) - role vars
+# derive the host from this group so no private host literals live in roles.
+honcho_small_llm_host:
+  hosts:
+    nova:
+
 # SearXNG
 searxng_host:
   hosts:
