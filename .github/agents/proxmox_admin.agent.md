@@ -136,6 +136,23 @@ qm clone {template_id} {new_vmid} --name {name} --full
 - Container remains: `unprivileged: 1`
 
 ### Modifying VM/LXC Resources
+
+For guest volume expansion after the Proxmox disk is already enlarged, do not
+run `qm resize` again. Use the guest's inventory SSH account/key (defaults:
+`virtuajimmy`, `~/.ssh/virtuajimmy`) with noninteractive sudo; the root/mgmt
+credentials above are for Proxmox nodes. Inspect mounts, partition offsets,
+filesystem and LVM before selecting a device. Back up partition metadata and
+dry-run `growpart` before changing a partition. For an unambiguous trailing
+ext4 partition, grow the partition, verify its kernel-visible size, then run
+`resize2fs` online. An old backup-GPT location is expected after disk expansion;
+verify GPT consistency after growth. Never restore the old partition table over
+a grown filesystem. Stop for ambiguous layouts or disruptive recovery.
+
+To check active Proxmox tasks, use
+`pvesh get /nodes/{node}/tasks --source active --output-format json`.
+`/cluster/tasks --running 1` is unsupported on this cluster. Also inspect the
+target VM's lock, snapshots, HA membership and available backups.
+
 ```bash
 # Increase VM memory (safe - non-destructive)
 qm set {vmid} --memory {new_MB}
