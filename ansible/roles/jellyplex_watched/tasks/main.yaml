@@ -15,11 +15,20 @@
     enabled: true
 
 # Directory Setup
+# 0750 (was 0755): the service dir holds the token-bearing .env, so it gets
+# no world read/traverse bits. Verified readers on the target host:
+#   - The Compose CLI runs become:false as the inventory SSH user and parses
+#     env_file client-side; it is an explicit member of the docker-user
+#     group, so the group r-x bit covers it.
+#   - The bind-mounted folder (/app/data) is accessed by the container
+#     process running as PUID/PGID 2001 = docker-user (the file/dir owner),
+#     so the owner rwx bit covers it.
+#   - dockerd opens the bind-mounted config.yaml as root.
 - name: Setup JellyPlex-Watched directory
   ansible.builtin.file:
     path: "{{ jellyplex_watched_folder }}"
     state: directory
-    mode: '0755'
+    mode: '0750'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
 
@@ -28,10 +37,32 @@
   ansible.builtin.template:
     src: "templates/env.j2"
     dest: "{{ jellyplex_watched_folder }}/.env"
-    mode: '0644'
+    mode: '0640'
     owner: "{{ docker_user }}"
     group: "{{ docker_user }}"
     force: true
+  # Renders vaulted Plex/Jellyfin tokens (env.j2 PLEX_TOKEN/JELLYFIN_TOKEN);
+  # suppress value disclosure in run logs and --diff unified diffs, matching
+  # the config task below and the repo sensitive-template pattern
+  # (review round 2, finding 1; cf. roles/firecrawl/tasks/main.yaml).
+  no_log: true
+  diff: false
+  notify:
+    - Start JellyPlex-Watched
+
+- name: Deploy JellyPlex-Watched config.yaml (v9 per-server user mappings)
+  ansible.builtin.template:
+    src: "templates/config.yaml.j2"
+    dest: "{{ jellyplex_watched_folder }}/config.yaml"
+    mode: '0640'
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    force: true
+  # Renders vaulted family usernames; suppress value disclosure in logs
+  # and unified diffs (review round 1, finding 2; repo sensitive-template
+  # pattern cf. roles/firecrawl/tasks/main.yaml).
+  no_log: true
+  diff: false
   notify:
     - Start JellyPlex-Watched
 

@@ -10,3 +10,4 @@ services:
     env_file: "./.env"
     volumes:
       - {{ jellyplex_watched_folder }}:/app/data
+      - {{ jellyplex_watched_folder }}/config.yaml:/app/config/config.yaml:ro
