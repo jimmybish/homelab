@@ -169,16 +169,11 @@ honcho_embedding_folder: "{{ honcho_folder }}/tei"
 honcho_embedding_base_url: "http://embeddings:80"
 
 # Feature flags: API-only LAN service - no SWAG proxy, no DNS alias, no
-# reverse-proxy exposure (clients use http://<LAN IP>:8000 directly).
-honcho_configure_homepage: true
+# reverse-proxy exposure (clients use http://<LAN IP>:8000 directly), and no
+# Homepage tile (Honcho has no web UI of its own; plumbing stays invisible).
 honcho_configure_proxy: false
 honcho_configure_dns: false
 honcho_is_proxied: false
-
-# Homepage card URL (no proxy URL exists for this service; the homepage
-# rebuild in roles/homepage runs without this role's vars, so the template
-# carries a matching default).
-honcho_public_url: "http://{{ honcho_bind_address }}:{{ honcho_port }}"
 
 honcho_readiness_retries: 40
 honcho_readiness_delay: 5
