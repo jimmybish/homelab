@@ -1,0 +1,35 @@
+---
+- name: Install Honcho
+  hosts: honcho_host
+  become: true
+  pre_tasks:
+    - name: Silence Grafana alerts
+      ansible.builtin.include_tasks: tasks/grafana_create_silence.yaml
+      vars:
+        grafana_silence_comment: "Deploying Honcho"
+      when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
+  roles:
+    - honcho
+  post_tasks:
+    - name: Remove Grafana alert silence
+      ansible.builtin.include_tasks: tasks/grafana_remove_silence.yaml
+      when: not (hostvars['localhost']['grafana_master_silence_active'] | default(false))
+
+# Fleet wiring to the Hermes profiles is owned by dev B card t_8e36c47b
+# (roles/hermes/tasks/honcho_wiring.yaml). It must run AFTER the Honcho
+# stack is up (the wiring probes the API and mints JWTs validated against
+# the deployed AUTH_JWT_SECRET). honcho_configure_profiles gates the whole
+# wiring so a server-only converge can skip it.
+- name: Wire Hermes profiles to Honcho
+  hosts: hermes_host
+  become: true
+  tasks:
+    - name: Include Honcho Hermes fleet wiring
+      # include_role (not include_tasks) so roles/hermes/vars/main.yaml is
+      # in scope for the wiring tasks; tasks_from confines execution to the
+      # honcho wiring file - roles/hermes/tasks/main.yaml (which can restart
+      # the gateway) is never touched.
+      ansible.builtin.include_role:
+        name: hermes
+        tasks_from: honcho_wiring.yaml
+      when: honcho_configure_profiles | default(true)

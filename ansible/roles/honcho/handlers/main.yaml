@@ -1,0 +1,9 @@
+---
+- name: Restart Honcho
+  become: false
+  community.docker.docker_compose_v2:
+    project_src: "{{ honcho_folder }}"
+    state: restarted
+    remove_orphans: true
+    wait: true
+    wait_timeout: 300

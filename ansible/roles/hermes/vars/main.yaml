@@ -27,3 +27,171 @@ hermes_is_proxied: true            # alias parents to the proxy host override
 # Upstream reachability validation on the gateway host (listen_ports_facts
 # + assert). Set false only for runs that must not gather listen facts.
 hermes_gateway_validate_upstream: true
+
+# ─── Honcho memory provider CLIENT wiring (dev B card t_8e36c47b) ──────────
+# Consumed by tasks/honcho_wiring.yaml and templates/honcho.json.j2. Named
+# hermes_honcho_* and kept in this role's vars (NOT group_vars/all) so the
+# server-side vars owned by dev A card t_b0564bec (roles/honcho) never
+# collide. DEPLOY CARD (t_296f2e57) must verify the two vaulted secrets
+# below decrypt to the SAME plaintext as card A's server vars
+# (AUTH_JWT_SECRET, LiteLLM master key) and dedupe to a single vault var
+# once card A names them - dev B minted its own values because card A was
+# still in flight when these were encrypted.
+#
+# Host-block schema verified 2026-11-11 against the installed catalog plugin
+# (catalog:official@4d492b1d, client.py):
+#   - Config resolution: $HERMES_HOME/honcho.json -> default profile's
+#     honcho.json -> ~/.honcho/config.json. Host-block fields win over root.
+#   - Host keys (client.profile_host_key): default profile -> "hermes",
+#     named profile p -> "hermes_<p>". Honcho's dashboard host block
+#     (STORAGE_HONCHO_HOST_BLOCK in plugins/memory/config_schema.py) reads
+#     and writes THE SAME file via client.resolve_config_path()/
+#     _host_block() - there is no separate dashboard storage location.
+#   - Dialectic LLM runs SERVER-side (card A's compose wires LiteLLM), so
+#     the client config carries no LLM key.
+
+hermes_honcho_hermes_user: jimmy
+hermes_honcho_hermes_home: /home/jimmy/.hermes
+hermes_honcho_hermes_bin: /home/jimmy/.hermes/hermes-agent/.hermes/bin/hermes
+hermes_honcho_hermes_venv_python: /home/jimmy/.hermes/hermes-agent/venv/bin/python3
+
+# Honcho server as seen from the hermes host. Resolved from the vaulted
+# global internal_honcho_url (group_vars/all) - no plaintext RFC1918 literal
+# in tracked files (review r1 finding 8). Card A owns any DNS alias switch.
+hermes_honcho_client_url: "{{ internal_honcho_url }}"
+
+# AUTH_JWT_SECRET of the honcho api container (vaulted; deploy card aligns
+# with card A). The api-key JWT is HS256-signed with this on the hermes host
+# (PyJWT 2.13.0 in the hermes-agent venv - the same verification path the
+# server uses). Docs: self-hosted server with AUTH_USE_AUTH=false still
+# expects an apiKey JWT "signed with the server's AUTH_JWT_SECRET".
+hermes_honcho_client_jwt_secret: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  38623365646637346339643531666336626633333031373065656430663239313731646633643736
+  3532306132396132623264663961646461333338393664660a303464313365353633653161656163
+  30393032396238303962646437376134353338643434353930373334303636343630613237363765
+  6332313133366464340a663662306432623635633137376439353166373439323864376365343266
+  62303039333137396262326637626534363138353566316163373136623330383835323831626361
+  62663235636136666336393262333333313563643562363836626238386236626530316434626434
+  63613562653566626565646438313532393833303261663537343638626665306166373565643734
+  61353663383563643133
+
+# Plugin spec in the official catalog (catalog:official@4d492b1d).
+hermes_honcho_plugin_spec: "honcho"
+
+# JWT lifetime for the minted api key (10 years; re-mint only by deleting
+# /root/.homelab-honcho/api_key - a regenerated token changes the sub claim).
+hermes_honcho_client_jwt_days: 3650
+
+# Jimmy's Discord snowflake, vaulted per pii-pre-review (chat user IDs are
+# durable personal identifiers and must not sit in plaintext in the repo).
+# Used only as the userPeerAliases key that maps the gateway runtime ID to
+# the shared named peer "jimmy"; Ansible templates the YAML key, so the
+# "{{ ... }}" key renders to the decrypted ID before honcho.json is written.
+hermes_honcho_jimmy_discord_id: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  30383832356132303062333039323365323363363730623333613437663835393830643736396264
+  3161373164663331323963396238333330333230623732300a396133353333636263386339633134
+  33316361326363373737303835613331343963303032613535653136303638383939313261393962
+  3636656631666235300a643462393061323031666661356263376634313566323738373061326435
+  61393562353565643761303064333965336565386466323861356634333430653466
+
+# Behaviour pinned by triage t_b8583624 (host-block key names are the
+# CLIENT's camelCase spellings from client.py _connection_fields/
+# _behavior_fields).
+hermes_honcho_client_defaults:
+  workspace: "hermes"
+  peerName: "hermes"
+  pinUserPeer: false        # POOLED everywhere - never true (triage pin)
+  userPeerAliases: {}
+  runtimePeerPrefix: ""     # unknown runtime IDs fall to raw id, not a named peer
+  recallMode: "hybrid"
+  sessionStrategy: "per-directory"
+  observationMode: "directional"
+  writeFrequency: "async"
+  saveMessages: true
+  dialecticCadence: 2
+  dialecticDepth: 1
+  dialecticReasoningLevel: "low"
+  a2aSessions: true         # bot DMs keep their own a2a session/peer
+  timeout: 10               # seconds per SDK call - a down server cannot hang sessions
+  enabled: true
+
+# Profiles wired to honcho (gateway serves exactly these six - verified from
+# gateway_state.json served_profiles on 2026-11-11). host_key follows
+# client.profile_host_key(); sessionStrategy per-repo ONLY for the
+# kanban-driving profiles (virtuajimmy, copilot) per triage.
+#
+# userPeerAliases map gateway runtime IDs -> shared named peers. Resolver
+# order (docs + client): pinUserPeer -> userPeerAliases[id] ->
+# runtimePeerPrefix+id -> raw id -> peerName. Only CONFIRMED IDs go here.
+# CONFIRMED (fix card t_0d641077, server-side AC6 evidence 2026-11-11):
+# Jimmy's Discord snowflake (vaulted; virtuajimmy discord.allow_from is the
+# only permitted Discord user) and the api_server runtime identity "api"
+# (all Open WebUI / OpenAI-compatible turns land in Honcho as peer "api" in
+# session agent-<profile>-api_server-dm-*; each profile's endpoint is gated
+# by its owner-provisioned API_SERVER_KEY, so "api" is an authenticated
+# owner channel, not a public door). STILL UNCONFIRMED -> left unaliased,
+# posted to card t_8e36c47b for Jimmy (Telegram UID - platform not
+# connected in gateway_state.json; Plex family Discord users - none seen
+# posting directly). Bot identities (bot:<profile>) are never aliased.
+hermes_honcho_profiles:
+  default:
+    home: "/home/jimmy/.hermes"
+    host_key: "hermes"
+    peerName: "hermes"
+    sessionStrategy: "per-directory"
+    userPeerAliases:
+      # Jimmy's Discord snowflake (virtuajimmy profile discord.allow_from -
+      # the only permitted Discord user, so attribution is certain).
+      "__jimmy_discord_id__": "jimmy"
+      # Open WebUI forwards the webui username through the api_server
+      # platform; "jimmy" -> "jimmy" is identity-safe regardless.
+      "jimmy": "jimmy"
+      "api": "jimmy"
+  virtuajimmy:
+    home: "/home/jimmy/.hermes/profiles/virtuajimmy"
+    host_key: "hermes_virtuajimmy"
+    peerName: "hermes.virtuajimmy"
+    sessionStrategy: "per-repo"
+    userPeerAliases:
+      "__jimmy_discord_id__": "jimmy"
+      "jimmy": "jimmy"
+      "api": "jimmy"
+  copilot:
+    home: "/home/jimmy/.hermes/profiles/copilot"
+    host_key: "hermes_copilot"
+    peerName: "hermes.copilot"
+    sessionStrategy: "per-repo"
+    userPeerAliases:
+      "__jimmy_discord_id__": "jimmy"
+      "jimmy": "jimmy"
+      "api": "jimmy"
+  dexter:
+    home: "/home/jimmy/.hermes/profiles/dexter"
+    host_key: "hermes_dexter"
+    peerName: "hermes.dexter"
+    sessionStrategy: "per-directory"
+    userPeerAliases:
+      "__jimmy_discord_id__": "jimmy"
+      "jimmy": "jimmy"
+      "api": "jimmy"
+  hass:
+    home: "/home/jimmy/.hermes/profiles/hass"
+    host_key: "hermes_hass"
+    peerName: "hermes.hass"
+    sessionStrategy: "per-directory"
+    userPeerAliases:
+      "__jimmy_discord_id__": "jimmy"
+      "jimmy": "jimmy"
+      "api": "jimmy"
+      "homeassistant": "homeassistant"   # HA automation service querier
+  plexibot:
+    home: "/home/jimmy/.hermes/profiles/plexibot"
+    host_key: "hermes_plexibot"
+    peerName: "hermes.plexibot"
+    sessionStrategy: "per-directory"
+    userPeerAliases:
+      "__jimmy_discord_id__": "jimmy"
+      "jimmy": "jimmy"
+      "api": "jimmy"

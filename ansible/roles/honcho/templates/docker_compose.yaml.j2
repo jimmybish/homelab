@@ -1,0 +1,246 @@
+---
+# Honcho self-hosted stack (dev A card t_b0564bec).
+# Mirrors upstream v3.6.0 docker-compose.yml.example with the pinned
+# deviations: published image (not build), LAN-only api bind, NO host
+# publish for database/redis, POSTGRES_HOST_AUTH_METHOD=trust dropped,
+# no mcp service, real DB password from vault.
+# Health endpoint is /health (verified in upstream src/main.py; the
+# "healthz" in the card body does not exist upstream).
+
+x-honcho-environment: &honcho-environment
+  TZ: "{{ timezone }}"
+  # Database + cache (compose-internal hostnames only)
+  DB_CONNECTION_URI: "postgresql+psycopg://{{ honcho_postgres_user }}:{{ honcho_postgres_password }}@database:5432/{{ honcho_postgres_database }}"
+  CACHE_URL: "redis://redis:6379/0?suppress=true"
+  CACHE_ENABLED: "true"
+  # Single-tenant self-hosted posture (pinned)
+  MULTI_TENANT: "{{ honcho_multi_tenant | string | lower }}"
+  TENANT_ID: "{{ honcho_tenant_id }}"
+  NAMESPACE: "{{ honcho_namespace }}"
+  VECTOR_STORE_TYPE: "{{ honcho_vector_store_type }}"
+  # Auth (pinned): HS256 JWT auth with vaulted secret
+  AUTH_USE_AUTH: "{{ honcho_auth_use_auth | string | lower }}"
+  AUTH_JWT_SECRET: "{{ honcho_auth_jwt_secret }}"
+  LOG_LEVEL: "INFO"
+  # LLM transport defaults (openai-compatible LiteLLM on sparky; per-module
+  # base URL/model overrides below take precedence for each workload)
+  LLM_OPENAI_API_KEY: "{{ honcho_llm_api_key }}"
+  HONCHO_LLM_API_KEY: "{{ honcho_llm_api_key }}"
+  # Routing split (card t_8d13e3e1): deriver + summary + minimal dialectic
+  # run on the 4B llama.cpp sidecar on the honcho_small_llm_host inventory
+  # member (sparkrun honcho-deriver-4b);
+  # structured-output failures in the deriver retry on the big model via
+  # the FALLBACK tier (FALLBACK__TRANSPORT is REQUIRED by the v3.6.0
+  # FallbackModelSettings schema - probe showed settings load aborts without
+  # it). llama.cpp ignores API keys; the same HONCHO_LLM_API_KEY placeholder
+  # satisfies the openai transport for both tiers.
+  DERIVER_MODEL_CONFIG__MODEL: "{{ honcho_deriver_small_model }}"
+  DERIVER_MODEL_CONFIG__OVERRIDES__BASE_URL: "{{ honcho_deriver_small_base_url }}/v1"
+  DERIVER_MODEL_CONFIG__OVERRIDES__API_KEY_ENV: "HONCHO_LLM_API_KEY"
+  DERIVER_MODEL_CONFIG__STRUCTURED_OUTPUT_MODE: "{{ honcho_deriver_structured_output_mode }}"
+  # Structured-output failures on the 4B retry on the big vLLM tier
+  # (card t_8d13e3e1). transport is a required FallbackModelSettings field.
+  DERIVER_MODEL_CONFIG__FALLBACK__MODEL: "{{ honcho_llm_model }}"
+  DERIVER_MODEL_CONFIG__FALLBACK__TRANSPORT: "{{ honcho_deriver_fallback_transport }}"
+  DERIVER_MODEL_CONFIG__FALLBACK__OVERRIDES__BASE_URL: "{{ honcho_llm_base_url }}/v1"
+  DERIVER_MODEL_CONFIG__FALLBACK__OVERRIDES__API_KEY_ENV: "HONCHO_LLM_API_KEY"
+  DERIVER_WORKERS: "{{ honcho_deriver_workers }}"
+  # v3.6.0 batch-accumulation gates: without a flush the deriver holds work
+  # units until they reach the token target / max age (30 min), which reads as
+  # "observations never appear" on a low-traffic single-user fleet. Flush makes
+  # ingestion near-real-time (upstream guidance for interactive deployments).
+  DERIVER_FLUSH_ENABLED: "true"
+  # Eager peer-card derivation keeps the honcho peers list populated so peer
+  # attribution (jimmy vs bot) is verifiable soon after a session, not after a
+  # 24h dream/peer-card idle window.
+  PEER_CARD_ENABLED: "true"
+  SUMMARY_MODEL_CONFIG__MODEL: "{{ honcho_deriver_small_model }}"
+  SUMMARY_MODEL_CONFIG__OVERRIDES__BASE_URL: "{{ honcho_deriver_small_base_url }}/v1"
+  SUMMARY_MODEL_CONFIG__OVERRIDES__API_KEY_ENV: "HONCHO_LLM_API_KEY"
+{% for level in ['minimal', 'low', 'medium', 'high', 'max'] %}
+  # minimal (hot recall path) rides the 4B sidecar; low..max stay on the
+  # big vLLM tier (card t_8d13e3e1).
+  DIALECTIC_LEVELS__{{ level }}__MODEL_CONFIG__MODEL: "{{ honcho_deriver_small_model if level == 'minimal' else honcho_llm_model }}"
+  DIALECTIC_LEVELS__{{ level }}__MODEL_CONFIG__OVERRIDES__BASE_URL: "{{ honcho_deriver_small_base_url if level == 'minimal' else honcho_llm_base_url }}/v1"
+  DIALECTIC_LEVELS__{{ level }}__MODEL_CONFIG__OVERRIDES__API_KEY_ENV: "HONCHO_LLM_API_KEY"
+{% endfor %}
+  DREAM_DEDUCTION_MODEL_CONFIG__MODEL: "{{ honcho_llm_model }}"
+  DREAM_DEDUCTION_MODEL_CONFIG__OVERRIDES__BASE_URL: "{{ honcho_llm_base_url }}/v1"
+  DREAM_DEDUCTION_MODEL_CONFIG__OVERRIDES__API_KEY_ENV: "HONCHO_LLM_API_KEY"
+  DREAM_INDUCTION_MODEL_CONFIG__MODEL: "{{ honcho_llm_model }}"
+  DREAM_INDUCTION_MODEL_CONFIG__OVERRIDES__BASE_URL: "{{ honcho_llm_base_url }}/v1"
+  DREAM_INDUCTION_MODEL_CONFIG__OVERRIDES__API_KEY_ENV: "HONCHO_LLM_API_KEY"
+{% if honcho_embedding_model | length > 0 %}
+  EMBEDDING_MODEL_CONFIG__MODEL: "{{ honcho_embedding_model }}"
+  EMBEDDING_MODEL_CONFIG__OVERRIDES__BASE_URL: "{{ honcho_embedding_base_url }}/v1"
+  EMBEDDING_MODEL_CONFIG__OVERRIDES__API_KEY_ENV: "HONCHO_LLM_API_KEY"
+{% else %}
+  # No embedding model configured - the in-compose TEI embedder is disabled.
+  # hybrid recall loses its vector leg; the startup validators still pass as
+  # long as EMBEDDING_VECTOR_DIMENSIONS matches the physical schema.
+{% endif %}
+  EMBEDDING_VECTOR_DIMENSIONS: "{{ honcho_embedding_dimensions }}"
+
+x-honcho-logging: &honcho-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+    compress: "true"
+
+services:
+  api:
+    image: "{{ honcho_image }}"
+    container_name: honcho-api
+    # Upstream entrypoint (docker/entrypoint.sh) runs alembic
+    # (scripts/provision_db.py -> src.migrate.main) then execs fastapi. The
+    # documented self-hosted bootstrap for a non-default embedding dim is
+    # alembic upgrade head -> scripts/configure_embeddings.py -> start
+    # (the startup validators refuse to boot on a dim mismatch), so the
+    # ALTER step is slotted in at exactly that point. configure_embeddings
+    # is a no-op when schema and config already match and REFUSES (non-zero)
+    # if any non-null embeddings exist, so it can never silently rewrite
+    # container shell ($${..} escapes compose-level interpolation so the
+    # container's own API_WORKERS env var takes effect).
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        set -e;
+        echo "Running database migrations...";
+        /app/.venv/bin/python scripts/provision_db.py;
+        echo "Configuring pgvector embedding dimensions...";
+        /app/.venv/bin/python scripts/configure_embeddings.py --yes;
+        echo "Starting API server...";
+        exec /app/.venv/bin/fastapi run --host 0.0.0.0 --workers
+        "$${API_WORKERS:-1}" src/main.py
+    environment:
+      <<: *honcho-environment
+      API_WORKERS: "{{ honcho_api_workers }}"
+    ports:
+      - "{{ honcho_bind_address }}:{{ honcho_port }}:{{ honcho_container_port }}"
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+{% if honcho_embedding_enabled %}
+      embeddings:
+        condition: service_healthy
+{% endif %}
+    restart: unless-stopped
+    networks:
+      - honcho_net
+    healthcheck:
+      # /health is unauthenticated in src/main.py and returns {"status":"ok"}
+      test:
+        [
+          "CMD",
+          "/app/.venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    logging: *honcho-logging
+
+  deriver:
+    image: "{{ honcho_image }}"
+    container_name: honcho-deriver
+    entrypoint: ["/app/.venv/bin/python", "-m", "src.deriver"]
+    environment:
+      <<: *honcho-environment
+    depends_on:
+      api:
+        condition: service_healthy
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - honcho_net
+    logging: *honcho-logging
+
+  database:
+    image: "{{ honcho_postgres_image }}"
+    container_name: honcho-database
+    restart: unless-stopped
+    # NO host port publish (pinned). POSTGRES_HOST_AUTH_METHOD=trust from the
+    # upstream example is deliberately dropped - password auth only.
+    command: ["postgres", "-c", "max_connections=200"]
+    environment:
+      TZ: "{{ timezone }}"
+      POSTGRES_DB: "{{ honcho_postgres_database }}"
+      POSTGRES_USER: "{{ honcho_postgres_user }}"
+      POSTGRES_PASSWORD: "{{ honcho_postgres_password }}"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    volumes:
+      - {{ honcho_database_folder }}:/var/lib/postgresql/data
+    networks:
+      - honcho_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ honcho_postgres_user }} -d {{ honcho_postgres_database }}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging: *honcho-logging
+
+  redis:
+    image: "{{ honcho_redis_image }}"
+    container_name: honcho-redis
+    restart: unless-stopped
+    # NO host port publish (pinned)
+    # Run as the host-mapped compose uid (resolved at deploy time from the
+    # vaulted docker_user, see honcho_redis_run_as in tasks) so AOF/RDB
+    # files created in the bind mount stay owned like the parent dir the
+    # setup task reconciles. Image default is root, and the root-created
+    # 0700 uid-999 appendonlydir churned the parent directory owner/mode
+    # on every converge (review r1 finding 4, changed=1 idempotency
+    # failure). The redis data dir is recursively reconciled to the same
+    # uid by the setup task so redis can still read/write its data.
+    user: "{{ honcho_redis_run_as }}"
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - {{ honcho_redis_folder }}:/data
+    networks:
+      - honcho_net
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging: *honcho-logging
+{% if honcho_embedding_enabled %}
+
+  embeddings:
+    # In-compose CPU embedder (deploy card t_296f2e57; see vars research
+    # notes). NO host port publish (pinned): only api/deriver reach it over
+    # honcho_net. MODEL env is TEI's own pull-at-boot flag; the HF model
+    # cache persists in honcho_embedding_folder so restarts don't re-download.
+    image: "{{ honcho_embedding_image }}"
+    container_name: honcho-embeddings
+    restart: unless-stopped
+    environment:
+      TZ: "{{ timezone }}"
+      MODEL_ID: "{{ honcho_embedding_model }}"
+    volumes:
+      - {{ honcho_embedding_folder }}:/data
+    networks:
+      - honcho_net
+    healthcheck:
+      # base stage installs curl (bookworm-slim has no wget) - verified
+      # against upstream Dockerfile FROM base AS http.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:80/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 300s
+    logging: *honcho-logging
+{% endif %}
+
+networks:
+  honcho_net:
+    driver: bridge
